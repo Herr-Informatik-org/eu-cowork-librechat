@@ -38,6 +38,18 @@ const backendURL = backendHost
   ? `http://${backendHost}:${backendPort}`
   : `http://localhost:${backendPort}`;
 const buildSourceMap = process.env.NODE_ENV === 'development';
+
+/**
+ * EU-Cowork: PWA-/App-Branding zur Build-Zeit (durchgereicht als Docker-Build-Args).
+ * Sind die Variablen nicht gesetzt, entsteht ein unverändertes Upstream-Bundle.
+ */
+const brandTitle = process.env.EUCOWORK_APP_TITLE?.trim();
+const pwaName = brandTitle || 'LibreChat';
+const pwaShortName = process.env.EUCOWORK_SHORT_NAME?.trim() || pwaName;
+const pwaThemeColor = process.env.EUCOWORK_THEME_COLOR?.trim() || '#009688';
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 const QUERY_DEVTOOLS_CHUNK_MODULES = [
   '@tanstack/react-query-devtools',
   '@tanstack/match-sorter-utils',
@@ -140,11 +152,11 @@ export default defineConfig(({ command }) => ({
       },
       includeAssets: [],
       manifest: {
-        name: 'LibreChat',
-        short_name: 'LibreChat',
+        name: pwaName,
+        short_name: pwaShortName,
         display: 'standalone',
         background_color: '#000000',
-        theme_color: '#009688',
+        theme_color: pwaThemeColor,
         icons: [
           {
             src: 'assets/favicon-32x32.png',
@@ -175,6 +187,20 @@ export default defineConfig(({ command }) => ({
         ],
       },
     }),
+    ...(brandTitle
+      ? [
+          {
+            name: 'eucowork-brand-title',
+            apply: 'build' as const,
+            transformIndexHtml(html: string) {
+              return html.replace(
+                /<title>[\s\S]*?<\/title>/,
+                `<title>${escapeHtml(brandTitle)}</title>`,
+              );
+            },
+          },
+        ]
+      : []),
     ...(buildSourceMap ? [sourcemapExclude({ excludeNodeModules: true })] : []),
     compression({
       threshold: 10240,

@@ -53,6 +53,24 @@ RUN \
 
 COPY --chown=node:node . .
 
+# EU-Cowork: PWA-/App-Branding zur Build-Zeit. Build-Args sind im folgenden RUN
+# als Umgebungsvariablen sichtbar und werden von client/vite.config.ts gelesen.
+# Ohne diese Args entsteht ein unverändertes Upstream-Bundle. Hier deklariert
+# (nach npm ci), damit ein Branding-Wechsel nur den Client-Build neu baut.
+ARG EUCOWORK_APP_TITLE=
+ARG EUCOWORK_SHORT_NAME=
+ARG EUCOWORK_THEME_COLOR=
+
+# EU-Cowork: optionaler Icon-Override. Der Default zeigt auf die Upstream-Assets,
+# der COPY ist dann ein No-op. Ein Betreiber setzt stattdessen ein eigenes
+# Verzeichnis im Build-Kontext mit gleichnamigen Dateien (favicon-32x32.png,
+# favicon-16x16.png, apple-touch-icon-180x180.png, icon-192x192.png,
+# maskable-icon.png, logo.svg). Muss VOR dem Client-Build stehen: dessen
+# post-build.cjs kopiert client/public/assets nach client/dist/assets, und der
+# Server liefert dist zuerst aus — ein Override danach wäre wirkungslos.
+ARG EUCOWORK_ICON_DIR=client/public/assets
+COPY --chown=node:node ${EUCOWORK_ICON_DIR}/ /app/client/public/assets/
+
 RUN \
     # React client build with configurable memory
     NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}" npm run frontend; \
