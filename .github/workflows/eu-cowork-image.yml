@@ -1,0 +1,140 @@
+# EU-Cowork: baut das Fork-Image und schiebt es nach ghcr.
+#
+# Bewusst eine EIGENE Workflow-Datei statt einer Änderung an den Upstream-
+# Workflows: Diese Datei kollidiert bei keinem Upstream-Rebase, weil Upstream
+# sie nicht kennt. Die Upstream-Workflows bleiben unverändert liegen; keiner
+# von ihnen triggert auf Pushes nach `eu-cowork`.
+#
+# Gebaut wird `Dockerfile` mit Target `node` — das ist exakt die Kombination,
+# aus der Upstream sein `librechat-dev`-Image baut (siehe dev-images.yml), also
+# der Stand, der bei uns produktiv läuft.
+name: EU-Cowork Image Build
+
+on:
+  push:
+    branches:
+      - eu-cowork
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: eu-cowork-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY_IMAGE: ghcr.io/herr-informatik/eu-cowork-librechat
+
+jobs:
+  build:
+    # Je Plattform ein NATIVER Runner statt eines QEMU-Laufs: arm64 unter QEMU
+    # braucht für den Client-Build ein Vielfaches der Zeit (Upstream setzt
+    # deshalb timeout-minutes: 130). arm64-Hosted-Runner sind für öffentliche
+    # Repos kostenlos, damit bleiben beide Plattformen Pflicht statt optional.
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute build metadata
+        run: |
+          echo "BUILD_COMMIT=${{ github.sha }}" >> "$GITHUB_ENV"
+          echo "BUILD_BRANCH=${{ github.ref_name }}" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
+      # Push per Digest; die Tags setzt erst der merge-Job auf die
+      # zusammengeführte Manifest-Liste.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: node
+          platforms: ${{ matrix.platform }}
+          provenance: false
+          cache-from: type=gha,scope=eu-cowork-${{ matrix.arch }}
+          cache-to: type=gha,mode=min,scope=eu-cowork-${{ matrix.arch }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            BUILD_COMMIT=${{ env.BUILD_COMMIT }}
+            BUILD_BRANCH=${{ env.BUILD_BRANCH }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Merge manifest and tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - build
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            -t "${REGISTRY_IMAGE}:${GITHUB_SHA}" \
+            -t "${REGISTRY_IMAGE}:eu-latest" \
+            $(printf "${REGISTRY_IMAGE}@sha256:%s " *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect "${REGISTRY_IMAGE}:${GITHUB_SHA}"
