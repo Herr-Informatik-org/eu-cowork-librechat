@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { useForm } from 'react-hook-form';
 import { Turnstile } from '@marsidev/react-turnstile';
 import { ThemeContext, SecretInput, Spinner, Button, isDark } from '@librechat/client';
+import { useSearchParams } from 'react-router-dom';
 import type { TLoginUser, TStartupConfig } from 'librechat-data-provider';
 import type { TAuthContext } from '~/common';
 import { useResendVerificationEmail, useGetStartupConfig } from '~/data-provider';
@@ -18,12 +19,23 @@ type TLoginFormProps = {
 const LoginForm: React.FC<TLoginFormProps> = ({ onSubmit, startupConfig, error, setError }) => {
   const localize = useLocalize();
   const { theme } = useContext(ThemeContext);
+  const [searchParams] = useSearchParams();
+  /**
+   * EU-Cowork: Einladungs- und Zugangsmails verlinken die Anmeldung mit `?email=`, damit
+   * der Empfänger nicht abtippen muss, unter welcher Adresse sein Konto angelegt wurde.
+   * Der Wert kommt aus der Adresszeile und ist damit frei setzbar — übernommen wird er
+   * deshalb nur, wenn er überhaupt wie eine E-Mail aussieht, sonst verworfen. Vorbelegen
+   * allein löst nichts aus: abgeschickt wird erst durch den Nutzer, und die Anmeldung
+   * prüft das Feld dann wie jede andere Eingabe. `URLSearchParams.get` dekodiert bereits.
+   */
+  const emailParam = searchParams.get('email')?.trim() ?? '';
+  const prefilledEmail = emailParam !== '' && validateEmail(emailParam) === true ? emailParam : '';
   const {
     register,
     getValues,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<TLoginUser>();
+  } = useForm<TLoginUser>({ defaultValues: { email: prefilledEmail } });
   const [showResendLink, setShowResendLink] = useState<boolean>(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
