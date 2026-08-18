@@ -24,8 +24,15 @@ concurrency:
   group: eu-cowork-image-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  REGISTRY_IMAGE: ghcr.io/herr-informatik/eu-cowork-librechat
+# KEIN fest verdrahteter Bildname mehr. Er stand hier als
+# `ghcr.io/herr-informatik/eu-cowork-librechat` und war nach der Umbenennung der
+# Organisation (herr-informatik -> Herr-Informatik-org) tot: gebaut wurde weiter
+# sauber, nur das Schieben endete in
+# `denied: permission_denied: The requested installation does not exist` — der
+# GITHUB_TOKEN gilt fuer die JETZIGE Organisation, nicht fuer die alte. Abgeleitet
+# aus `github.repository` ueberlebt der Name jede weitere Umbenennung von selbst.
+# Kleinschreibung ist Pflicht: eine OCI-Referenz erlaubt keine Grossbuchstaben,
+# `github.repository` liefert sie aber in der Schreibweise der Organisation.
 
 jobs:
   build:
@@ -50,6 +57,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Compute image name
+        run: |
+          set -euo pipefail
+          echo "REGISTRY_IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -115,6 +127,11 @@ jobs:
           path: /tmp/digests
           pattern: digests-*
           merge-multiple: true
+
+      - name: Compute image name
+        run: |
+          set -euo pipefail
+          echo "REGISTRY_IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
