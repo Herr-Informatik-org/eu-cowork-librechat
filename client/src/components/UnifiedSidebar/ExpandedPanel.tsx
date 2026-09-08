@@ -140,7 +140,6 @@ function ExpandedPanel({
   const [toolsOpen, setToolsOpen] = useState(false);
   const primaryLinks = links.filter((link) => ['conversations', 'files'].includes(link.id));
   const toolLinks = links.filter((link) => !['conversations', 'files'].includes(link.id));
-  const activeTool = toolLinks.find((link) => link.id === effectiveActive);
 
   const toggleLabel = expanded ? 'com_nav_close_sidebar' : 'com_nav_open_sidebar';
   const toggleClick = expanded ? onCollapse : onExpand;
@@ -177,7 +176,7 @@ function ExpandedPanel({
       </div>
       <nav aria-label={localize('com_ui_nav_actions')} className="shrink-0 space-y-0.5 px-2 pb-3">
         <NewChatButton setActive={setActive} expanded={expanded} />
-        {(expanded ? primaryLinks : links).map((link) => (
+        {primaryLinks.map((link) => (
           <NavActionButton
             key={link.id}
             link={link}
@@ -187,25 +186,37 @@ function ExpandedPanel({
             onExpand={onExpand}
           />
         ))}
-        {expanded && toolLinks.length > 0 && (
+        {toolLinks.length > 0 && (
           <>
             <Button
               variant="ghost"
-              className="h-9 w-full justify-start gap-3 rounded-lg px-3 text-sm font-normal text-text-secondary"
+              className={cn(
+                'h-9 rounded-lg text-sm font-normal text-text-secondary',
+                expanded ? 'w-full justify-start gap-3 px-3' : 'w-9 p-0',
+              )}
+              aria-label={localize('com_ui_nav_tools')}
+              title={localize('com_ui_nav_tools')}
               aria-expanded={toolsOpen}
               aria-controls="workspace-nav-tools"
-              onClick={() => setToolsOpen((open) => !open)}
+              onClick={() => {
+                if (!expanded) onExpand?.();
+                setToolsOpen((open) => !open);
+              }}
             >
               <SlidersHorizontal className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate text-left">
-                {activeTool ? localize(activeTool.title) : localize('com_ui_nav_tools')}
-              </span>
-              <ChevronDown
-                className={cn('h-3.5 w-3.5', toolsOpen && 'rotate-180')}
-                aria-hidden="true"
-              />
+              {expanded && (
+                <span className="min-w-0 flex-1 truncate text-left">
+                  {localize('com_ui_nav_tools')}
+                </span>
+              )}
+              {expanded && (
+                <ChevronDown
+                  className={cn('h-3.5 w-3.5', toolsOpen && 'rotate-180')}
+                  aria-hidden="true"
+                />
+              )}
             </Button>
-            {toolsOpen && (
+            {toolsOpen && expanded && (
               <div
                 id="workspace-nav-tools"
                 className="max-h-[30vh] space-y-0.5 overflow-y-auto pl-2"

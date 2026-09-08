@@ -7,7 +7,6 @@ import { useToastContext, useMediaQuery } from '@librechat/client';
 import ActivityStatusBadge from '~/components/Chat/Activity/ActivityStatusBadge';
 import type { TConversation } from 'librechat-data-provider';
 import { useNavigateToConvo, useLocalize, useShiftKey } from '~/hooks';
-import ConversationEndpointIcon from './ConversationEndpointIcon';
 import { useUpdateConversationMutation } from '~/data-provider';
 import { areConversationRenderPropsEqual } from './utils';
 import { NotificationSeverity } from '~/common';
@@ -208,9 +207,7 @@ function Conversation({
       ref={containerRef}
       className={cn(
         'group relative flex h-12 w-full items-center rounded-lg outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-black dark:focus-visible:ring-white md:h-9',
-        isActiveConvo || isPopoverActive
-          ? 'bg-surface-active-alt before:absolute before:bottom-1 before:left-0 before:top-1 before:w-0.5 before:rounded-full before:bg-black dark:before:bg-white'
-          : 'hover:bg-surface-active-alt',
+        isActiveConvo || isPopoverActive ? 'bg-surface-active-alt' : 'hover:bg-surface-active-alt',
       )}
       role="button"
       tabIndex={renaming ? -1 : 0}
@@ -261,7 +258,7 @@ function Conversation({
           isSmallScreen={isSmallScreen}
           localize={localize}
         >
-          <ConversationEndpointIcon conversation={conversation} size={20} context="menu-item" />
+          {null}
         </ConvoLink>
       )}
       {conversationId && (

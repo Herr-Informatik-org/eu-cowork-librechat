@@ -1,10 +1,28 @@
-.session-workspace { isolation: isolate; }
-.session-empty { border: 1px dashed var(--border-light); border-radius: 0.75rem; }
-.session-file-row { padding: 0.875rem 0.5rem; border-bottom: 1px solid var(--border-light); }
-.session-file-icon { display: flex; width: 2rem; height: 2.25rem; align-items: center; justify-content: center; border: 1px solid var(--border-light); border-radius: 0.45rem; color: var(--text-secondary); background: var(--surface-secondary); }
-.session-link { display: inline-flex; align-items: center; gap: 0.25rem; border-radius: 0.25rem; color: var(--text-secondary); font-size: 0.6875rem; font-weight: 500; }
-.session-source { display: flex; gap: 0.65rem; padding: 0.625rem 0.5rem; border-radius: 0.5rem; }
-.session-details { border-top: 1px solid var(--border-light); padding: 1rem 0.5rem 0; }
-.session-details summary { cursor: pointer; }
-.session-focus:focus-visible { outline: 2px solid var(--text-secondary); outline-offset: 3px; }
-@media (hover: hover) and (pointer: fine) { .session-source:hover { background: var(--surface-hover); } .session-link:hover { color: var(--text-primary); text-decoration: underline; } }
+.session-chat-host { container: chat-workspace / inline-size; }
+.session-chat-layout { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
+.session-widget-slot { display: none; min-width: 0; min-height: 0; padding: 12px 12px 12px 0; }
+.session-workspace { isolation: isolate; position: relative; color: var(--text-primary); background: var(--surface-primary); }
+.session-widget { border: 1px solid var(--border-light); border-radius: 18px; padding: 4px; max-height: calc(100dvh - 32px); overflow-y: auto; box-shadow: 0 4px 16px rgb(0 0 0 / 3%); }
+.session-panel { height: 100%; overflow-y: auto; padding: 8px; }
+.session-section { padding: 12px 4px; }
+.session-section + .session-section { border-top: 1px solid var(--border-light); }
+.session-section-title { display: flex; gap: 8px; align-items: center; padding: 0 10px 8px; color: var(--text-secondary); font-size: 12px; font-weight: 500; }
+.session-panel .session-section-title { padding-right: 40px; }
+.session-count { color: var(--text-tertiary); font-size: 11px; }
+.session-empty { padding: 6px 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.session-file-row { display: flex; align-items: center; min-width: 0; gap: 2px; padding-right: 2px; border-radius: 9px; }
+.session-file-open { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; min-height: 38px; padding: 8px 10px; border-radius: 9px; text-align: left; font-size: 13px; font-weight: 400; }
+.session-file-open svg, .session-skill svg { color: var(--text-secondary); }
+.session-file-open:disabled { cursor: default; opacity: 0.6; }
+.session-icon-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 7px; color: var(--text-secondary); }
+.session-close { position: absolute; top: 8px; right: 8px; }
+.session-skill { display: flex; align-items: center; gap: 9px; padding: 8px 10px; font-size: 13px; }
+.session-focus:focus-visible { outline: 2px solid var(--text-secondary); outline-offset: -2px; }
+@media (hover: hover) and (pointer: fine) {
+  .session-file-row:hover, button.session-file-open:hover { background: var(--surface-hover); }
+  .session-icon-button:hover { color: var(--text-primary); background: var(--surface-active-alt); }
+}
+@container chat-workspace (min-width: 800px) {
+  .session-chat-layout:has(> .session-widget-slot) { grid-template-columns: minmax(0, 1fr) 280px; }
+  .session-widget-slot { display: block; }
+}

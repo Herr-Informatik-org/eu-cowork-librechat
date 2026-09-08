@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Eye } from 'lucide-react';
 import { useSetRecoilState } from 'recoil';
 import type { TFile } from 'librechat-data-provider';
@@ -37,9 +38,15 @@ export function createOfficeFileArtifact(file: Partial<TFile>): Artifact | null 
 export default function OfficeFilePreviewButton({
   file,
   artifactId,
+  children,
+  className = 'session-link session-focus',
+  label,
 }: {
   file: Partial<TFile>;
   artifactId?: string;
+  children?: ReactNode;
+  className?: string;
+  label?: string;
 }) {
   const localize = useLocalize();
   const setArtifacts = useSetRecoilState(store.artifactsState);
@@ -52,17 +59,25 @@ export default function OfficeFilePreviewButton({
   return (
     <button
       type="button"
-      className="session-link session-focus"
+      className={className}
+      aria-label={label ?? localize('com_ui_session_preview')}
       onClick={() => {
         if (lazyArtifact) {
-          setArtifacts((previous) => ({ ...previous, [lazyArtifact.id]: lazyArtifact }));
+          setArtifacts((previous) => ({
+            ...previous,
+            [lazyArtifact.id]: lazyArtifact,
+          }));
         }
         setArtifact(artifactId ?? lazyArtifact!.id);
         showArtifacts(true);
       }}
     >
-      <Eye className="size-3" aria-hidden="true" />
-      {localize('com_ui_session_preview')}
+      {children ?? (
+        <>
+          <Eye className="size-3" aria-hidden="true" />
+          {localize('com_ui_session_preview')}
+        </>
+      )}
     </button>
   );
 }

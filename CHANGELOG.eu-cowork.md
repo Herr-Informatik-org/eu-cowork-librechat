@@ -1,11 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
-## Noch nicht veröffentlicht – 8. September 2026
+## Änderungen – 8. September 2026
 
 - Eine linke Navigation bündelt Aktionen, Projekte und Chats. Verwaltungsbereiche
   lassen sich je Rolle ausblenden, ohne die Nutzung freigegebener Werkzeuge zu entziehen.
-- Die Sitzungsübersicht zeigt verwendbare Dateien, Ergebnisse und protokollierte
-  Werkzeuge. Originaldownloads verwenden die vorhandenen authentifizierten Dateirouten.
+- Dateien und tatsächlich verwendete Skills erscheinen in einer kompakten Box rechts
+  oben im Chat. Ein geöffnetes Seitenpanel oder eine Dokumentvorschau ersetzt die Box.
+  Dateizeilen öffnen Vorschauen direkt; separate Download-Icons liefern die Originale
+  über vorhandene authentifizierte Dateirouten. Auf kleinen Displays bleibt das Panel
+  über den Chatkopf erreichbar. Lange Chats behalten ihr sichtbares Eingabefeld.
+- Die eingeklappte Navigation zeigt dieselben Hauptaktionen wie die ausgeklappte.
+  Provider-Icons und der seitliche Auswahlstrich entfallen in der Chatliste.
 - DOCX, XLSX/XLS/ODS und PPTX erhalten eine echte PDF-Vorschau über einen optionalen
   isolierten Office-Renderer. Originale bleiben unverändert; private Vorschauen prüfen
   Berechtigungen vor jedem Zugriff und begrenzen Dateigrösse, Laufzeit und Cache.
@@ -21,6 +26,7 @@
   Rückmeldung bei leeren Ergebnissen. Modell- und Ausführungsdefinition bleiben synchron.
   Das gilt auch für kombinierte Inhalts-/Quellenantworten; die Quellen bleiben erhalten.
 
-Die Änderungen sind lokal geprüft und noch kein veröffentlichter Fork-Commit oder
-gepinntes Release-Image. Testfälle, Browserbelege und verbleibende Betriebsgrenzen
-stehen im Monorepo unter `docs/ux/premium-chat-abnahme-2026-09.md`.
+Die Änderungen sind lokal geprüft. Der Produktions-Image-Digest wird separat nach
+Freigabe angehoben. Testfälle und Betriebsgrenzen stehen im Monorepo unter
+`docs/ux/premium-chat-abnahme-2026-09.md` und
+`docs/ux/chat-workspace-refinement-2026-09.md`.

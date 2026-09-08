@@ -107,7 +107,7 @@ export default function Presentation({ children }: { children: React.ReactNode }
           )
         }
       >
-        <main className="flex h-full flex-col overflow-y-auto" role="main">
+        <main className="session-chat-host flex h-full flex-col overflow-y-auto" role="main">
           {children}
         </main>
       </SidePanelGroup>

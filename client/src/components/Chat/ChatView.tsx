@@ -25,6 +25,7 @@ import Landing from './Landing';
 import Header from './Header';
 import Footer from './Footer';
 import ActivityBar from './Activity/ActivityBar';
+import SessionWidget from '~/components/SidePanel/Session/Widget';
 import { cn } from '~/utils';
 import store from '~/store';
 
@@ -115,33 +116,36 @@ function ChatView({ index = 0, project }: { index?: number; project?: TChatProje
       <ChatContext.Provider value={chatHelpers}>
         <AddedChatContext.Provider value={addedChatHelpers}>
           <Presentation>
-            <div className="relative flex h-full w-full flex-col">
-              <Header />
-              <>
-                <div
-                  className={cn(
-                    'flex flex-col',
-                    isLandingPage
-                      ? 'flex-1 items-center justify-end sm:justify-center'
-                      : 'h-full overflow-y-auto',
-                  )}
-                >
-                  {content}
+            <div className="session-chat-layout">
+              <div className="relative flex h-full min-h-0 w-full min-w-0 flex-col">
+                <Header />
+                <>
                   <div
                     className={cn(
-                      'w-full',
-                      isLandingPage && 'max-w-3xl transition-all duration-200 xl:max-w-4xl',
+                      'flex flex-col',
+                      isLandingPage
+                        ? 'flex-1 items-center justify-end sm:justify-center'
+                        : 'h-full overflow-y-auto',
                     )}
                   >
-                    {isProjectLandingPage && project && <ProjectLandingChip project={project} />}
-                    {isLandingPage && <ConversationStarters />}
-                    <ActivityBar />
-                    <ChatForm index={index} placeholder={chatFormPlaceholder} />
-                    {!isLandingPage && <Footer />}
+                    {content}
+                    <div
+                      className={cn(
+                        'w-full',
+                        isLandingPage && 'max-w-3xl transition-all duration-200 xl:max-w-4xl',
+                      )}
+                    >
+                      {isProjectLandingPage && project && <ProjectLandingChip project={project} />}
+                      {isLandingPage && <ConversationStarters />}
+                      <ActivityBar />
+                      <ChatForm index={index} placeholder={chatFormPlaceholder} />
+                      {!isLandingPage && <Footer />}
+                    </div>
                   </div>
-                </div>
-                {isLandingPage && <Footer />}
-              </>
+                  {isLandingPage && <Footer />}
+                </>
+              </div>
+              <SessionWidget />
             </div>
           </Presentation>
         </AddedChatContext.Provider>

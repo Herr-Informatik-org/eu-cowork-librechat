@@ -25,9 +25,14 @@ export default function SessionFileDownloadButton({ file }: { file: Partial<TFil
   });
   if (!hasSessionFileDownload(file)) return null;
   return (
-    <button type="button" className="session-link session-focus" onClick={handleDownload}>
-      <Download className="size-3" aria-hidden="true" />
-      {localize('com_ui_session_original')}
+    <button
+      type="button"
+      className="session-icon-button session-focus"
+      onClick={handleDownload}
+      aria-label={`${localize('com_ui_session_original')}: ${file.filename || file.file_id || ''}`}
+      title={localize('com_ui_session_original')}
+    >
+      <Download className="size-4" aria-hidden="true" />
     </button>
   );
 }

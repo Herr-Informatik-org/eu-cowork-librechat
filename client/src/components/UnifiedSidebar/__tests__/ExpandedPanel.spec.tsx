@@ -48,6 +48,8 @@ jest.mock('~/components/Chat/Menus/OpenSidebar', () => ({
   CLOSE_SIDEBAR_ID: 'close-sidebar',
 }));
 
+jest.mock('~/components/SidePanel/Nav', () => ({ __esModule: true, default: () => <div /> }));
+
 jest.mock('~/components/Nav/AccountSettings', () => ({
   __esModule: true,
   default: () => <div data-testid="account-settings" />,
@@ -107,6 +109,11 @@ function renderPanel({
 }
 
 describe('ExpandedPanel', () => {
+  beforeAll(async () => {
+    const warmup = renderPanel();
+    await screen.findByTestId('account-settings');
+    warmup.unmount();
+  });
   beforeEach(() => {
     jest.clearAllMocks();
     localStorage.clear();
@@ -115,7 +122,9 @@ describe('ExpandedPanel', () => {
   describe('single column navigation', () => {
     it('keeps the current panel open when its action is selected again', () => {
       const { onCollapse } = renderPanel({ expanded: true });
-      const activeButton = screen.getByRole('button', { name: 'com_ui_chat_history' });
+      const activeButton = screen.getByRole('button', {
+        name: 'com_ui_chat_history',
+      });
       fireEvent.click(activeButton);
       expect(onCollapse).not.toHaveBeenCalled();
     });
@@ -131,17 +140,22 @@ describe('ExpandedPanel', () => {
 
     it('expands sidebar when clicking any icon while collapsed', () => {
       const { onExpand } = renderPanel({ expanded: false });
-      const activeButton = screen.getByRole('button', { name: 'com_ui_chat_history' });
+      const activeButton = screen.getByRole('button', {
+        name: 'com_ui_chat_history',
+      });
       fireEvent.click(activeButton);
       expect(onExpand).toHaveBeenCalledTimes(1);
     });
 
-    it('sets active panel and expands when clicking an inactive icon while collapsed', () => {
-      const { onExpand } = renderPanel({ expanded: false });
-      const inactiveButton = screen.getByRole('button', { name: 'com_ui_prompts' });
-      fireEvent.click(inactiveButton);
+    it('keeps the same tools entry while collapsed and expands before showing its children', () => {
+      const { onExpand, container } = renderPanel({ expanded: false });
+      expect(screen.queryByTestId('nav-panel-prompts')).not.toBeInTheDocument();
+      const tools = screen.getByRole('button', { name: 'com_ui_nav_tools' });
+      const actions = container.querySelector('nav');
+      expect(actions?.querySelectorAll('button, a')).toHaveLength(3);
+      fireEvent.click(tools);
       expect(onExpand).toHaveBeenCalledTimes(1);
-      expect(localStorage.getItem('side:active-panel')).toBe('prompts');
+      expect(localStorage.getItem('side:active-panel')).not.toBe('prompts');
     });
   });
 

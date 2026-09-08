@@ -29,7 +29,7 @@ jest.mock('~/utils', () => ({
   cn: (...args: unknown[]) => args.filter(Boolean).join(' '),
   logger: { error: jest.fn() },
 }));
-jest.mock('../ConversationEndpointIcon', () => () => null);
+jest.mock('../ConversationEndpointIcon', () => () => <svg data-testid="provider-logo" />);
 jest.mock('../ConvoOptions', () => ({ ConvoOptions: () => null }));
 jest.mock('../RenameForm', () => () => null);
 jest.mock(
@@ -84,4 +84,13 @@ describe('Conversation navigation callbacks', () => {
     expect(toggleNav).toHaveBeenCalledTimes(1);
     expect(mockNavigateToConvo).not.toHaveBeenCalled();
   });
+});
+
+test('the selected conversation uses a plain highlight without provider logo or side stripe', () => {
+  mockCurrentConversationId = 'test-chat';
+  render(<Convo conversation={conversation} retainView={retainView} toggleNav={jest.fn()} />);
+  const row = screen.getByTestId('convo-item');
+  expect(row).toHaveClass('bg-surface-active-alt');
+  expect(row.className).not.toContain('before:');
+  expect(screen.queryByTestId('provider-logo')).not.toBeInTheDocument();
 });
