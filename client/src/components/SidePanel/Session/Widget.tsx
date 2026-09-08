@@ -1,13 +1,13 @@
 import { useParams } from 'react-router-dom';
 import { useRecoilValue } from 'recoil';
 import { Constants } from 'librechat-data-provider';
-import { sessionPanelVisible } from './state';
+import { sessionContextHidden } from './state';
 import SessionPanel from './Panel';
 import store from '~/store';
 
 export default function SessionWidget() {
   const { conversationId } = useParams();
-  const panelVisible = useRecoilValue(sessionPanelVisible);
+  const panelVisible = useRecoilValue(sessionContextHidden);
   const artifactId = useRecoilValue(store.currentArtifactId);
   const artifactsVisible = useRecoilValue(store.artifactsVisibility);
   if (

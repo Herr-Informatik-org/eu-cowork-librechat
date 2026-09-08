@@ -10,7 +10,6 @@ import { steerOverlayHeightFamily } from '~/store/steer';
 import { MessagesViewProvider } from '~/Providers';
 import { fontSizeAtom } from '~/store/fontSize';
 import MultiMessage from './MultiMessage';
-import MessageNav from './MessageNav';
 import { cn } from '~/utils';
 import store from '~/store';
 
@@ -114,7 +113,7 @@ function MessagesViewContent({
       <div className="relative flex-1 overflow-hidden overflow-y-auto">
         <div className="relative h-full">
           <div
-            className="scrollbar-gutter-stable"
+            className="scrollbar-gutter-stable chat-scrollbar"
             onScroll={debouncedHandleScroll}
             ref={scrollableRef}
             style={{
@@ -168,7 +167,6 @@ function MessagesViewContent({
             onNearBottomChange={handleNearBottomChange}
           />
 
-          <MessageNav scrollableRef={scrollableRef} />
         </div>
       </div>
     </>

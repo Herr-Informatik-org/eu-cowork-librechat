@@ -9,7 +9,6 @@ import CopyButton from '~/components/Messages/Content/CopyButton';
 import { useShareContext, useMutationState } from '~/Providers';
 import useArtifacts from '~/hooks/Artifacts/useArtifacts';
 import DownloadArtifact from './DownloadArtifact';
-import ArtifactVersion from './ArtifactVersion';
 import ArtifactTabs from './ArtifactTabs';
 import { isCodeOnlyArtifact, isPreviewOnlyArtifact } from '~/utils/artifacts';
 import { displayFilename } from '~/components/Chat/Messages/Content/Parts/attachmentTypes';
@@ -84,14 +83,7 @@ export default function Artifacts() {
     }
   }, [height, isMobile]);
 
-  const {
-    activeTab,
-    setActiveTab,
-    currentIndex,
-    currentArtifact,
-    orderedArtifactIds,
-    setCurrentArtifactId,
-  } = useArtifacts();
+  const { activeTab, setActiveTab, currentArtifact } = useArtifacts();
 
   /* Office artifacts have no source view, and source-code artifacts have
    * no useful rendered preview. Filter each down to the only meaningful
@@ -191,6 +183,7 @@ export default function Artifacts() {
       setIsClosing(true);
       setIsVisible(false);
       setTimeout(() => {
+        resetCurrentArtifactId();
         setArtifactsVisible(false);
         setIsClosing(false);
         setHeight(90);
@@ -230,7 +223,7 @@ export default function Artifacts() {
         )}
         <div
           className={cn(
-            'flex w-full min-w-0 flex-col bg-surface-primary text-xl text-text-primary',
+            'artifact-drawer flex w-full min-w-0 flex-col bg-surface-primary text-xl text-text-primary',
             isMobile
               ? cn(
                   'fixed inset-x-0 bottom-0 z-[100] rounded-t-[20px] shadow-[0_-10px_60px_rgba(0,0,0,0.35)]',
@@ -240,10 +233,10 @@ export default function Artifacts() {
                   isDragging ? '' : 'transition-all duration-300',
                 )
               : cn(
-                  'h-full shadow-2xl',
+                  'h-full',
                   isVisible && !isClosing
-                    ? 'duration-350 translate-x-0 opacity-100 transition-all'
-                    : 'translate-x-5 opacity-0 transition-all duration-300',
+                    ? 'translate-x-0 opacity-100'
+                    : 'translate-x-full opacity-0',
                 ),
           )}
           style={isMobile ? { height: `${height}vh` } : { overflow: 'hidden' }}
@@ -321,18 +314,6 @@ export default function Artifacts() {
               )}
               {displayedTab !== 'preview' && isMutating && (
                 <RefreshCw size={16} className="animate-spin text-text-secondary" />
-              )}
-              {orderedArtifactIds.length > 1 && (
-                <ArtifactVersion
-                  currentIndex={currentIndex}
-                  totalVersions={orderedArtifactIds.length}
-                  onVersionChange={(index) => {
-                    const target = orderedArtifactIds[index];
-                    if (target) {
-                      setCurrentArtifactId(target);
-                    }
-                  }}
-                />
               )}
               {!isPreviewOnly && (
                 <CopyButton isCopied={isCopied} iconOnly onClick={handleCopyArtifact} />

@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { useRecoilState, useRecoilValue } from 'recoil';
+import { useRecoilValue } from 'recoil';
 import { PanelRight } from 'lucide-react';
 import { useMediaQuery } from '@librechat/client';
 import { getConfigDefaults, PermissionTypes, Permissions } from 'librechat-data-provider';
@@ -13,14 +13,13 @@ import AddMultiConvo from './AddMultiConvo';
 import { useHasAccess, useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 import store from '~/store';
-import { sessionPanelVisible } from '~/components/SidePanel/Session/state';
+import { useSessionVisibility } from '~/components/SidePanel/Session/state';
 
 const defaultInterface = getConfigDefaults().interface;
 
 function Header() {
   const localize = useLocalize();
-  const [sessionVisible, setSessionVisible] = useRecoilState(sessionPanelVisible);
-  const [currentArtifactId, setCurrentArtifactId] = useRecoilState(store.currentArtifactId);
+  const { contextVisible, toggleContext } = useSessionVisibility();
   const { data: startupConfig } = useGetStartupConfig();
   const navVisible = useRecoilValue(store.sidebarExpanded);
 
@@ -78,16 +77,9 @@ function Header() {
           <button
             type="button"
             aria-label={localize('com_ui_session_workspace')}
-            aria-pressed={sessionVisible && !currentArtifactId}
+            aria-pressed={contextVisible}
             title={localize('com_ui_session_workspace')}
-            onClick={() => {
-              if (currentArtifactId) {
-                setCurrentArtifactId(null);
-                setSessionVisible(true);
-                return;
-              }
-              setSessionVisible((visible) => !visible);
-            }}
+            onClick={toggleContext}
             className="rounded-lg p-2 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-heavy"
           >
             <PanelRight className="size-5" aria-hidden="true" />

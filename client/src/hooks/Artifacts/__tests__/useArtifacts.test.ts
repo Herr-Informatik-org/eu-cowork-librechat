@@ -575,16 +575,15 @@ describe('useArtifacts', () => {
   });
 
   describe('cleanup on unmount', () => {
-    it('should reset artifacts when unmounting', () => {
+    it('preserves the selected file when the drawer unmounts', () => {
       (useRecoilValue as jest.Mock).mockReturnValue({});
 
       const { unmount } = renderHook(() => useArtifacts());
 
       unmount();
 
-      expect(mockResetArtifacts).toHaveBeenCalled();
-      expect(mockResetCurrentArtifactId).toHaveBeenCalled();
-      expect(logger.log).toHaveBeenCalledWith('artifacts_visibility', 'Unmounting artifacts');
+      expect(mockResetArtifacts).not.toHaveBeenCalled();
+      expect(mockResetCurrentArtifactId).not.toHaveBeenCalled();
     });
   });
 

@@ -7,7 +7,7 @@ import type { Artifact } from '~/common';
 import { useChatContext, useFileMapContext } from '~/Providers';
 import { useGetMessagesByConvoId } from '~/data-provider';
 import { collectSessionContext } from './context';
-import { sessionPanelVisible } from './state';
+import { sessionContextHidden } from './state';
 import { useLocalize } from '~/hooks';
 import FileRow from './FileRow';
 import store from '~/store';
@@ -18,7 +18,7 @@ function SessionPanel({ variant = 'panel' }: { variant?: 'panel' | 'widget' }) {
   const { conversationId } = useParams();
   const { index } = useChatContext();
   const fileMap = useFileMapContext();
-  const setVisible = useSetRecoilState(sessionPanelVisible);
+  const setVisible = useSetRecoilState(sessionContextHidden);
   const artifacts = useRecoilValue(store.artifactsState);
   const setArtifact = useSetRecoilState(store.currentArtifactId);
   const showArtifacts = useSetRecoilState(store.artifactsVisibility);
@@ -70,7 +70,7 @@ function SessionPanel({ variant = 'panel' }: { variant?: 'panel' | 'widget' }) {
       {variant === 'panel' && (
         <button
           type="button"
-          onClick={() => setVisible(false)}
+          onClick={() => setVisible(true)}
           className="session-close session-icon-button session-focus"
           aria-label={localize('com_ui_close')}
         >

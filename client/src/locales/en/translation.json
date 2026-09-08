@@ -2189,7 +2189,7 @@
   "com_user_message": "You",
   "com_ui_office_layout": "Document view · LibreOffice",
   "com_ui_office_simplified": "Simplified content preview · layout may differ",
-  "com_ui_office_original": "The editable original is preserved. Download uses the original file. Calculations in a preview do not modify the original.",
+  "com_ui_office_original": "Preview · Request changes in the chat.",
   "com_ui_office_loading": "Preparing document view…",
   "com_ui_office_unavailable": "The document view is currently unavailable. You can download the original file.",
   "com_ui_office_previous": "Previous page",

@@ -181,11 +181,8 @@ export default function useArtifacts() {
       resetState();
     }
     prevConversationIdRef.current = conversationId;
-    /** Resets artifacts when unmounting */
-    return () => {
-      logger.log('artifacts_visibility', 'Unmounting artifacts');
-      resetState();
-    };
+    // Closing the drawer preserves its selected file. Conversation changes are
+    // also guarded by Presentation while this hook is unmounted.
   }, [conversationId, resetArtifacts, resetCurrentArtifactId]);
 
   /**

@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { useRecoilValue, useRecoilState, useSetRecoilState } from 'recoil';
+import { useRecoilValue, useSetRecoilState } from 'recoil';
 import { FileSources, LocalStorageKeys } from 'librechat-data-provider';
 import type { ExtendedFile } from '~/common';
 import useResetArtifactsOnConversationChange from '~/hooks/Artifacts/useResetArtifactsOnConversationChange';
@@ -8,15 +8,12 @@ import { EditorProvider, ArtifactsProvider } from '~/Providers';
 import { useDeleteFilesMutation } from '~/data-provider';
 import Artifacts from '~/components/Artifacts/Artifacts';
 import { SidePanelGroup } from '~/components/SidePanel';
-import { useSetFilesToDelete, useLocalize } from '~/hooks';
+import { useSetFilesToDelete } from '~/hooks';
 import store from '~/store';
-import SessionPanel from '~/components/SidePanel/Session/Panel';
-import { sessionPanelVisible } from '~/components/SidePanel/Session/state';
+import { sessionContextHidden } from '~/components/SidePanel/Session/state';
 
 export default function Presentation({ children }: { children: React.ReactNode }) {
-  const localize = useLocalize();
-  const [sessionVisible, setSessionVisible] = useRecoilState(sessionPanelVisible);
-  const setCurrentArtifactId = useSetRecoilState(store.currentArtifactId);
+  const setContextHidden = useSetRecoilState(sessionContextHidden);
   const artifacts = useRecoilValue(store.artifactsState);
   const artifactsVisibility = useRecoilValue(store.artifactsVisibility);
   // Render-gating the panel on `currentArtifactId != null` (in addition
@@ -29,6 +26,9 @@ export default function Presentation({ children }: { children: React.ReactNode }
   const currentArtifactId = useRecoilValue(store.currentArtifactId);
 
   useResetArtifactsOnConversationChange();
+  useEffect(() => {
+    if (artifactsVisibility && currentArtifactId) setContextHidden(false);
+  }, [artifactsVisibility, currentArtifactId, setContextHidden]);
 
   const setFilesToDelete = useSetFilesToDelete();
 
@@ -79,34 +79,10 @@ export default function Presentation({ children }: { children: React.ReactNode }
     }
     return null;
   }, [artifactsVisibility, artifacts, currentArtifactId]);
-  const sessionElement = sessionVisible ? <SessionPanel /> : null;
 
   return (
     <DragDropWrapper className="relative flex w-full grow overflow-hidden bg-presentation">
-      <SidePanelGroup
-        panelDefaultSize={artifactsElement ? '50' : '30'}
-        artifacts={
-          artifactsElement ? (
-            <div className="flex h-full flex-col">
-              <div className="border-b border-border-light bg-surface-primary px-4 py-2">
-                <button
-                  type="button"
-                  className="rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-surface-hover"
-                  onClick={() => {
-                    setCurrentArtifactId(null);
-                    setSessionVisible(true);
-                  }}
-                >
-                  {localize('com_ui_session_back')}
-                </button>
-              </div>
-              <div className="min-h-0 flex-1">{artifactsElement}</div>
-            </div>
-          ) : (
-            sessionElement
-          )
-        }
-      >
+      <SidePanelGroup panelDefaultSize="50" artifacts={artifactsElement}>
         <main className="session-chat-host flex h-full flex-col overflow-y-auto" role="main">
           {children}
         </main>

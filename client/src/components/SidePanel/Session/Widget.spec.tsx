@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { RecoilRoot } from 'recoil';
 import Widget from './Widget';
-import { sessionPanelVisible } from './state';
+import { sessionContextHidden } from './state';
 import store from '~/store';
 
 jest.mock('./Panel', () => ({
@@ -14,7 +14,7 @@ function setup({ panel = false, artifact = '', visible = false, id = 'existing' 
   return render(
     <RecoilRoot
       initializeState={({ set }) => {
-        set(sessionPanelVisible, panel);
+        set(sessionContextHidden, panel);
         set(store.currentArtifactId, artifact || null);
         set(store.artifactsVisibility, visible);
       }}
@@ -32,7 +32,7 @@ test('existing chats show the separate context card when no right panel is open'
   setup();
   expect(screen.getByTestId('context-card')).toBeInTheDocument();
 });
-test('opening the session panel replaces the context card', () => {
+test('hiding the context removes the context card', () => {
   setup({ panel: true });
   expect(screen.queryByTestId('context-card')).not.toBeInTheDocument();
 });

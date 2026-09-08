@@ -2133,7 +2133,7 @@
   "com_user_message": "Du",
   "com_ui_office_layout": "Dokumentansicht · LibreOffice",
   "com_ui_office_simplified": "Vereinfachte Inhaltsvorschau · Layout kann abweichen",
-  "com_ui_office_original": "Die bearbeitbare Originaldatei bleibt erhalten. Der Download liefert das Original. Berechnungen in einer Vorschau verändern das Original nicht.",
+  "com_ui_office_original": "Vorschau · Änderungen über den Chat beauftragen.",
   "com_ui_office_loading": "Dokumentansicht wird vorbereitet…",
   "com_ui_office_unavailable": "Die Dokumentansicht ist momentan nicht verfügbar. Du kannst die Originaldatei herunterladen.",
   "com_ui_office_previous": "Vorherige Seite",

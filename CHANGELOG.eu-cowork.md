@@ -2,6 +2,17 @@
 
 ## Änderungen – 8. September 2026
 
+- Der rechte Arbeitsbereich hat drei Zustände: ausgeblendet, kompakte Kontextkachel
+  und Dokument. Der Toggle behält die ausgewählte Datei beim Zuklappen; X schliesst
+  sie zurück zur Kachel. Eine grosse reine Kontextliste entfällt, auch mobil.
+- Die Dokumentansicht fährt mit einer 240-ms-Kurve sanft ein. Reduzierte Bewegung
+  vermeidet das Verschieben. Der irreführende dateiübergreifende Versionsbutton und
+  «Back to session» entfallen; die Office-Ansicht erklärt ihren Vorschaucharakter kurz.
+- Lange Chat-Titel laufen nach 300 ms Hover mit lesbarer Geschwindigkeit nach links.
+  Nachrichtenmarkierungen neben dem Verlauf entfallen, der Scrollbar-Hintergrund ist
+  transparent. Das Artifacts-Dropdown passt optisch zum benachbarten Schalter.
+
+
 - Eine linke Navigation bündelt Aktionen, Projekte und Chats. Verwaltungsbereiche
   lassen sich je Rolle ausblenden, ohne die Nutzung freigegebener Werkzeuge zu entziehen.
 - Dateien und tatsächlich verwendete Skills erscheinen in einer kompakten Box rechts

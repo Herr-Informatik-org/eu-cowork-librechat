@@ -86,7 +86,7 @@ function Artifacts() {
   }
 
   return (
-    <div className="flex">
+    <div className="artifact-composer-control flex">
       <CheckboxButton
         className={cn('max-w-fit', isEnabled && 'rounded-r-none border-r-0')}
         checked={isEnabled}
@@ -100,15 +100,15 @@ function Artifacts() {
         <Ariakit.MenuProvider open={isPopoverOpen} setOpen={setIsPopoverOpen}>
           <Ariakit.MenuButton
             className={cn(
-              'w-7 rounded-l-none rounded-r-full border-b border-l-0 border-r border-t border-border-light md:w-6',
-              'border-amber-600/40 bg-amber-500/10 hover:bg-amber-700/10',
+              'artifact-options-toggle flex w-7 items-center justify-center rounded-r-lg border border-l-0 border-border-light bg-surface-secondary text-text-secondary hover:bg-surface-hover',
               'transition-colors',
             )}
+            aria-label={localize('com_ui_artifacts_options')}
             onClick={handleMenuButtonClick}
           >
             <ChevronDown
               className={cn(
-                'ml-1 h-4 w-4 text-text-secondary transition-transform duration-300 md:ml-0.5',
+                'h-4 w-4 text-text-secondary transition-transform duration-150 motion-reduce:transition-none',
                 isButtonExpanded && 'rotate-180',
               )}
               aria-hidden="true"
