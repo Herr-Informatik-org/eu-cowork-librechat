@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import copy from 'copy-to-clipboard';
-import { useRecoilValue } from 'recoil';
+import { useRecoilValue, useSetRecoilState } from 'recoil';
 import { Download } from 'lucide-react';
 import { OGDialog, OGDialogContent, OGDialogTitle, OGDialogDescription } from '@librechat/client';
 import { useFileDownload, useSharedFileDownload } from '~/data-provider';
@@ -9,6 +9,7 @@ import CopyButton from '~/components/Messages/Content/CopyButton';
 import { useShareContext } from '~/Providers';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
+import { createOfficeFileArtifact } from '~/components/SidePanel/Session/OfficeFilePreviewButton';
 
 interface FilePreviewDialogProps {
   open: boolean;
@@ -38,7 +39,8 @@ function canPreviewByMime(mime?: string): 'pdf' | 'text' | false {
   if (
     mime.startsWith('text/') ||
     mime.includes('json') ||
-    mime.includes('xml') ||
+    mime === 'application/xml' ||
+    mime.endsWith('+xml') ||
     mime.includes('javascript') ||
     mime.includes('typescript') ||
     mime.includes('yaml') ||
@@ -154,7 +156,26 @@ export default function FilePreviewDialog({
   const [isCopied, setIsCopied] = useState(false);
   const loadingRef = useRef(false);
 
-  const previewKind = canPreviewByMime(fileType) || canPreviewByExt(fileName);
+  const setArtifacts = useSetRecoilState(store.artifactsState);
+  const setCurrentArtifact = useSetRecoilState(store.currentArtifactId);
+  const showArtifacts = useSetRecoilState(store.artifactsVisibility);
+  const officeArtifact = useMemo(
+    () =>
+      !shareId
+        ? createOfficeFileArtifact({ file_id: fileId, filename: fileName, filepath: filePath })
+        : null,
+    [shareId, fileId, fileName, filePath],
+  );
+  useEffect(() => {
+    if (!open || !officeArtifact) return;
+    setArtifacts((previous) => ({ ...previous, [officeArtifact.id]: officeArtifact }));
+    setCurrentArtifact(officeArtifact.id);
+    showArtifacts(true);
+    onOpenChange(false);
+  }, [open, officeArtifact, setArtifacts, setCurrentArtifact, showArtifacts, onOpenChange]);
+  const previewKind = officeArtifact
+    ? false
+    : canPreviewByMime(fileType) || canPreviewByExt(fileName);
 
   const cancelledRef = useRef(false);
 
@@ -266,6 +287,8 @@ export default function FilePreviewDialog({
   if (sortedPages && sortedPages.length > 0) {
     metaParts.push(localize('com_file_pages', { pages: sortedPages.join(', ') }));
   }
+
+  if (officeArtifact) return null;
 
   return (
     <OGDialog open={open} onOpenChange={onOpenChange}>

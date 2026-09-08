@@ -1,5 +1,12 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-08: Originaldarstellung und einheitliche Dateiöffnung
+
+- Tabellen behalten schmale Spalten, Zeilenhöhen und Schriftarten statt die Vorschau künstlich zu strecken.
+- Hochgeladene Office-Dateien öffnen auch direkt aus einer Chatnachricht die private Dokumentansicht. OpenXML wird nicht länger als Text interpretiert; Freigaben bleiben getrennt.
+- PDFs zeigen keine redundante Dokumenttyp-Zeile.
+- Geprüft: zwölf Komponentenprüfungen einschliesslich des reproduzierten XLSX-Klickfehlers, Typecheck und Build.
+
 ## 2026-09-08: Grosse Arbeitsmappen Blatt für Blatt öffnen
 
 - Die interaktive Tabellenansicht lädt das gewählte Blatt nach und behält alle verfügbaren Tabs.

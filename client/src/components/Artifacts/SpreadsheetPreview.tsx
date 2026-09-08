@@ -12,6 +12,7 @@ type Cell = {
   bold: boolean;
   italic: boolean;
   fontSize: number;
+  fontFamily?: string;
   align: 'left' | 'right' | 'center';
   wrap: boolean;
   rowspan: number;
@@ -79,6 +80,22 @@ export default function SpreadsheetPreview({ artifact }: { artifact: Artifact })
           throw new Error('Invalid workbook');
         if (!abort.signal.aborted) {
           setSheets(data.sheets);
+          const active = data.sheets[sheetIndex];
+          if (active)
+            setSelected(([row, column]) =>
+              active.rows[row]?.height > 0 && active.widths[column] > 0
+                ? [row, column]
+                : [
+                    Math.max(
+                      0,
+                      active.rows.findIndex((item) => item.height > 0),
+                    ),
+                    Math.max(
+                      0,
+                      active.widths.findIndex((width) => width > 0),
+                    ),
+                  ],
+            );
           setLoading(false);
         }
       })
@@ -130,11 +147,22 @@ export default function SpreadsheetPreview({ artifact }: { artifact: Artifact })
             {localize('com_ui_sheet_loading')}
           </div>
         ) : (
-          <table role="grid" aria-label={sheet.name} aria-readonly="true">
+          <table
+            role="grid"
+            aria-label={sheet.name}
+            aria-readonly="true"
+            style={{ width: 42 + sheet.widths.reduce((sum, width) => sum + width, 0) }}
+          >
             <colgroup>
               <col style={{ width: 42 }} />
               {sheet.widths.map((w, c) => (
-                <col key={c} style={{ width: Math.min(600, Math.max(40, w)) }} />
+                <col
+                  key={c}
+                  style={{
+                    width: Math.min(8192, Math.max(0, w)),
+                    visibility: w === 0 ? 'collapse' : undefined,
+                  }}
+                />
               ))}
             </colgroup>
             <thead>
@@ -151,7 +179,13 @@ export default function SpreadsheetPreview({ artifact }: { artifact: Artifact })
               {sheet.rows.slice(start, start + PAGE_SIZE).map((row, i) => {
                 const r = start + i;
                 return (
-                  <tr key={r} style={{ height: Math.min(200, Math.max(22, row.height)) }}>
+                  <tr
+                    key={r}
+                    style={{
+                      height: Math.min(2048, Math.max(0, row.height)),
+                      display: row.height === 0 ? 'none' : undefined,
+                    }}
+                  >
                     <th className={selected[0] === r ? 'selected' : ''}>{r + 1}</th>
                     {row.cells.map(
                       (value, c) =>
@@ -184,7 +218,11 @@ export default function SpreadsheetPreview({ artifact }: { artifact: Artifact })
                                 nc >= 0 &&
                                 nc < sheet.widths.length
                               ) {
-                                if (sheet.rows[nr].cells[nc]) {
+                                if (
+                                  sheet.widths[nc] > 0 &&
+                                  sheet.rows[nr].height > 0 &&
+                                  sheet.rows[nr].cells[nc]
+                                ) {
                                   setSelected([nr, nc]);
                                   event.currentTarget
                                     .closest('table')
@@ -201,7 +239,8 @@ export default function SpreadsheetPreview({ artifact }: { artifact: Artifact })
                               color: safeColor(value.color, '#202020'),
                               fontWeight: value.bold ? 600 : 400,
                               fontStyle: value.italic ? 'italic' : 'normal',
-                              fontSize: `${Math.min(36, Math.max(8, value.fontSize))}pt`,
+                              fontSize: `${Math.min(144, Math.max(1, value.fontSize))}pt`,
+                              fontFamily: value.fontFamily || 'Calibri, Arial, sans-serif',
                               textAlign: ['left', 'right', 'center'].includes(value.align)
                                 ? value.align
                                 : 'left',

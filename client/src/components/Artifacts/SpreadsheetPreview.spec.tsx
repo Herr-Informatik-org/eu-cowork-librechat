@@ -95,3 +95,30 @@ test('loads a selected sheet on demand without dropping the other tabs', async (
     expect.objectContaining({ signal: expect.anything() }),
   );
 });
+
+test('preserves narrow columns, source fonts and row heights instead of stretching the sheet', async () => {
+  (request.get as jest.Mock).mockResolvedValue({
+    sheets: [
+      {
+        ...sheet,
+        widths: [12, 80],
+        rows: [{ height: 16, cells: [{ ...cell, fontFamily: 'Calibri' }, cell] }],
+      },
+    ],
+  });
+  render(<SpreadsheetPreview artifact={artifact} />);
+  const grid = await screen.findByRole('grid');
+  expect(grid).toHaveStyle({ width: '134px' });
+  expect(grid.querySelectorAll('col')[1]).toHaveStyle({ width: '12px' });
+  expect(grid.querySelector('tbody tr')).toHaveStyle({ height: '16px' });
+  expect(screen.getAllByRole('gridcell')[0]).toHaveStyle({ fontFamily: 'Calibri' });
+});
+
+test('collapses hidden columns without shifting the remaining cell-to-column mapping', async () => {
+  (request.get as jest.Mock).mockResolvedValue({ sheets: [{ ...sheet, widths: [0, 100] }] });
+  render(<SpreadsheetPreview artifact={artifact} />);
+  const grid = await screen.findByRole('grid');
+  expect(grid.querySelectorAll('col')[1]).toHaveStyle({ visibility: 'collapse' });
+  expect(grid.querySelectorAll('tbody td')).toHaveLength(2);
+  expect(screen.getByRole('textbox')).toHaveValue('<script>alert(1)</script>');
+});

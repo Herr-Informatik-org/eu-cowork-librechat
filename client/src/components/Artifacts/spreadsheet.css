@@ -36,8 +36,7 @@
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
-  width: max-content;
-  min-width: 100%;
+  width: auto;
 }
 .spreadsheet-scroll th {
   position: sticky;
@@ -57,13 +56,14 @@
 }
 .spreadsheet-scroll td,
 .spreadsheet-scroll th {
+  line-height: 1;
   border-right: 1px solid #e4e7eb;
   border-bottom: 1px solid #e4e7eb;
 }
 .spreadsheet-scroll td {
-  padding: 3px 6px;
+  padding: 0 2px;
   overflow: hidden;
-  max-width: 600px;
+  box-sizing: border-box;
   cursor: cell;
   vertical-align: middle;
 }

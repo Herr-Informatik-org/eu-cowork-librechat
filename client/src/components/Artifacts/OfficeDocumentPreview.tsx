@@ -175,15 +175,9 @@ export default function OfficeDocumentPreview({ artifact }: { artifact: Artifact
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface-primary">
       <div className="flex flex-wrap items-center gap-2 border-b border-border-light px-3 py-2 text-xs text-text-secondary">
-        <span className="min-w-0 basis-full">
-          {localize(
-            isPdf
-              ? artifact.title?.toLowerCase().endsWith('.pdf')
-                ? 'com_ui_pdf_document_view'
-                : 'com_ui_office_layout'
-              : 'com_ui_office_simplified',
-          )}
-        </span>
+        {!isPdf && (
+          <span className="min-w-0 basis-full">{localize('com_ui_office_simplified')}</span>
+        )}
         {pdf && !error && (
           <div className="flex w-full min-w-0 flex-wrap items-center justify-center gap-1">
             <Button
