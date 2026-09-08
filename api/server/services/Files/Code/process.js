@@ -326,6 +326,11 @@ const processCodeOutput = async ({
   agentId,
   freshClaimAfter,
 }) => {
+  // Reserved scratch paths stay in the expiring code session, not permanent chat storage.
+  const outputPath = name.replace(/\\/g, '/').replace(/^\/mnt\/data\//, '');
+  if (outputPath.split('/').includes('_work')) {
+    return null;
+  }
   const appConfig = req.config;
   const currentDate = new Date();
   const baseURL = getCodeBaseURL();

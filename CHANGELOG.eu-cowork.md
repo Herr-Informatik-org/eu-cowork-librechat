@@ -1,5 +1,12 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-08 — Ergebnisliste ohne interne Arbeitsdateien
+
+- Code-Ausgaben unter `_work/` bleiben in der temporären Ausführungssitzung und werden nicht in den dauerhaften Chat-Dateispeicher kopiert. Fertige Ausgaben ausserhalb dieses reservierten Ordners bleiben unverändert.
+- Mit `read_file` betrachtete Kontrollbilder werden dem Modell weiterhin übergeben, aber nicht nochmals als generierte Bildanhänge gespeichert. Dies gilt für Chat-Completions und Responses.
+- Verifiziert mit 136 API-Tests; bestehender lokaler Herr-DCF-Testchat von 25 internen Anhängen bereinigt, Originale und Endergebnisse erhalten.
+
+
 ## 2026-09-08: Originaldarstellung und einheitliche Dateiöffnung
 
 - Tabellen behalten schmale Spalten, Zeilenhöhen und Schriftarten statt die Vorschau künstlich zu strecken.

@@ -156,6 +156,18 @@ describe('createToolEndCallback', () => {
     artifactPromises = [];
   });
 
+  it.each(['createToolEndCallback', 'createResponsesToolEndCallback'])(
+    '%s does not save read_file inspection images as generated deliverables', async (factory) => {
+    const { saveBase64Image } = require('~/server/services/Files/process');
+    const callback = require('../callbacks')[factory]({ req, res, artifactPromises, tracker: {} });
+    await callback({ output: { name: 'read_file', tool_call_id: 'inspection',
+      artifact: { content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }] },
+    } }, { run_id: 'run', thread_id: 'conversation' });
+    await Promise.all(artifactPromises);
+    expect(saveBase64Image).not.toHaveBeenCalled();
+    expect(artifactPromises).toHaveLength(0);
+  });
+
   describe('ui_resources artifact handling', () => {
     it('should process ui_resources artifact and return attachment when headers not sent', async () => {
       const toolEndCallback = createToolEndCallback({ req, res, artifactPromises });

@@ -207,6 +207,16 @@ describe('Code Process', () => {
     determineFileType.mockResolvedValue({ mime: 'text/plain' });
   });
 
+  it.each(['_work/model.xlsx', '/mnt/data/_work/check.png', '_work/log.txt'])(
+    'keeps temporary output %s out of permanent storage',
+    async (name) => {
+      expect(await processCodeOutput({ ...baseParams, name })).toBeNull();
+      expect(mockAxios).not.toHaveBeenCalled();
+      expect(mockClaimCodeFile).not.toHaveBeenCalled();
+      expect(createFile).not.toHaveBeenCalled();
+    },
+  );
+
   describe('atomic file claim (via processCodeOutput)', () => {
     it('should reuse file_id from existing record via atomic claim', async () => {
       mockClaimCodeFile.mockResolvedValue({
