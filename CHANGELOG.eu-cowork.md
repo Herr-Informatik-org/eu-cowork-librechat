@@ -1,5 +1,11 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-08: Grosse Arbeitsmappen Blatt für Blatt öffnen
+
+- Die interaktive Tabellenansicht lädt das gewählte Blatt nach und behält alle verfügbaren Tabs.
+- Ungültige Blattnummern werden vor dem Renderer-Aufruf abgewiesen.
+- Geprüft mit 33 API- und vier Komponentenprüfungen, Typecheck, Build und einer lokalen Mappe mit 17 Blättern.
+
 ## Änderungen – 8. September 2026
 
 - XLSX, XLS und ODS öffnen eine helle Tabellenansicht mit auswählbaren Zellen,

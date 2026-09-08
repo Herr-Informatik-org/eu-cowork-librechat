@@ -11,7 +11,12 @@
  */
 
 jest.mock('@librechat/data-schemas', () => ({
-  logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
+  logger: {
+    warn: jest.fn(),
+    debug: jest.fn(),
+    error: jest.fn(),
+    info: jest.fn(),
+  },
   SystemCapabilities: {},
 }));
 
@@ -132,14 +137,12 @@ describe('GET /files/:file_id/preview/pdf', () => {
     const originalFetch = global.fetch;
     beforeEach(() => {
       process.env.OFFICE_PREVIEW_RENDERER_URL = 'http://renderer:8090';
-      global.fetch = jest
-        .fn()
-        .mockResolvedValue({
-          ok: true,
-          body: require('stream').Readable.from([
-            Buffer.from(JSON.stringify({ sheets: [{ name: 'Übersicht' }] })),
-          ]),
-        });
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        body: require('stream').Readable.from([
+          Buffer.from(JSON.stringify({ sheets: [{ name: 'Übersicht' }] })),
+        ]),
+      });
     });
     afterEach(() => {
       global.fetch = originalFetch;
@@ -150,11 +153,30 @@ describe('GET /files/:file_id/preview/pdf', () => {
       expect(response.status).toBe(200);
       expect(response.body.sheets[0].name).toBe('Übersicht');
       expect(response.headers['cache-control']).toBe('private, no-store');
-      expect(global.fetch.mock.calls[0][0].href).toBe('http://renderer:8090/workbook?format=xlsx');
+      expect(global.fetch.mock.calls[0][0].href).toBe(
+        'http://renderer:8090/workbook?format=xlsx&sheet=0',
+      );
       expect(global.fetch.mock.calls[0][1]).toEqual(
-        expect.objectContaining({ body: Buffer.from('original'), redirect: 'error' }),
+        expect.objectContaining({
+          body: Buffer.from('original'),
+          redirect: 'error',
+        }),
       );
       expect(mockUpdateFile).not.toHaveBeenCalled();
+    });
+    it('selects a bounded sheet and rejects invalid indices before renderer I/O', async () => {
+      expect(
+        (await request(buildApp()).get('/files/office-file/preview/workbook?sheet=9')).status,
+      ).toBe(200);
+      expect(global.fetch.mock.calls[0][0].search).toBe('?format=xlsx&sheet=9');
+      global.fetch.mockClear();
+      for (const index of ['-1', '20', '1.5', 'NaN']) {
+        expect(
+          (await request(buildApp()).get('/files/office-file/preview/workbook?sheet=' + index))
+            .status,
+        ).toBe(400);
+      }
+      expect(global.fetch).not.toHaveBeenCalled();
     });
     it('denies workbook access to another user before renderer I/O', async () => {
       mockGetFiles.mockResolvedValue([{ ...file, user: 'other-user' }]);
@@ -202,7 +224,11 @@ describe('GET /files/:file_id/preview/pdf', () => {
     expect(officePdf.readOfficePdf).toHaveBeenCalledWith(key);
   });
   it('renders an authorized Office upload lazily without overwriting its extracted RAG text', async () => {
-    const upload = { ...file, text: 'Original extracted document text', textFormat: 'text' };
+    const upload = {
+      ...file,
+      text: 'Original extracted document text',
+      textFormat: 'text',
+    };
     mockFindFileById.mockResolvedValue(upload);
     officePdf.readOfficePdf.mockResolvedValueOnce(null);
     const response = await request(buildApp()).get('/files/office-file/preview/pdf');
@@ -221,7 +247,11 @@ describe('GET /files/:file_id/preview/pdf', () => {
     expect(getStrategyFunctions).not.toHaveBeenCalled();
   });
   it('rejects a plaintext file containing a copied PDF descriptor before cache access', async () => {
-    mockFindFileById.mockResolvedValue({ ...file, filename: 'copied.txt', textFormat: 'text' });
+    mockFindFileById.mockResolvedValue({
+      ...file,
+      filename: 'copied.txt',
+      textFormat: 'text',
+    });
     expect((await request(buildApp()).get('/files/office-file/preview/pdf')).status).toBe(404);
     expect(officePdf.readOfficePdf).not.toHaveBeenCalled();
   });
@@ -357,7 +387,12 @@ describe('GET /files/:file_id/preview', () => {
 
   it('allows preview text through an attached agent file reference', async () => {
     mockGetFiles.mockResolvedValueOnce([
-      { file_id: 'victim-file', user: 'victim-user', filename: 'secret.xlsx', status: 'ready' },
+      {
+        file_id: 'victim-file',
+        user: 'victim-user',
+        filename: 'secret.xlsx',
+        status: 'ready',
+      },
     ]);
     mockGetAgents.mockResolvedValueOnce([
       {
@@ -404,7 +439,12 @@ describe('GET /files/:file_id/preview', () => {
 
   it('returns status:ready with text + textFormat when the deferred render succeeded', async () => {
     mockGetFiles.mockResolvedValueOnce([
-      { file_id: 'fid-ready', user: OWNER_USER_ID, filename: 'data.xlsx', status: 'ready' },
+      {
+        file_id: 'fid-ready',
+        user: OWNER_USER_ID,
+        filename: 'data.xlsx',
+        status: 'ready',
+      },
     ]);
     /* Text is fetched only on the terminal ready response. */
     mockFindFileById.mockResolvedValueOnce({
@@ -485,7 +525,12 @@ describe('GET /files/:file_id/preview', () => {
      * before the text fetch. Surface ready-without-text rather than
      * 500 — the client routes to download-only and stops polling. */
     mockGetFiles.mockResolvedValueOnce([
-      { file_id: 'fid-race', user: OWNER_USER_ID, filename: 'data.xlsx', status: 'ready' },
+      {
+        file_id: 'fid-race',
+        user: OWNER_USER_ID,
+        filename: 'data.xlsx',
+        status: 'ready',
+      },
     ]);
     mockFindFileById.mockResolvedValueOnce(null);
     const res = await request(buildApp()).get('/files/fid-race/preview');
@@ -495,7 +540,12 @@ describe('GET /files/:file_id/preview', () => {
 
   it('returns 500 with a stable shape if the text fetch throws unexpectedly', async () => {
     mockGetFiles.mockResolvedValueOnce([
-      { file_id: 'fid-boom', user: OWNER_USER_ID, filename: 'data.xlsx', status: 'ready' },
+      {
+        file_id: 'fid-boom',
+        user: OWNER_USER_ID,
+        filename: 'data.xlsx',
+        status: 'ready',
+      },
     ]);
     mockFindFileById.mockRejectedValueOnce(new Error('mongo down'));
     const res = await request(buildApp()).get('/files/fid-boom/preview');

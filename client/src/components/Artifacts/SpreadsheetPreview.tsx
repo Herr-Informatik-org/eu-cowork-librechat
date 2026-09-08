@@ -22,6 +22,7 @@ type Sheet = {
   widths: number[];
   rows: { height: number; cells: (Cell | null)[] }[];
   truncated: boolean;
+  loaded?: boolean;
 };
 const PAGE_SIZE = 100;
 export function columnName(index: number): string {
@@ -42,17 +43,21 @@ export default function SpreadsheetPreview({ artifact }: { artifact: Artifact })
   const [page, setPage] = useState(0);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [loading, setLoading] = useState(true);
   const fileId = artifact.download?.file_id;
   useEffect(() => {
-    const abort = new AbortController();
     setSheets([]);
-    setError(false);
     setSheetIndex(0);
     setSelected([0, 0]);
     setPage(0);
+  }, [fileId]);
+  useEffect(() => {
+    const abort = new AbortController();
+    setError(false);
+    setLoading(true);
     request
       .get<{ sheets: Sheet[] }>(
-        `${apiBaseUrl()}/api/files/${encodeURIComponent(fileId ?? '')}/preview/workbook`,
+        `${apiBaseUrl()}/api/files/${encodeURIComponent(fileId ?? '')}/preview/workbook?sheet=${sheetIndex}`,
         { signal: abort.signal, timeout: 60000 },
       )
       .then((data) => {
@@ -60,16 +65,28 @@ export default function SpreadsheetPreview({ artifact }: { artifact: Artifact })
           !Array.isArray(data.sheets) ||
           !data.sheets.length ||
           data.sheets.length > 20 ||
-          data.sheets.some((s) => s.rows.length > 1000 || s.widths.length > 60)
+          data.sheets.some(
+            (s) =>
+              !s ||
+              typeof s.name !== 'string' ||
+              !Array.isArray(s.rows) ||
+              !Array.isArray(s.widths) ||
+              s.rows.length > 1000 ||
+              s.widths.length > 60 ||
+              s.rows.some((r) => !r || !Array.isArray(r.cells) || r.cells.length > 60),
+          )
         )
           throw new Error('Invalid workbook');
-        if (!abort.signal.aborted) setSheets(data.sheets);
+        if (!abort.signal.aborted) {
+          setSheets(data.sheets);
+          setLoading(false);
+        }
       })
       .catch(() => {
         if (!abort.signal.aborted) setError(true);
       });
     return () => abort.abort();
-  }, [fileId, retry]);
+  }, [fileId, sheetIndex, retry]);
   if (error)
     return (
       <div className="p-5 text-sm" role="status">
@@ -107,94 +124,100 @@ export default function SpreadsheetPreview({ artifact }: { artifact: Artifact })
           {localize('com_ui_sheet_limited')}
         </div>
       )}
-      <div className="spreadsheet-scroll">
-        <table role="grid" aria-label={sheet.name} aria-readonly="true">
-          <colgroup>
-            <col style={{ width: 42 }} />
-            {sheet.widths.map((w, c) => (
-              <col key={c} style={{ width: Math.min(600, Math.max(40, w)) }} />
-            ))}
-          </colgroup>
-          <thead>
-            <tr>
-              <th />
-              {sheet.widths.map((_, c) => (
-                <th key={c} className={selected[1] === c ? 'selected' : ''}>
-                  {columnName(c)}
-                </th>
+      <div className="spreadsheet-scroll" aria-busy={loading}>
+        {loading ? (
+          <div className="p-5 text-sm text-text-secondary" role="status">
+            {localize('com_ui_sheet_loading')}
+          </div>
+        ) : (
+          <table role="grid" aria-label={sheet.name} aria-readonly="true">
+            <colgroup>
+              <col style={{ width: 42 }} />
+              {sheet.widths.map((w, c) => (
+                <col key={c} style={{ width: Math.min(600, Math.max(40, w)) }} />
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sheet.rows.slice(start, start + PAGE_SIZE).map((row, i) => {
-              const r = start + i;
-              return (
-                <tr key={r} style={{ height: Math.min(200, Math.max(22, row.height)) }}>
-                  <th className={selected[0] === r ? 'selected' : ''}>{r + 1}</th>
-                  {row.cells.map(
-                    (value, c) =>
-                      value && (
-                        <td
-                          key={c}
-                          data-cell={`${r}-${c}`}
-                          role="gridcell"
-                          aria-selected={selected[0] === r && selected[1] === c}
-                          tabIndex={selected[0] === r && selected[1] === c ? 0 : -1}
-                          rowSpan={Math.min(value.rowspan, start + PAGE_SIZE - r)}
-                          colSpan={value.colspan}
-                          onClick={() => setSelected([r, c])}
-                          onFocus={() => setSelected([r, c])}
-                          onKeyDown={(event) => {
-                            const moves: Record<string, number[]> = {
-                              ArrowDown: [1, 0],
-                              ArrowUp: [-1, 0],
-                              ArrowLeft: [0, -1],
-                              ArrowRight: [0, 1],
-                            };
-                            const move = moves[event.key];
-                            if (!move) return;
-                            event.preventDefault();
-                            let nr = r + move[0],
-                              nc = c + move[1];
-                            while (
-                              nr >= start &&
-                              nr < Math.min(start + PAGE_SIZE, sheet.rows.length) &&
-                              nc >= 0 &&
-                              nc < sheet.widths.length
-                            ) {
-                              if (sheet.rows[nr].cells[nc]) {
-                                setSelected([nr, nc]);
-                                event.currentTarget
-                                  .closest('table')
-                                  ?.querySelector<HTMLElement>(`[data-cell="${nr}-${nc}"]`)
-                                  ?.focus();
-                                break;
+            </colgroup>
+            <thead>
+              <tr>
+                <th />
+                {sheet.widths.map((_, c) => (
+                  <th key={c} className={selected[1] === c ? 'selected' : ''}>
+                    {columnName(c)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sheet.rows.slice(start, start + PAGE_SIZE).map((row, i) => {
+                const r = start + i;
+                return (
+                  <tr key={r} style={{ height: Math.min(200, Math.max(22, row.height)) }}>
+                    <th className={selected[0] === r ? 'selected' : ''}>{r + 1}</th>
+                    {row.cells.map(
+                      (value, c) =>
+                        value && (
+                          <td
+                            key={c}
+                            data-cell={`${r}-${c}`}
+                            role="gridcell"
+                            aria-selected={selected[0] === r && selected[1] === c}
+                            tabIndex={selected[0] === r && selected[1] === c ? 0 : -1}
+                            rowSpan={Math.min(value.rowspan, start + PAGE_SIZE - r)}
+                            colSpan={value.colspan}
+                            onClick={() => setSelected([r, c])}
+                            onFocus={() => setSelected([r, c])}
+                            onKeyDown={(event) => {
+                              const moves: Record<string, number[]> = {
+                                ArrowDown: [1, 0],
+                                ArrowUp: [-1, 0],
+                                ArrowLeft: [0, -1],
+                                ArrowRight: [0, 1],
+                              };
+                              const move = moves[event.key];
+                              if (!move) return;
+                              event.preventDefault();
+                              let nr = r + move[0],
+                                nc = c + move[1];
+                              while (
+                                nr >= start &&
+                                nr < Math.min(start + PAGE_SIZE, sheet.rows.length) &&
+                                nc >= 0 &&
+                                nc < sheet.widths.length
+                              ) {
+                                if (sheet.rows[nr].cells[nc]) {
+                                  setSelected([nr, nc]);
+                                  event.currentTarget
+                                    .closest('table')
+                                    ?.querySelector<HTMLElement>(`[data-cell="${nr}-${nc}"]`)
+                                    ?.focus();
+                                  break;
+                                }
+                                nr += move[0];
+                                nc += move[1];
                               }
-                              nr += move[0];
-                              nc += move[1];
-                            }
-                          }}
-                          style={{
-                            background: safeColor(value.background, '#ffffff'),
-                            color: safeColor(value.color, '#202020'),
-                            fontWeight: value.bold ? 600 : 400,
-                            fontStyle: value.italic ? 'italic' : 'normal',
-                            fontSize: `${Math.min(36, Math.max(8, value.fontSize))}pt`,
-                            textAlign: ['left', 'right', 'center'].includes(value.align)
-                              ? value.align
-                              : 'left',
-                            whiteSpace: value.wrap ? 'pre-wrap' : 'nowrap',
-                          }}
-                        >
-                          {value.text}
-                        </td>
-                      ),
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                            }}
+                            style={{
+                              background: safeColor(value.background, '#ffffff'),
+                              color: safeColor(value.color, '#202020'),
+                              fontWeight: value.bold ? 600 : 400,
+                              fontStyle: value.italic ? 'italic' : 'normal',
+                              fontSize: `${Math.min(36, Math.max(8, value.fontSize))}pt`,
+                              textAlign: ['left', 'right', 'center'].includes(value.align)
+                                ? value.align
+                                : 'left',
+                              whiteSpace: value.wrap ? 'pre-wrap' : 'nowrap',
+                            }}
+                          >
+                            {value.text}
+                          </td>
+                        ),
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
       <div className="spreadsheet-tabs" role="tablist" aria-label={localize('com_ui_sheet_tabs')}>
         {sheets.map((s, i) => (

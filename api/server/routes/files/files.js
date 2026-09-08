@@ -232,9 +232,14 @@ router.delete('/', async (req, res) => {
       const toolResourceFiles = agent.tool_resources?.[req.body.tool_resource]?.file_ids ?? [];
       const agentFiles = files
         .filter((f) => toolResourceFiles.includes(f.file_id))
-        .map((file) => ({ tool_resource: req.body.tool_resource, file_id: file.file_id }));
+        .map((file) => ({
+          tool_resource: req.body.tool_resource,
+          file_id: file.file_id,
+        }));
       if (agentFiles.length === 0) {
-        res.status(200).json({ message: 'File associations removed successfully from agent' });
+        res.status(200).json({
+          message: 'File associations removed successfully from agent',
+        });
         return;
       }
 
@@ -289,16 +294,18 @@ router.delete('/', async (req, res) => {
       const assistantFiles = files.filter((f) => toolResourceFiles.includes(f.file_id));
 
       await processDeleteRequest({ req, files: assistantFiles });
-      res.status(200).json({ message: 'File associations removed successfully from assistant' });
+      res.status(200).json({
+        message: 'File associations removed successfully from assistant',
+      });
       return;
     } else if (
       req.body.assistant_id &&
       req.body.files?.[0]?.filepath === EModelEndpoint.azureAssistants
     ) {
       await processDeleteRequest({ req, files: req.body.files });
-      return res
-        .status(200)
-        .json({ message: 'File associations removed successfully from Azure Assistant' });
+      return res.status(200).json({
+        message: 'File associations removed successfully from Azure Assistant',
+      });
     }
 
     await processDeleteRequest({ req, files: authorizedFiles });
@@ -407,12 +414,16 @@ router.get(
   fileAccess,
   async (req, res) => {
     const workbook = req.path.endsWith('/workbook');
+    const sheetIndex = req.query.sheet === undefined ? 0 : Number(req.query.sheet);
+    if (workbook && (!Number.isInteger(sheetIndex) || sheetIndex < 0 || sheetIndex >= 20)) {
+      return res.status(400).json({ message: 'Ungültiges Tabellenblatt' });
+    }
     // Admission precedes original reads and cache allocations, including cache hits.
     if (activeOfficePdfRequests >= 2) {
       res.setHeader('Retry-After', '2');
-      return res
-        .status(503)
-        .json({ message: 'Dokumentvorschau ist ausgelastet. Bitte erneut versuchen.' });
+      return res.status(503).json({
+        message: 'Dokumentvorschau ist ausgelastet. Bitte erneut versuchen.',
+      });
     }
     activeOfficePdfRequests++;
     let processingDone = false;
@@ -451,9 +462,9 @@ router.get(
       }
       // A descriptor is not an authorization token. Bind every cache hit to the authorized original bytes.
       if (checkOpenAIStorage(file.source)) {
-        return res
-          .status(404)
-          .json({ message: 'Vorschau abgelaufen. Originaldatei herunterladen.' });
+        return res.status(404).json({
+          message: 'Vorschau abgelaufen. Originaldatei herunterladen.',
+        });
       }
       const { getDownloadStream } = getStrategyFunctions(file.source);
       if (!getDownloadStream) {
@@ -484,7 +495,7 @@ router.get(
           throw new Error('Ungültige Renderer-Adresse');
         }
         target.pathname = '/workbook';
-        target.search = `format=${extension}`;
+        target.search = `format=${extension}&sheet=${sheetIndex}`;
         target.hash = '';
         const response = await fetch(target, {
           method: 'POST',
@@ -522,9 +533,9 @@ router.get(
           pdf = await readOfficePdf(key);
         }
         if (!pdf)
-          return res
-            .status(503)
-            .json({ message: 'Dokumentvorschau ist vorübergehend nicht verfügbar' });
+          return res.status(503).json({
+            message: 'Dokumentvorschau ist vorübergehend nicht verfügbar',
+          });
       }
       // Re-check revision after rendering; an older request must not show a newer file's stale copy.
       const current = await db.findFileById(req.params.file_id);
@@ -546,9 +557,9 @@ router.get(
       return res.send(pdf);
     } catch (error) {
       logger.warn('[/files/:file_id/preview/pdf] Vorschau nicht verfügbar:', error.message);
-      return res
-        .status(503)
-        .json({ message: 'Dokumentvorschau ist vorübergehend nicht verfügbar' });
+      return res.status(503).json({
+        message: 'Dokumentvorschau ist vorübergehend nicht verfügbar',
+      });
     } finally {
       processingDone = true;
       release();
@@ -599,9 +610,10 @@ router.get('/:file_id/preview', fileAccess, async (req, res) => {
     return res.status(200).json(payload);
   } catch (error) {
     logger.error('[/files/:file_id/preview] Error fetching preview status:', error);
-    return res
-      .status(500)
-      .json({ error: 'Internal Server Error', message: 'Failed to fetch preview status' });
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to fetch preview status',
+    });
   }
 });
 
