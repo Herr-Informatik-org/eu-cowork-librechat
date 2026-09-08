@@ -4,6 +4,7 @@ import { useRecoilValue } from 'recoil';
 import { useParams } from 'react-router-dom';
 import { Constants } from 'librechat-data-provider';
 import { useToastContext, useMediaQuery } from '@librechat/client';
+import ActivityStatusBadge from '~/components/Chat/Activity/ActivityStatusBadge';
 import type { TConversation } from 'librechat-data-provider';
 import { useNavigateToConvo, useLocalize, useShiftKey } from '~/hooks';
 import ConversationEndpointIcon from './ConversationEndpointIcon';
@@ -150,11 +151,15 @@ function Conversation({
       return;
     }
 
-    if (currentConvoId === conversationId || isPopoverActive) {
+    if (isPopoverActive) {
       return;
     }
 
     toggleNav();
+
+    if (currentConvoId === conversationId) {
+      return;
+    }
 
     if (typeof title === 'string' && title.length > 0) {
       document.title = title;
@@ -178,26 +183,10 @@ function Conversation({
     isShiftHeld: isActiveConvo ? isShiftHeld : false,
   };
 
-  const generatingSpinner = (
-    <svg
-      className="h-5 w-5 flex-shrink-0 animate-spin text-text-primary"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-label={localize('com_ui_generating')}
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-      />
-    </svg>
-  );
-
   let actionVisibilityClassName =
     'pointer-events-none max-w-0 scale-x-0 opacity-0 group-focus-within:pointer-events-auto group-focus-within:max-w-[60px] group-focus-within:scale-x-100 group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:max-w-[60px] group-hover:scale-x-100 group-hover:opacity-100';
   if (isGenerating) {
-    actionVisibilityClassName = 'pointer-events-none w-5 scale-x-100 opacity-100';
+    actionVisibilityClassName = 'pointer-events-none w-0 opacity-0';
   } else if (isPopoverActive || isActiveConvo) {
     actionVisibilityClassName = 'pointer-events-auto scale-x-100 opacity-100';
   }
@@ -210,9 +199,9 @@ function Conversation({
   }
 
   const showConvoOptions = !renaming && (hasInteracted || isActiveConvo);
-  const actionContent = isGenerating
-    ? generatingSpinner
-    : showConvoOptions && <ConvoOptions {...convoOptionsProps} />;
+  const actionContent = !isGenerating && showConvoOptions && (
+    <ConvoOptions {...convoOptionsProps} />
+  );
 
   return (
     <div
@@ -274,6 +263,14 @@ function Conversation({
         >
           <ConversationEndpointIcon conversation={conversation} size={20} context="menu-item" />
         </ConvoLink>
+      )}
+      {conversationId && (
+        <ActivityStatusBadge
+          conversationId={conversationId}
+          active={isGenerating}
+          compact
+          className="mr-1 shrink-0"
+        />
       )}
       {conversation.pinned === true && (
         <Pin className="icon-sm mr-1 shrink-0 text-text-primary" aria-hidden="true" />

@@ -9,6 +9,8 @@ import { ArtifactCodeEditor } from './ArtifactCodeEditor';
 import { useCodeState } from '~/Providers/EditorContext';
 import { ArtifactPreview } from './ArtifactPreview';
 import { useShareContext } from '~/Providers';
+import { isPreviewOnlyArtifact } from '~/utils/artifacts';
+import OfficeDocumentPreview from './OfficeDocumentPreview';
 
 export default function ArtifactTabs({
   artifact,
@@ -41,7 +43,7 @@ export default function ArtifactTabs({
   const { files, fileKey, template, sharedProps } = useArtifactProps({ artifact });
 
   return (
-    <div className="flex h-full w-full flex-col">
+    <div className="flex h-full w-full min-w-0 flex-col">
       <Tabs.Content
         value="code"
         id="artifacts-code"
@@ -56,15 +58,19 @@ export default function ArtifactTabs({
         className="h-full w-full flex-grow overflow-hidden"
         tabIndex={-1}
       >
-        <ArtifactPreview
-          files={files}
-          fileKey={fileKey}
-          template={template}
-          previewRef={previewRef}
-          sharedProps={sharedProps}
-          currentCode={currentCode}
-          startupConfig={resolvedStartupConfig}
-        />
+        {isPreviewOnlyArtifact(artifact.type) ? (
+          <OfficeDocumentPreview artifact={artifact} />
+        ) : (
+          <ArtifactPreview
+            files={files}
+            fileKey={fileKey}
+            template={template}
+            previewRef={previewRef}
+            sharedProps={sharedProps}
+            currentCode={currentCode}
+            startupConfig={resolvedStartupConfig}
+          />
+        )}
       </Tabs.Content>
     </div>
   );

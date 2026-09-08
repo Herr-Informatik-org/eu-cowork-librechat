@@ -49,6 +49,11 @@ import { useAuthContext } from '~/hooks/AuthContext';
 import { MESSAGE_UPDATE_INTERVAL } from '~/common';
 import { useLiveAnnouncer } from '~/Providers';
 import store from '~/store';
+import {
+  beginConversationActivity,
+  finishConversationActivity,
+  failConversationActivity,
+} from '~/store/activity';
 
 type TSyncData = {
   sync: boolean;
@@ -466,6 +471,7 @@ export default function useEventHandlers({
         ...responseMessage,
       };
 
+      beginConversationActivity(submission, conversationId, false, nextResponseMessage.messageId);
       setMessages([...messages, nextResponseMessage]);
 
       announcePolite({
@@ -541,6 +547,12 @@ export default function useEventHandlers({
         userMessage,
         isRegenerate,
       });
+      beginConversationActivity(
+        submission,
+        userMessage.conversationId ?? data.conversationId,
+        false,
+        initialResponse.messageId,
+      );
       if (isRegenerate) {
         setMessages([...messages, initialResponse]);
         focusRegeneratedResponse(initialResponse.parentMessageId);
@@ -656,6 +668,10 @@ export default function useEventHandlers({
 
   const finalHandler = useCallback(
     (data: TFinalResData, submission: EventSubmission) => {
+      finishConversationActivity(submission, {
+        ...data,
+        conversationId: data.conversation?.conversationId,
+      });
       const { requestMessage, responseMessage, conversation, runMessages } = data;
       const {
         messages,
@@ -904,6 +920,7 @@ export default function useEventHandlers({
 
   const errorHandler = useCallback(
     ({ data, submission }: { data?: TResData; submission: EventSubmission }) => {
+      failConversationActivity(submission);
       const { messages, userMessage, initialResponse } = submission;
       setCompleted((prev) => new Set(prev.add(initialResponse.messageId)));
 

@@ -26,7 +26,10 @@ describe('roleDefaults', () => {
       const schemaShape = permissionsSchema.shape;
 
       for (const [permType, subSchema] of Object.entries(schemaShape)) {
-        const fieldNames = Object.keys(subSchema.shape);
+        // VIEW is optional UI state, not an access grant; legacy roles intentionally omit it.
+        const fieldNames = Object.keys(subSchema.shape).filter(
+          (field) => field !== Permissions.VIEW,
+        );
         if (fieldNames.length <= 1) {
           continue;
         }
@@ -76,7 +79,10 @@ describe('roleDefaults', () => {
       const restrictedSet = new Set<string>(RESOURCE_PERMISSION_TYPES);
 
       for (const [permType, subSchema] of Object.entries(schemaShape)) {
-        const fieldNames = Object.keys(subSchema.shape);
+        // VIEW is optional UI state, not an access grant; legacy roles intentionally omit it.
+        const fieldNames = Object.keys(subSchema.shape).filter(
+          (field) => field !== Permissions.VIEW,
+        );
         const hasResourceFields = fieldNames.some((f) =>
           RESOURCE_MANAGEMENT_FIELDS.includes(f as Permissions),
         );
@@ -112,7 +118,10 @@ describe('roleDefaults', () => {
       const schemaShape = permissionsSchema.shape;
 
       for (const [permType, subSchema] of Object.entries(schemaShape)) {
-        const fieldNames = Object.keys(subSchema.shape);
+        // VIEW is optional UI state, not an access grant; legacy roles intentionally omit it.
+        const fieldNames = Object.keys(subSchema.shape).filter(
+          (field) => field !== Permissions.VIEW,
+        );
         const adminValues = adminPerms[permType as PermissionTypes] as Record<string, boolean>;
 
         for (const field of fieldNames) {
@@ -172,5 +181,25 @@ describe('roleDefaults', () => {
       ] as Record<string, boolean>;
       expect(userMcp[Permissions.CONFIGURE_OBO]).toBe(false);
     });
+  });
+});
+
+describe('sidebar visibility permissions', () => {
+  it.each([
+    PermissionTypes.AGENTS,
+    PermissionTypes.PROMPTS,
+    PermissionTypes.SKILLS,
+    PermissionTypes.MEMORIES,
+    PermissionTypes.MCP_SERVERS,
+  ])('preserves explicit visibility for %s without changing access or legacy defaults', (type) => {
+    const source = roleDefaults[SystemRoles.USER].permissions;
+    const legacy = permissionsSchema.parse(source);
+    expect(legacy[type]).not.toHaveProperty(Permissions.VIEW);
+    const changed = permissionsSchema.parse({
+      ...source,
+      [type]: { ...source[type], VIEW: false },
+    });
+    expect(changed[type]).toEqual({ ...legacy[type], VIEW: false });
+    expect(changed[type].USE).toEqual(legacy[type].USE);
   });
 });

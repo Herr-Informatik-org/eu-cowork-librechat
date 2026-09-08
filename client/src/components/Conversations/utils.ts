@@ -3,6 +3,8 @@ import type { TConversation } from 'librechat-data-provider';
 export type ConversationRenderProps = {
   conversation: TConversation;
   isGenerating?: boolean;
+  toggleNav?: () => void;
+  retainView?: () => void;
 };
 
 export function areConversationIconFieldsEqual(
@@ -42,6 +44,8 @@ export function areConversationRenderPropsEqual(
 ) {
   return (
     areConversationListItemFieldsEqual(prevProps.conversation, nextProps.conversation) &&
-    prevProps.isGenerating === nextProps.isGenerating
+    prevProps.isGenerating === nextProps.isGenerating &&
+    prevProps.toggleNav === nextProps.toggleNav &&
+    prevProps.retainView === nextProps.retainView
   );
 }

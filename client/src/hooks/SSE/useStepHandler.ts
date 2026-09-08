@@ -29,6 +29,7 @@ import {
 } from '~/utils/subagentContent';
 import { isAskUserQuestionPart, isAnsweredAskUserQuestionPart } from '~/utils/approval';
 import { subagentProgressByToolCallId, sandboxStartingByToolCallId } from '~/store';
+import { beginConversationActivity } from '~/store/activity';
 import { MESSAGE_UPDATE_INTERVAL } from '~/common';
 
 type TUseStepHandler = {
@@ -753,6 +754,8 @@ export default function useStepHandler({
           console.warn('No message id found in run step event');
           return;
         }
+
+        beginConversationActivity(submission, userMessage.conversationId, false, responseMessageId);
 
         stepMap.current.set(runStep.id, runStep);
 

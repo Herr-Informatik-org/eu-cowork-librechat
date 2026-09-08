@@ -128,6 +128,8 @@ export const PERMISSION_SUB_KEYS = new Set([
  */
 export enum Permissions {
   USE = 'USE',
+  /** Sidebar visibility only; never grants access to a resource or tool. */
+  VIEW = 'VIEW',
   CREATE = 'CREATE',
   UPDATE = 'UPDATE',
   READ = 'READ',
@@ -149,6 +151,7 @@ export enum Permissions {
 }
 
 export const promptPermissionsSchema = z.object({
+  [Permissions.VIEW]: z.boolean().optional(),
   [Permissions.USE]: z.boolean().default(true),
   [Permissions.CREATE]: z.boolean().default(true),
   [Permissions.SHARE]: z.boolean().default(false),
@@ -162,6 +165,7 @@ export const bookmarkPermissionsSchema = z.object({
 export type TBookmarkPermissions = z.infer<typeof bookmarkPermissionsSchema>;
 
 export const memoryPermissionsSchema = z.object({
+  [Permissions.VIEW]: z.boolean().optional(),
   [Permissions.USE]: z.boolean().default(true),
   [Permissions.CREATE]: z.boolean().default(true),
   [Permissions.UPDATE]: z.boolean().default(true),
@@ -171,6 +175,7 @@ export const memoryPermissionsSchema = z.object({
 export type TMemoryPermissions = z.infer<typeof memoryPermissionsSchema>;
 
 export const agentPermissionsSchema = z.object({
+  [Permissions.VIEW]: z.boolean().optional(),
   [Permissions.USE]: z.boolean().default(true),
   [Permissions.CREATE]: z.boolean().default(true),
   [Permissions.SHARE]: z.boolean().default(false),
@@ -221,6 +226,7 @@ export const fileCitationsPermissionsSchema = z.object({
 export type TFileCitationsPermissions = z.infer<typeof fileCitationsPermissionsSchema>;
 
 export const mcpServersPermissionsSchema = z.object({
+  [Permissions.VIEW]: z.boolean().optional(),
   [Permissions.USE]: z.boolean().default(true),
   [Permissions.CREATE]: z.boolean().default(true),
   [Permissions.SHARE]: z.boolean().default(false),
@@ -238,6 +244,7 @@ export const remoteAgentsPermissionsSchema = z.object({
 export type TRemoteAgentsPermissions = z.infer<typeof remoteAgentsPermissionsSchema>;
 
 export const skillPermissionsSchema = z.object({
+  [Permissions.VIEW]: z.boolean().optional(),
   [Permissions.USE]: z.boolean().default(true),
   [Permissions.CREATE]: z.boolean().default(true),
   [Permissions.SHARE]: z.boolean().default(false),

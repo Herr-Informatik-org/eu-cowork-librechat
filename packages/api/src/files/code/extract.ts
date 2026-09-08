@@ -44,7 +44,7 @@ export const MAX_TEXT_EXTRACT_BYTES: number = resolveMaxTextExtractBytes(
   process.env.FILE_PREVIEW_MAX_EXTRACT_BYTES,
 );
 const DOCUMENT_PARSE_TIMEOUT_MS = 8_000;
-const OFFICE_HTML_TIMEOUT_MS = 12_000;
+const OFFICE_HTML_TIMEOUT_MS = process.env.OFFICE_PREVIEW_RENDERER_URL ? 50_000 : 12_000;
 const TRUNCATION_MARKER = '\n\n…[truncated]';
 const TRUNCATION_MARKER_BYTES = Buffer.byteLength(TRUNCATION_MARKER, 'utf-8');
 

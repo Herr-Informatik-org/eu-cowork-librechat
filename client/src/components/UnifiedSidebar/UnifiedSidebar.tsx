@@ -7,26 +7,26 @@ import type { ChatFormValues } from '~/common';
 import { ChatContext, ChatFormProvider, ActivePanelProvider } from '~/Providers';
 import useUnifiedSidebarLinks from '~/hooks/Nav/useUnifiedSidebarLinks';
 import { useChatHelpers, useLocalize } from '~/hooks';
-import SidePanelNav from '~/components/SidePanel/Nav';
 import ExpandedPanel from './ExpandedPanel';
 import Sidebar from './Sidebar';
 import { cn } from '~/utils';
 import store from '~/store';
 
 const COLLAPSED_WIDTH = 52;
-const EXPANDED_MIN = 360;
+const EXPANDED_MIN = 280;
 const TRANSITION_MS = 300;
 const EASING = 'cubic-bezier(0.2, 0, 0, 1)';
 
 function getInitialWidth(): number {
   const saved = localStorage.getItem('side:width');
-  return saved ? Math.max(Number(saved), EXPANDED_MIN) : EXPANDED_MIN;
+  const width = Number(saved);
+  return Number.isFinite(width) && width > 0 ? Math.max(width, EXPANDED_MIN) : 300;
 }
 
 /**
  * Isolates useChatHelpers Recoil subscriptions from the sidebar layout.
  * Atom changes (e.g. during streaming) only re-render this component
- * and the active panel — not the sidebar shell, resize logic, or icon strip.
+ * and the active panel — not the sidebar shell, resize logic, or navigation actions.
  * This works because Recoil subscriptions don't propagate to parent components.
  */
 function SidebarChatProvider({ children }: { children: ReactNode }) {
@@ -149,9 +149,6 @@ function UnifiedSidebar() {
           <SidebarChatProvider>
             <ActivePanelProvider>
               <ExpandedPanel links={links} onCollapse={handleCollapse} />
-              <nav className="min-h-0 flex-1 overflow-hidden bg-surface-primary-alt">
-                <SidePanelNav links={links} />
-              </nav>
             </ActivePanelProvider>
           </SidebarChatProvider>
         </div>

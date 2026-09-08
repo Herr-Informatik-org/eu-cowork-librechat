@@ -163,6 +163,9 @@ describe('ConversationsSection streaming re-renders', () => {
   });
 
   it('does not re-render FavoritesList or BookmarkNav when the section re-renders mid-stream', async () => {
+    // Load the actual lazy child before measuring renders; cold Babel compilation can
+    // otherwise consume waitFor's timeout before the Suspense chunk resolves.
+    await import('~/components/Nav/Bookmarks/BookmarkNav');
     renderSection();
 
     // BookmarkNav is lazy-loaded; wait until it has actually rendered (its own

@@ -147,9 +147,8 @@ export async function sanitizeOfficeHtml(html: string): Promise<string> {
 
 /**
  * Wrap a sanitized HTML body in a complete document with the styles we want
- * inside the Sandpack iframe. The CSS palette uses `prefers-color-scheme` so
- * the iframe inherits dark/light from its parent (Sandpack iframes inherit
- * the prefers-color-scheme media query from the host document).
+ * inside the Sandpack iframe. Documents keep a white paper surface regardless
+ * of the chat or system theme; their content must not be recolored by the UI.
  */
 function wrapAsDocument(bodyHtml: string, extraHeadHtml = ''): string {
   return `<!DOCTYPE html>
@@ -160,7 +159,7 @@ function wrapAsDocument(bodyHtml: string, extraHeadHtml = ''): string {
 <title>Preview</title>
 <style>
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #ffffff;
   --fg: #1f2937;
   --muted: #6b7280;
@@ -171,19 +170,6 @@ function wrapAsDocument(bodyHtml: string, extraHeadHtml = ''): string {
   --tab-active-bg: rgba(229, 231, 235, 0.95);
   --tab-bg: transparent;
   --link: #2563eb;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1a1a2e;
-    --fg: #e5e7eb;
-    --muted: #9ca3af;
-    --border: rgba(128, 128, 128, 0.35);
-    --row-alt: rgba(255, 255, 255, 0.03);
-    --row-hover: rgba(59, 130, 246, 0.12);
-    --header-bg: rgba(31, 41, 55, 0.95);
-    --tab-active-bg: rgba(55, 65, 81, 0.95);
-    --link: #60a5fa;
-  }
 }
 * { box-sizing: border-box; }
 html, body {
@@ -425,8 +411,7 @@ function buildDocxCdnDocument(base64: string, mammothFallbackHtml: string): stri
  * body text (no explicit color) inherit our light-grey --fg on the
  * white page bg — barely-visible translucent rendering on PR #12934
  * manual e2e. Hardcoding light keeps the page contrast right; the
- * mammoth-only path (wrapAsDocument) still respects the users OS
- * scheme since it owns its own bg + text colors. */
+ * mammoth-only path (wrapAsDocument) uses the same paper palette. */
 :root { color-scheme: light; --bg: #ffffff; --fg: #1f2937; --muted: #6b7280; --link: #2563eb; --border: #e5e7eb; --header-bg: #f3f4f6; --row-alt: #f9fafb; }
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
 #lc-render { padding: 16px; }
@@ -435,8 +420,8 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); fon
 .lc-docx-loading { display: flex; align-items: center; justify-content: center; height: 60vh; color: var(--muted); font-size: 14px; }
 ${DOCX_EXTRA_CSS}
 /* docx-preview emits its own per-document <style> tags inside #lc-render
- * — leave them be. These rules just keep the host frame consistent with
- * dark mode and bound the rendered document width. */
+ * — leave them be. These rules keep the paper frame consistent and
+ * bound the rendered document width. */
 /* docx-preview wraps each section in .docx-wrapper and sets explicit
  * inline width on .docx from the source pageSize. With ignoreWidth:true
  * set on the renderer those inline widths are skipped, but we override
@@ -672,6 +657,20 @@ async function renderWorkbookSheets(
         truncated = true;
       }
     }
+    /* SheetJS does not calculate formulas. Code-generated workbooks often have
+     * a formula without a cached value; showing an empty cell conceals it.
+     * Change only the in-memory preview, retaining existing cached values. */
+    for (const address of Object.keys(ws)) {
+      if (address.startsWith('!')) {
+        continue;
+      }
+      const cell = ws[address] as import('xlsx').CellObject;
+      // A formula stub may carry a synthetic v:0 from the parser, not a cached result.
+      if (cell.f && (cell.t === 'z' || cell.v == null)) {
+        const label = `=${cell.f} (nicht berechnet)`;
+        ws[address] = { ...cell, t: 's', v: label, w: label, h: undefined };
+      }
+    }
     const html = XLSX.utils.sheet_to_html(ws, { editable: false, header: '', footer: '' });
     sheets.push({ name: sheetName, html, truncated, totalRows });
   }
@@ -761,7 +760,7 @@ function escapeHtml(input: string): string {
  * decompression-amplification attack surface, so the safety check is
  * skipped for it (yauzl would reject it as malformed anyway).
  */
-export async function excelSheetToHtml(buffer: Buffer): Promise<string> {
+export async function excelSheetToHtml(buffer: Buffer, extension = 'xlsx'): Promise<string> {
   /* Cheap magic-byte check so we only run the ZIP validator on actual
    * ZIP-backed inputs. `.xls` (BIFF/CFB) starts with `D0 CF 11 E0`; ZIPs
    * start with `PK\x03\x04`. Skipping the validator on a non-ZIP input
@@ -769,8 +768,14 @@ export async function excelSheetToHtml(buffer: Buffer): Promise<string> {
   if (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b) {
     await assertSafeZipSize(buffer, { name: 'spreadsheet' });
   }
+  const officePreview = await tryLibreOfficePreview(buffer, extension, OFFICE_HTML_OUTPUT_CAP);
+  if (officePreview) {
+    return officePreview;
+  }
   const XLSX = await import('xlsx');
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  // openpyxl emits uncached formulas without a cell type and with an empty <v>.
+  // Preserve those cells as stubs so the preview can disclose the missing result.
+  const workbook = XLSX.read(buffer, { type: 'buffer', sheetStubs: true });
   const sheets = await renderWorkbookSheets(workbook, XLSX);
   /* The per-sheet HTML from `sheet_to_html` is generally well-formed but we
    * still sanitize it (defense in depth). The chrome (tab strip, banners) is
@@ -1631,7 +1636,7 @@ export async function bufferToOfficeHtml(
     case 'csv':
       return csvToHtml(buffer);
     case 'spreadsheet':
-      return excelSheetToHtml(buffer);
+      return excelSheetToHtml(buffer, /\.(ods|xls)$/i.exec(name)?.[1].toLowerCase() ?? 'xlsx');
     case 'pptx':
       return pptxToHtml(buffer);
     default:

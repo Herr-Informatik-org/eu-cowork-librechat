@@ -233,7 +233,7 @@ describe('definitions.ts', () => {
         expect(result.toolRegistry.has('execute_code')).toBe(false);
       });
 
-      it('should include parameters for web_search native tool', async () => {
+      it('exposes an explicit unfiltered date in event-driven web_search definitions', async () => {
         mockIsBuiltInTool.mockImplementation((name) => name === 'web_search');
 
         const params: LoadToolDefinitionsParams = {
@@ -253,7 +253,12 @@ describe('definitions.ts', () => {
         expect(webSearchDef).toBeDefined();
         expect(webSearchDef?.parameters).toBeDefined();
         expect(webSearchDef?.parameters?.properties).toHaveProperty('query');
-        expect(webSearchDef?.parameters?.required).toContain('query');
+        expect(webSearchDef?.parameters?.required).toEqual(['query']);
+        expect(webSearchDef?.parameters?.properties?.date).toEqual({
+          anyOf: [WebSearchToolDefinition.schema.properties.date, { type: 'null' }],
+          description: expect.stringContaining('Use null for all time'),
+        });
+        expect(WebSearchToolDefinition.schema.properties.date).not.toHaveProperty('anyOf');
       });
 
       it('should include parameters for file_search native tool', async () => {

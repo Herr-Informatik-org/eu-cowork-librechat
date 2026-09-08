@@ -1,5 +1,6 @@
 import { useMemo, useCallback, useContext } from 'react';
-import type { TUser, PermissionTypes, Permissions } from 'librechat-data-provider';
+import { Permissions } from 'librechat-data-provider';
+import type { TUser, PermissionTypes } from 'librechat-data-provider';
 import { AuthContext } from '~/hooks/AuthContext';
 
 const useHasAccess = ({
@@ -29,7 +30,9 @@ const useHasAccess = ({
       }
 
       if (isAuthenticated && user?.role != null && roles && roles[user.role]) {
-        return roles[user.role]?.permissions?.[permissionType]?.[permission] === true;
+        const value = roles[user.role]?.permissions?.[permissionType]?.[permission];
+        // Older roles have no VIEW bit. Visibility never replaces capability checks.
+        return permission === Permissions.VIEW ? value !== false : value === true;
       }
       return false;
     },

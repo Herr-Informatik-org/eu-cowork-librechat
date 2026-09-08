@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { useRecoilValue } from 'recoil';
 import { Dropdown, Spinner } from '@librechat/client';
 import { useLocalize } from '~/hooks';
@@ -16,14 +17,13 @@ export const ThemeSelector = ({
   popoverClassName?: string;
 }) => {
   const localize = useLocalize();
+  const labelId = useId();
 
   const themeOptions = [
     { value: 'system', label: localize('com_nav_theme_system') },
     { value: 'dark', label: localize('com_nav_theme_dark') },
     { value: 'light', label: localize('com_nav_theme_light') },
   ];
-
-  const labelId = 'theme-selector-label';
 
   return (
     <div className="flex items-center justify-between">

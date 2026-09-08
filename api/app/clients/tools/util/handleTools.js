@@ -54,6 +54,7 @@ const {
 } = require('~/server/services/MCP');
 const { getMCPRequestContext } = require('~/server/services/MCPRequestContext');
 const { createFileSearchTool, primeFiles: primeSearchFiles } = require('./fileSearch');
+const { prepareWebSearchTool } = require('./prepareWebSearchTool');
 const { primeFiles: primeCodeFiles } = require('~/server/services/Files/Code/process');
 const { getUserPluginAuthValue } = require('~/server/services/PluginService');
 const { loadAuthValues } = require('~/server/services/Tools/credentials');
@@ -401,12 +402,14 @@ const loadTools = async ({
         dynamicToolContextMap[tool] = buildWebSearchDynamicContext(
           options.req?.conversationCreatedAt,
         );
-        return createSearchTool({
-          ...result.authResult,
-          onSearchResults,
-          onGetHighlights,
-          logger,
-        });
+        return prepareWebSearchTool(
+          createSearchTool({
+            ...result.authResult,
+            onSearchResults,
+            onGetHighlights,
+            logger,
+          }),
+        );
       };
       continue;
     } else if (tool === ASK_USER_QUESTION_TOOL_NAME) {

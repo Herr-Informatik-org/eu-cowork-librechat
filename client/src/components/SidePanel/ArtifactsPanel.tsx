@@ -7,6 +7,7 @@ interface ArtifactsPanelProps {
   minSizeMain: string;
   shouldRender: boolean;
   onRenderChange: (shouldRender: boolean) => void;
+  defaultSize?: string;
 }
 
 const ArtifactsPanel = memo(function ArtifactsPanel({
@@ -14,6 +15,7 @@ const ArtifactsPanel = memo(function ArtifactsPanel({
   minSizeMain,
   shouldRender,
   onRenderChange,
+  defaultSize = '50',
 }: ArtifactsPanelProps) {
   const artifactsPanelRef = usePanelRef();
 
@@ -40,7 +42,7 @@ const ArtifactsPanel = memo(function ArtifactsPanel({
         <ResizableHandleAlt withHandle className="bg-border-medium text-text-primary" />
       )}
       <ResizablePanel
-        defaultSize="50"
+        defaultSize={defaultSize}
         maxSize="70"
         collapsedSize="0"
         collapsible={true}
@@ -48,7 +50,7 @@ const ArtifactsPanel = memo(function ArtifactsPanel({
         panelRef={artifactsPanelRef}
         id="artifacts-panel"
       >
-        <div className="h-full min-w-[400px] overflow-hidden">{artifacts}</div>
+        <div className="h-full w-full min-w-0 overflow-hidden">{artifacts}</div>
       </ResizablePanel>
     </>
   );

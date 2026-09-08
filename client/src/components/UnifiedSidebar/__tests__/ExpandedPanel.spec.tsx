@@ -112,17 +112,18 @@ describe('ExpandedPanel', () => {
     localStorage.clear();
   });
 
-  describe('NavIconButton collapse toggle', () => {
-    it('collapses sidebar when clicking the active icon while expanded', () => {
+  describe('single column navigation', () => {
+    it('keeps the current panel open when its action is selected again', () => {
       const { onCollapse } = renderPanel({ expanded: true });
       const activeButton = screen.getByRole('button', { name: 'com_ui_chat_history' });
       fireEvent.click(activeButton);
-      expect(onCollapse).toHaveBeenCalledTimes(1);
+      expect(onCollapse).not.toHaveBeenCalled();
     });
 
     it('switches panel when clicking an inactive icon while expanded', () => {
       const { onCollapse } = renderPanel({ expanded: true });
-      const inactiveButton = screen.getByRole('button', { name: 'com_ui_prompts' });
+      fireEvent.click(screen.getByRole('button', { name: 'com_ui_nav_tools' }));
+      const inactiveButton = screen.getByTestId('nav-panel-prompts');
       fireEvent.click(inactiveButton);
       expect(onCollapse).not.toHaveBeenCalled();
       expect(localStorage.getItem('side:active-panel')).toBe('prompts');
@@ -142,6 +143,25 @@ describe('ExpandedPanel', () => {
       expect(onExpand).toHaveBeenCalledTimes(1);
       expect(localStorage.getItem('side:active-panel')).toBe('prompts');
     });
+  });
+
+  it('places labelled actions and the selected panel in one column', () => {
+    const { container } = renderPanel();
+    expect(screen.getByTestId('new-chat-button')).toHaveTextContent('com_ui_new_chat');
+    const column = container.querySelector('.workspace-nav');
+    expect(column).toHaveClass('flex-col');
+    expect(column).toContainElement(screen.getByTestId('workspace-nav-content'));
+    expect(screen.queryByTestId('nav-panel-prompts')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'com_ui_nav_tools' }));
+    fireEvent.click(screen.getByTestId('nav-panel-prompts'));
+    expect(localStorage.getItem('side:active-panel')).toBe('prompts');
+    expect(screen.queryByTestId('nav-panel-prompts')).not.toBeInTheDocument();
+  });
+
+  it('only the dedicated close action collapses the expanded workspace', () => {
+    const { onCollapse } = renderPanel();
+    fireEvent.click(screen.getByTestId('close-sidebar-button'));
+    expect(onCollapse).toHaveBeenCalledTimes(1);
   });
 
   describe('NewChatButton panel switch', () => {

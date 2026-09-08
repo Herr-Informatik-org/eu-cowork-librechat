@@ -1,6 +1,6 @@
-import { memo, useCallback, lazy, Suspense } from 'react';
+import { memo, useCallback, useState, lazy, Suspense } from 'react';
 import { useRecoilValue } from 'recoil';
-import { SquarePen } from 'lucide-react';
+import { ChevronDown, SlidersHorizontal, SquarePen } from 'lucide-react';
 import { QueryKeys } from 'librechat-data-provider';
 import { useQueryClient } from '@tanstack/react-query';
 import { Skeleton, Sidebar, Button, TooltipAnchor } from '@librechat/client';
@@ -10,13 +10,16 @@ import { useActivePanel, resolveActivePanel, DEFAULT_PANEL } from '~/Providers';
 import { CLOSE_SIDEBAR_ID } from '~/components/Chat/Menus/OpenSidebar';
 import { useLocalize, useNewConvo } from '~/hooks';
 import { clearMessagesCache, cn } from '~/utils';
+import SidePanelNav from '~/components/SidePanel/Nav';
 import store from '~/store';
 
 const AccountSettings = lazy(() => import('~/components/Nav/AccountSettings'));
 
 const NewChatButton = memo(function NewChatButton({
   setActive,
+  expanded,
 }: {
+  expanded: boolean;
   setActive: (id: string) => void;
 }) {
   const localize = useLocalize();
@@ -52,30 +55,32 @@ const NewChatButton = memo(function NewChatButton({
           data-testid="new-chat-button"
           aria-label={localize('com_ui_new_chat')}
           aria-keyshortcuts={ariaKey}
-          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-surface-hover"
+          className={cn(
+            'flex h-9 items-center gap-3 rounded-lg text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover',
+            expanded ? 'w-full px-3' : 'w-9 justify-center',
+          )}
           onClick={handleClick}
         >
-          <SquarePen className="h-5 w-5 text-text-primary" />
+          <SquarePen className="h-4 w-4 shrink-0 text-text-primary" aria-hidden="true" />
+          {expanded && <span>{localize('com_ui_new_chat')}</span>}
         </a>
       }
     />
   );
 });
 
-const NavIconButton = memo(function NavIconButton({
+const NavActionButton = memo(function NavActionButton({
   link,
   isActive,
   expanded,
   setActive,
   onExpand,
-  onCollapse,
 }: {
   link: NavLink;
   isActive: boolean;
   expanded: boolean;
   setActive: (id: string) => void;
   onExpand?: () => void;
-  onCollapse?: () => void;
 }) {
   const localize = useLocalize();
 
@@ -85,18 +90,12 @@ const NavIconButton = memo(function NavIconButton({
         link.onClick(e);
         return;
       }
-      if (isActive && expanded) {
-        onCollapse?.();
-        return;
-      }
-      if (!isActive) {
-        setActive(link.id);
-      }
+      setActive(link.id);
       if (!expanded) {
         onExpand?.();
       }
     },
-    [link, isActive, setActive, expanded, onExpand, onCollapse],
+    [link, setActive, expanded, onExpand],
   );
 
   return (
@@ -105,18 +104,19 @@ const NavIconButton = memo(function NavIconButton({
       side="right"
       render={
         <Button
-          size="icon"
           variant="ghost"
           aria-label={localize(link.title)}
           aria-pressed={isActive}
           data-testid={`nav-panel-${link.id}`}
           className={cn(
-            'h-9 w-9 rounded-lg',
+            'h-9 rounded-lg text-sm font-normal',
+            expanded ? 'w-full justify-start gap-3 px-3' : 'w-9 p-0',
             isActive ? 'bg-surface-active-alt text-text-primary' : 'text-text-secondary',
           )}
           onClick={handleClick}
         >
-          <link.icon className="h-5 w-5" aria-hidden="true" />
+          <link.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {expanded && <span className="truncate">{localize(link.title)}</span>}
         </Button>
       }
     />
@@ -137,6 +137,10 @@ function ExpandedPanel({
   const localize = useLocalize();
   const { active, setActive } = useActivePanel();
   const effectiveActive = resolveActivePanel(active, links);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const primaryLinks = links.filter((link) => ['conversations', 'files'].includes(link.id));
+  const toolLinks = links.filter((link) => !['conversations', 'files'].includes(link.id));
+  const activeTool = toolLinks.find((link) => link.id === effectiveActive);
 
   const toggleLabel = expanded ? 'com_nav_close_sidebar' : 'com_nav_open_sidebar';
   const toggleClick = expanded ? onCollapse : onExpand;
@@ -144,45 +148,96 @@ function ExpandedPanel({
   const toggleSidebarAriaKey = useShortcutAriaKey('toggleSidebar');
 
   return (
-    <div className="flex h-full flex-shrink-0 flex-col gap-2 border-r border-border-light bg-surface-primary-alt px-2 py-2">
-      <TooltipAnchor
-        side="right"
-        description={toggleSidebarHint}
-        render={
-          <Button
-            id={expanded ? CLOSE_SIDEBAR_ID : undefined}
-            data-testid={expanded ? 'close-sidebar-button' : 'open-sidebar-button'}
-            size="icon"
-            variant="ghost"
-            aria-label={localize(toggleLabel)}
-            aria-expanded={expanded}
-            aria-keyshortcuts={toggleSidebarAriaKey}
-            className="h-9 w-9 rounded-lg"
-            onClick={toggleClick}
-          >
-            <Sidebar aria-hidden="true" className="h-5 w-5 text-text-primary" />
-          </Button>
-        }
-      />
-      <NewChatButton setActive={setActive} />
-      <div className="mx-2 border-b border-border-light" />
-      <div className="flex flex-col gap-1 overflow-y-auto">
-        {links.map((link) => (
-          <NavIconButton
+    <div className="workspace-nav flex h-full min-h-0 w-full flex-col border-r border-border-light bg-surface-primary-alt">
+      <div className="flex shrink-0 items-center gap-1 px-2 pb-1 pt-3">
+        {expanded && (
+          <span className="min-w-0 flex-1 px-3 text-sm font-semibold tracking-tight text-text-primary">
+            {localize('com_ui_nav_workspace')}
+          </span>
+        )}
+        <TooltipAnchor
+          side="right"
+          description={toggleSidebarHint}
+          render={
+            <Button
+              id={expanded ? CLOSE_SIDEBAR_ID : undefined}
+              data-testid={expanded ? 'close-sidebar-button' : 'open-sidebar-button'}
+              size="icon"
+              variant="ghost"
+              aria-label={localize(toggleLabel)}
+              aria-expanded={expanded}
+              aria-keyshortcuts={toggleSidebarAriaKey}
+              className="h-9 w-9 shrink-0 rounded-lg"
+              onClick={toggleClick}
+            >
+              <Sidebar aria-hidden="true" className="h-4 w-4 text-text-secondary" />
+            </Button>
+          }
+        />
+      </div>
+      <nav aria-label={localize('com_ui_nav_actions')} className="shrink-0 space-y-0.5 px-2 pb-3">
+        <NewChatButton setActive={setActive} expanded={expanded} />
+        {(expanded ? primaryLinks : links).map((link) => (
+          <NavActionButton
             key={link.id}
             link={link}
             isActive={link.id === effectiveActive}
-            expanded={expanded ?? true}
+            expanded={expanded}
             setActive={setActive}
             onExpand={onExpand}
-            onCollapse={onCollapse}
           />
         ))}
-      </div>
-
-      <div className="mt-auto">
-        <Suspense fallback={<Skeleton className="h-9 w-9 rounded-lg" />}>
-          <AccountSettings collapsed />
+        {expanded && toolLinks.length > 0 && (
+          <>
+            <Button
+              variant="ghost"
+              className="h-9 w-full justify-start gap-3 rounded-lg px-3 text-sm font-normal text-text-secondary"
+              aria-expanded={toolsOpen}
+              aria-controls="workspace-nav-tools"
+              onClick={() => setToolsOpen((open) => !open)}
+            >
+              <SlidersHorizontal className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-left">
+                {activeTool ? localize(activeTool.title) : localize('com_ui_nav_tools')}
+              </span>
+              <ChevronDown
+                className={cn('h-3.5 w-3.5', toolsOpen && 'rotate-180')}
+                aria-hidden="true"
+              />
+            </Button>
+            {toolsOpen && (
+              <div
+                id="workspace-nav-tools"
+                className="max-h-[30vh] space-y-0.5 overflow-y-auto pl-2"
+              >
+                {toolLinks.map((link) => (
+                  <NavActionButton
+                    key={link.id}
+                    link={link}
+                    isActive={link.id === effectiveActive}
+                    expanded
+                    setActive={(id) => {
+                      setActive(id);
+                      setToolsOpen(false);
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </nav>
+      {expanded && (
+        <div
+          className="min-h-0 flex-1 overflow-hidden border-t border-border-light pt-2"
+          data-testid="workspace-nav-content"
+        >
+          <SidePanelNav links={links} />
+        </div>
+      )}
+      <div className="mt-auto shrink-0 border-t border-border-light p-2">
+        <Suspense fallback={<Skeleton className="h-9 w-full rounded-lg" />}>
+          <AccountSettings collapsed={!expanded} />
         </Suspense>
       </div>
     </div>

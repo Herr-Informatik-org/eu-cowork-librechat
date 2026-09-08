@@ -56,26 +56,31 @@ const DragDropModal = () => {
       case EToolResources.file_search:
         return {
           label: localize('com_ui_upload_file_search'),
+          description: localize('com_ui_upload_search_description'),
           icon: <FileSearch className="icon-md" />,
         };
       case EToolResources.execute_code:
         return {
           label: localize('com_ui_upload_code_environment'),
+          description: localize('com_ui_upload_code_description'),
           icon: <TerminalSquareIcon className="icon-md" />,
         };
       case EToolResources.context:
         return {
           label: localize('com_ui_upload_ocr_text'),
+          description: localize('com_ui_upload_text_description'),
           icon: <FileType2Icon className="icon-md" />,
         };
       default:
         return isProviderDocSupported
           ? {
               label: localize('com_ui_upload_provider'),
+              description: localize('com_ui_upload_provider_description'),
               icon: <FileImageIcon className="icon-md" />,
             }
           : {
               label: localize('com_ui_upload_image_input'),
+              description: localize('com_ui_upload_image_description'),
               icon: <ImageUpIcon className="icon-md" />,
             };
     }
@@ -95,7 +100,7 @@ const DragDropModal = () => {
         main={
           <div className="flex flex-col gap-2">
             {options.map((value) => {
-              const { label, icon } = getOptionMeta(value);
+              const { label, description, icon } = getOptionMeta(value);
               return (
                 <button
                   key={value ?? 'provider'}
@@ -103,10 +108,17 @@ const DragDropModal = () => {
                     routeFiles(files, value);
                     closeModal();
                   }}
-                  className="flex items-center gap-2 rounded-lg p-2 hover:bg-surface-active-alt"
+                  className="flex items-start gap-2 rounded-lg p-2 text-left hover:bg-surface-active-alt"
                 >
-                  {icon}
-                  <span>{label}</span>
+                  <span className="mt-0.5 shrink-0" aria-hidden="true">
+                    {icon}
+                  </span>
+                  <span className="flex flex-col gap-1">
+                    <span>{label}</span>
+                    <span className="text-xs leading-relaxed text-text-secondary">
+                      {description}
+                    </span>
+                  </span>
                 </button>
               );
             })}

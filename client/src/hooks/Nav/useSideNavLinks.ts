@@ -88,6 +88,26 @@ export default function useSideNavLinks({
     permissionType: PermissionTypes.MCP_SERVERS,
     permission: Permissions.CREATE,
   });
+  const showAgents = useHasAccess({
+    permissionType: PermissionTypes.AGENTS,
+    permission: Permissions.VIEW,
+  });
+  const showPrompts = useHasAccess({
+    permissionType: PermissionTypes.PROMPTS,
+    permission: Permissions.VIEW,
+  });
+  const showSkills = useHasAccess({
+    permissionType: PermissionTypes.SKILLS,
+    permission: Permissions.VIEW,
+  });
+  const showMemories = useHasAccess({
+    permissionType: PermissionTypes.MEMORIES,
+    permission: Permissions.VIEW,
+  });
+  const showMCP = useHasAccess({
+    permissionType: PermissionTypes.MCP_SERVERS,
+    permission: Permissions.VIEW,
+  });
   const { availableMCPServers } = useMCPServerManager();
 
   const { agentsConfig } = useGetAgentsConfig({ endpointsConfig });
@@ -100,6 +120,7 @@ export default function useSideNavLinks({
       endpointsConfig?.[EModelEndpoint.agents] &&
       hasAccessToAgents &&
       hasAccessToCreateAgents &&
+      showAgents &&
       endpointsConfig[EModelEndpoint.agents].disableBuilder !== true
     ) {
       links.push({
@@ -112,6 +133,9 @@ export default function useSideNavLinks({
     }
 
     if (
+      hasAccessToAgents &&
+      hasAccessToCreateAgents &&
+      showAgents &&
       isAssistantsEndpoint(endpoint) &&
       ((endpoint === EModelEndpoint.assistants &&
         endpointsConfig?.[EModelEndpoint.assistants] &&
@@ -130,7 +154,7 @@ export default function useSideNavLinks({
       });
     }
 
-    if (hasAccessToSkills && skillsEnabled) {
+    if (hasAccessToSkills && skillsEnabled && showSkills) {
       links.push({
         title: 'com_ui_skills',
         label: '',
@@ -140,7 +164,7 @@ export default function useSideNavLinks({
       });
     }
 
-    if (hasAccessToPrompts) {
+    if (hasAccessToPrompts && showPrompts) {
       links.push({
         title: 'com_ui_prompts',
         label: '',
@@ -150,7 +174,7 @@ export default function useSideNavLinks({
       });
     }
 
-    if (hasAccessToMemories && hasAccessToReadMemories) {
+    if (hasAccessToMemories && hasAccessToReadMemories && showMemories) {
       links.push({
         title: 'com_ui_memories',
         label: '',
@@ -194,8 +218,9 @@ export default function useSideNavLinks({
     }
 
     if (
-      (hasAccessToUseMCPSettings && availableMCPServers && availableMCPServers.length > 0) ||
-      hasAccessToCreateMCP
+      showMCP &&
+      ((hasAccessToUseMCPSettings && availableMCPServers && availableMCPServers.length > 0) ||
+        hasAccessToCreateMCP)
     ) {
       links.push({
         title: 'com_nav_setting_mcp',
@@ -236,6 +261,11 @@ export default function useSideNavLinks({
     hasAccessToCreateMCP,
     includeHidePanel,
     hidePanel,
+    showAgents,
+    showPrompts,
+    showSkills,
+    showMemories,
+    showMCP,
   ]);
 
   return Links;

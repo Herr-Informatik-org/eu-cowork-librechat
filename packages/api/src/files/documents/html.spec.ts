@@ -1,6 +1,7 @@
 import path from 'path';
 import * as fs from 'fs';
 import JSZip from 'jszip';
+import * as XLSX from 'xlsx';
 import { megabyte } from 'librechat-data-provider';
 import {
   _internal,
@@ -19,6 +20,22 @@ const fixturesDir = __dirname;
 const readFixture = (name: string): Buffer => fs.readFileSync(path.join(fixturesDir, name));
 
 describe('Office HTML producers', () => {
+  describe('document paper palette', () => {
+    test.each([
+      { name: 'Excel', render: () => excelSheetToHtml(readFixture('sample.xlsx')) },
+      { name: 'CSV', render: () => csvToHtml(Buffer.from('name,value\nAlpha,42')) },
+      {
+        name: 'Word fallback',
+        render: () => _internal.wordDocToHtmlViaMammoth(readFixture('sample.docx')),
+      },
+    ])('$name keeps white paper independently of the chat or system theme', async ({ render }) => {
+      const html = await render();
+      expect(html).toMatch(/color-scheme:\s*light;/);
+      expect(html).toContain('--bg: #ffffff');
+      expect(html).not.toMatch(/prefers-color-scheme:\s*dark|#1a1a2e/);
+    });
+  });
+
   describe('wordDocToHtml', () => {
     /* The dispatcher chooses CDN vs mammoth by buffer size. The fixture
      * sample.docx is small (~6 KB) so it goes down the CDN path. Tests
@@ -260,6 +277,65 @@ describe('Office HTML producers', () => {
   });
 
   describe('excelSheetToHtml', () => {
+    test.each(['<v/>', '<v></v>', ''])(
+      'retains an openpyxl-style formula with an empty cache %j and no cell type',
+      async (cacheXml) => {
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(
+          workbook,
+          {
+            B5: { t: 'n', v: 12 },
+            C5: { t: 'n', v: 49.9 },
+            D5: { t: 'n', v: 0.1 },
+            D7: { t: 'n', f: 'ROUND(B5*C5*(1-D5),2)', v: 538.92 },
+            E7: { t: 'n', f: '1-1', v: 0 },
+            '!ref': 'B5:E7',
+          },
+          'Summary',
+        );
+        const zip = await JSZip.loadAsync(
+          XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }),
+        );
+        const sheetXml = await zip.file('xl/worksheets/sheet1.xml')!.async('string');
+        // Match the actual OOXML emitted by openpyxl after inserting a formula.
+        // SheetJS drops this cell unless stub preservation is explicitly enabled.
+        zip.file(
+          'xl/worksheets/sheet1.xml',
+          sheetXml.replace(
+            /<c r="D7"[^>]*>.*?<\/c>/,
+            `<c r="D7"><f>ROUND(B5*C5*(1-D5),2)</f>${cacheXml}</c>`,
+          ),
+        );
+        const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+        const original = Buffer.from(buffer);
+        const html = await excelSheetToHtml(buffer);
+        expect(html).toContain('=ROUND(B5*C5*(1-D5),2) (nicht berechnet)');
+        expect(html).not.toContain('=1-1');
+        expect(html).toContain('<td>0</td>');
+        expect(html).not.toContain('538.92');
+        expect(buffer.equals(original)).toBe(true);
+      },
+    );
+
+    test('shows formulas without cached results as uncalculated and preserves cached zero', async () => {
+      const workbook = XLSX.utils.book_new();
+      const sheet = XLSX.utils.aoa_to_sheet([
+        ['Menge', 'Einzelpreis', 'Rabatt', 'Gesamt'],
+        [12, 49.9, 0.1],
+      ]);
+      sheet.D2 = { t: 'n', f: 'A2*B2*(1-C2)' };
+      sheet.E2 = { t: 'n', f: '1-1', v: 0 };
+      sheet['!ref'] = 'A1:E2';
+      XLSX.utils.book_append_sheet(workbook, sheet, 'Rechnung');
+      const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+      const original = Buffer.from(buffer);
+      const html = await excelSheetToHtml(buffer);
+      expect(html).toContain('=A2*B2*(1-C2) (nicht berechnet)');
+      expect(html).not.toContain('=1-1');
+      expect(html).toContain('<td>0</td>');
+      expect(buffer.equals(original)).toBe(true);
+    });
+
     test('renders all sheets of a multi-sheet workbook into the HTML document', async () => {
       const html = await excelSheetToHtml(readFixture('sample.xlsx'));
       expect(html).toMatch(/^<!DOCTYPE html>/);

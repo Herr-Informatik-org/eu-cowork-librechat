@@ -1,0 +1,46 @@
+.chat-premium-composer .chat-composer-surface {
+  box-shadow: 0 2px 8px rgb(0 0 0 / 3%);
+  transition-property: border-color, box-shadow;
+  transition-duration: 160ms;
+  transition-timing-function: ease-out;
+}
+.chat-premium-composer .chat-composer-surface:focus-within {
+  border-color: var(--border-heavy);
+  box-shadow: 0 3px 14px rgb(0 0 0 / 5%);
+}
+.chat-premium-composer textarea {
+  font-size: 1rem;
+  line-height: 1.65;
+  letter-spacing: -0.01em;
+}
+.chat-premium-composer .chat-composer-tools button[role='checkbox'] {
+  border-color: transparent;
+  border-radius: 0.625rem;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+.chat-premium-composer .chat-composer-tools button[role='checkbox'][aria-checked='true'] {
+  border-color: var(--border-medium);
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+}
+.chat-premium-composer .chat-composer-tools button[role='checkbox']:focus-visible {
+  outline: 2px solid var(--text-secondary);
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .chat-premium-composer .chat-composer-tools button[role='checkbox']:hover {
+    background: var(--surface-hover);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-premium-composer,
+  .chat-premium-composer .chat-composer-surface,
+  .chat-premium-composer .chat-composer-tools button[role='checkbox'] {
+    transition: none;
+  }
+}

@@ -30,6 +30,7 @@ import { TAuthConfig, TUserContext, TAuthContext, TResError } from '~/common';
 import { SESSION_KEY, isSafeRedirect, getPostLoginRedirect } from '~/utils';
 import useTimeout from './useTimeout';
 import store from '~/store';
+import { setConversationActivityUser } from '~/store/activity';
 
 const AuthContext = (import.meta.hot?.data?.__AuthContext ??
   createContext<TAuthContext | undefined>(undefined)) as React.Context<TAuthContext | undefined>;
@@ -71,6 +72,7 @@ const AuthContextProvider = ({
     () =>
       debounce((userContext: TUserContext) => {
         const { token, isAuthenticated, user, redirect } = userContext;
+        setConversationActivityUser(isAuthenticated ? user?.id : null);
         setUser(user);
         setToken(token);
         setTokenHeader(token);
@@ -126,6 +128,7 @@ const AuthContextProvider = ({
   });
   const logoutUser = useLogoutUserMutation({
     onSuccess: (data) => {
+      setConversationActivityUser(null);
       if (data.redirect) {
         /** data.redirect is the IdP's end_session_endpoint URL — an absolute URL generated
          * server-side from trusted IdP metadata (not user input), so isSafeRedirect is bypassed.
@@ -144,6 +147,7 @@ const AuthContextProvider = ({
       });
     },
     onError: (error) => {
+      setConversationActivityUser(null);
       doSetError((error as Error).message);
       setUserContext({
         token: undefined,
@@ -202,6 +206,7 @@ const AuthContextProvider = ({
           return;
         }
         console.log('Token is not present. User is not authenticated.');
+        setConversationActivityUser(null);
         if (authConfig?.test === true) {
           return;
         }
@@ -212,6 +217,7 @@ const AuthContextProvider = ({
           return;
         }
         console.log('refreshToken mutation error:', error);
+        setConversationActivityUser(null);
         if (authConfig?.test === true) {
           return;
         }
@@ -226,8 +232,10 @@ const AuthContextProvider = ({
       return;
     }
     if (userQuery.data) {
+      if (isAuthenticated) setConversationActivityUser(userQuery.data.id);
       setUser(userQuery.data);
     } else if (userQuery.isError) {
+      setConversationActivityUser(null);
       doSetError((userQuery.error as Error).message);
       navigate(buildLoginRedirectUrl(), { replace: true });
     }

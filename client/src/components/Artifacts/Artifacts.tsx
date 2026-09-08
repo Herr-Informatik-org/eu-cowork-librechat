@@ -208,7 +208,7 @@ export default function Artifacts() {
 
   return (
     <Tabs.Root value={displayedTab} onValueChange={setActiveTab} asChild>
-      <div className="flex h-full w-full flex-col">
+      <div className="flex h-full w-full min-w-0 flex-col">
         {/* Mobile backdrop with dynamic blur */}
         {isMobile && (
           <div
@@ -230,7 +230,7 @@ export default function Artifacts() {
         )}
         <div
           className={cn(
-            'flex w-full flex-col bg-surface-primary text-xl text-text-primary',
+            'flex w-full min-w-0 flex-col bg-surface-primary text-xl text-text-primary',
             isMobile
               ? cn(
                   'fixed inset-x-0 bottom-0 z-[100] rounded-t-[20px] shadow-[0_-10px_60px_rgba(0,0,0,0.35)]',
@@ -267,33 +267,39 @@ export default function Artifacts() {
               isMobile ? 'justify-center' : 'overflow-hidden',
             )}
           >
-            {!isMobile && (
+            {(!isMobile || isPreviewOnly) && (
               <div
                 className={cn(
-                  'flex items-center transition-all duration-500',
+                  'flex min-w-0 flex-1 items-center transition-all duration-500',
                   isVisible && !isClosing
                     ? 'translate-x-0 opacity-100'
                     : '-translate-x-2 opacity-0',
                 )}
               >
-                <Radio
-                  options={tabOptions}
-                  value={displayedTab}
-                  onChange={setActiveTab}
-                  disabled={isMutating && displayedTab !== 'code'}
-                  buttonClassName="h-9 px-3 gap-1.5"
-                />
+                {isPreviewOnly ? (
+                  <span className="truncate px-2 text-sm font-medium" title={tabOptions[0]?.label}>
+                    {tabOptions[0]?.label}
+                  </span>
+                ) : (
+                  <Radio
+                    options={tabOptions}
+                    value={displayedTab}
+                    onChange={setActiveTab}
+                    disabled={isMutating && displayedTab !== 'code'}
+                    buttonClassName="h-9 px-3 gap-1.5"
+                  />
+                )}
               </div>
             )}
 
             <div
               className={cn(
-                'flex items-center gap-2 transition-all duration-500',
+                'flex shrink-0 items-center gap-2 transition-all duration-500',
                 isMobile ? 'min-w-max' : '',
                 isVisible && !isClosing ? 'translate-x-0 opacity-100' : 'translate-x-2 opacity-0',
               )}
             >
-              {displayedTab === 'preview' && (
+              {displayedTab === 'preview' && !isPreviewOnly && (
                 <Button
                   size="icon"
                   variant="ghost"
@@ -328,7 +334,9 @@ export default function Artifacts() {
                   }}
                 />
               )}
-              <CopyButton isCopied={isCopied} iconOnly onClick={handleCopyArtifact} />
+              {!isPreviewOnly && (
+                <CopyButton isCopied={isCopied} iconOnly onClick={handleCopyArtifact} />
+              )}
               <DownloadArtifact artifact={currentArtifact} />
               <Button
                 size="icon"

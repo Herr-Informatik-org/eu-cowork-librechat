@@ -2,6 +2,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { buildOfficePdfReference } from './officePdf';
 
 /**
  * LibreOffice-backed office preview pipeline.
@@ -538,6 +539,9 @@ export async function tryLibreOfficePreview(
     return null;
   }
   try {
+    if (process.env.OFFICE_PREVIEW_RENDERER_URL) {
+      return await buildOfficePdfReference(buffer, extensionHint);
+    }
     const pdf = await convertOfficeToPdf(buffer, extensionHint);
     const base64 = pdf.toString('base64');
     const html = buildPdfEmbedDocument(base64);

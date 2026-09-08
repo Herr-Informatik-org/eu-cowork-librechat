@@ -8,10 +8,11 @@ const PANEL_IDS_SPLIT = ['messages-view', 'artifacts-panel'];
 
 interface SidePanelProps {
   artifacts?: React.ReactNode;
+  panelDefaultSize?: string;
   children: React.ReactNode;
 }
 
-const SidePanelGroup = memo(({ artifacts, children }: SidePanelProps) => {
+const SidePanelGroup = memo(({ artifacts, children, panelDefaultSize = '50' }: SidePanelProps) => {
   const [shouldRenderArtifacts, setShouldRenderArtifacts] = useState(artifacts != null);
   const isSmallScreen = useMediaQuery('(max-width: 767px)');
 
@@ -31,7 +32,11 @@ const SidePanelGroup = memo(({ artifacts, children }: SidePanelProps) => {
         onLayoutChanged={onLayoutChanged}
         className="relative flex-1 bg-presentation"
       >
-        <ResizablePanel defaultSize="50" minSize={minSizeMain} id="messages-view">
+        <ResizablePanel
+          defaultSize={artifacts != null ? `${100 - Number(panelDefaultSize)}` : '100'}
+          minSize={minSizeMain}
+          id="messages-view"
+        >
           {children}
         </ResizablePanel>
 
@@ -41,6 +46,7 @@ const SidePanelGroup = memo(({ artifacts, children }: SidePanelProps) => {
             minSizeMain={minSizeMain}
             shouldRender={shouldRenderArtifacts}
             onRenderChange={setShouldRenderArtifacts}
+            defaultSize={panelDefaultSize}
           />
         )}
       </ResizablePanelGroup>

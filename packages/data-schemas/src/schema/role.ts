@@ -11,12 +11,14 @@ const rolePermissionsSchema = new Schema(
       [Permissions.USE]: { type: Boolean },
     },
     [PermissionTypes.PROMPTS]: {
+      [Permissions.VIEW]: { type: Boolean },
       [Permissions.USE]: { type: Boolean },
       [Permissions.CREATE]: { type: Boolean },
       [Permissions.SHARE]: { type: Boolean },
       [Permissions.SHARE_PUBLIC]: { type: Boolean },
     },
     [PermissionTypes.MEMORIES]: {
+      [Permissions.VIEW]: { type: Boolean },
       [Permissions.USE]: { type: Boolean },
       [Permissions.CREATE]: { type: Boolean },
       [Permissions.UPDATE]: { type: Boolean },
@@ -24,6 +26,7 @@ const rolePermissionsSchema = new Schema(
       [Permissions.OPT_OUT]: { type: Boolean },
     },
     [PermissionTypes.AGENTS]: {
+      [Permissions.VIEW]: { type: Boolean },
       [Permissions.USE]: { type: Boolean },
       [Permissions.CREATE]: { type: Boolean },
       [Permissions.SHARE]: { type: Boolean },
@@ -56,6 +59,7 @@ const rolePermissionsSchema = new Schema(
       [Permissions.USE]: { type: Boolean },
     },
     [PermissionTypes.MCP_SERVERS]: {
+      [Permissions.VIEW]: { type: Boolean },
       [Permissions.USE]: { type: Boolean },
       [Permissions.CREATE]: { type: Boolean },
       [Permissions.SHARE]: { type: Boolean },
@@ -69,6 +73,7 @@ const rolePermissionsSchema = new Schema(
       [Permissions.SHARE_PUBLIC]: { type: Boolean },
     },
     [PermissionTypes.SKILLS]: {
+      [Permissions.VIEW]: { type: Boolean },
       [Permissions.USE]: { type: Boolean },
       [Permissions.CREATE]: { type: Boolean },
       [Permissions.SHARE]: { type: Boolean },

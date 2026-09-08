@@ -1,5 +1,6 @@
 import { WebSearchToolDefinition, CalculatorToolDefinition } from '@librechat/agents';
 import type { ExtendedJsonSchema } from './schema';
+import { withNullableSearchDate } from './webSearch';
 import { AskUserQuestionToolDefinition } from '~/agents/hitl/askUserQuestionTool';
 import { geminiToolkit } from '~/tools/toolkits/gemini';
 import { oaiToolkit } from '~/tools/toolkits/oai';
@@ -445,7 +446,7 @@ const agentToolDefinitions: Record<string, ToolRegistryDefinition> = {
   [WebSearchToolDefinition.name]: {
     name: WebSearchToolDefinition.name,
     description: WebSearchToolDefinition.description,
-    schema: WebSearchToolDefinition.schema as unknown as ExtendedJsonSchema,
+    schema: withNullableSearchDate(WebSearchToolDefinition.schema as unknown as ExtendedJsonSchema),
     toolType: 'builtin',
   },
   [AskUserQuestionToolDefinition.name]: {

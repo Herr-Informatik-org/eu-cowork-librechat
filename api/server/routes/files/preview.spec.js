@@ -19,6 +19,11 @@ jest.mock('@librechat/api', () => ({
   refreshS3FileUrls: jest.fn(),
   resolveUploadErrorMessage: jest.fn(),
   verifyAgentUploadPermission: jest.fn(),
+  parseOfficePdfReference: jest.fn(),
+  readOfficePdf: jest.fn(),
+  prepareOfficePdf: jest.fn(),
+  officePdfKey: jest.fn(),
+  OFFICE_PDF_MAX_BYTES: 10 * 1024 * 1024,
 }));
 
 const mockFindFileById = jest.fn();
@@ -73,6 +78,8 @@ jest.mock('~/cache', () => ({
 const express = require('express');
 const request = require('supertest');
 const filesRouter = require('./files');
+const officePdf = require('@librechat/api');
+const { getStrategyFunctions } = require('~/server/services/Files/strategies');
 
 /**
  * Mount the router with a per-request user injector so we can simulate
@@ -91,6 +98,163 @@ function buildApp({ user = { id: 'user-123', role: 'user' } } = {}) {
 }
 
 const OWNER_USER_ID = 'user-123';
+
+describe('GET /files/:file_id/preview/pdf', () => {
+  const key = 'a'.repeat(64);
+  const file = {
+    file_id: 'office-file',
+    user: OWNER_USER_ID,
+    source: 'local',
+    filepath: '/uploads/example.xlsx',
+    filename: 'example.xlsx',
+    textFormat: 'html',
+    text: 'reference',
+    status: 'ready',
+  };
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetFiles.mockResolvedValue([file]);
+    mockFindFileById.mockResolvedValue(file);
+    officePdf.parseOfficePdfReference.mockImplementation((text) =>
+      text === 'reference' ? { key, format: 'xlsx' } : null,
+    );
+    officePdf.readOfficePdf.mockResolvedValue(Buffer.from('%PDF-1.7\nfixture'));
+    officePdf.officePdfKey.mockReturnValue(key);
+    const { Readable } = require('stream');
+    getStrategyFunctions.mockReturnValue({
+      getDownloadStream: jest
+        .fn()
+        .mockImplementation(() => Promise.resolve(Readable.from([Buffer.from('original')]))),
+    });
+  });
+  it('serves only the authorized file PDF with no shared cache', async () => {
+    const res = await request(buildApp()).get('/files/office-file/preview/pdf');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/application\/pdf/);
+    expect(res.headers['cache-control']).toBe('private, no-store');
+    expect(officePdf.readOfficePdf).toHaveBeenCalledWith(key);
+  });
+  it('renders an authorized Office upload lazily without overwriting its extracted RAG text', async () => {
+    const upload = { ...file, text: 'Original extracted document text', textFormat: 'text' };
+    mockFindFileById.mockResolvedValue(upload);
+    officePdf.readOfficePdf.mockResolvedValueOnce(null);
+    const response = await request(buildApp()).get('/files/office-file/preview/pdf');
+    expect(response.status).toBe(200);
+    expect(officePdf.prepareOfficePdf).toHaveBeenCalledWith(Buffer.from('original'), 'xlsx');
+    expect(mockUpdateFile).not.toHaveBeenCalled();
+  });
+  it('denies lazy previews of another user upload through the same fileAccess boundary', async () => {
+    mockGetFiles.mockResolvedValue([
+      { ...file, user: 'other-user', text: undefined, textFormat: undefined },
+    ]);
+    mockGetAgents.mockResolvedValue([]);
+    const response = await request(buildApp()).get('/files/office-file/preview/pdf');
+    expect(response.status).toBe(403);
+    expect(officePdf.prepareOfficePdf).not.toHaveBeenCalled();
+    expect(getStrategyFunctions).not.toHaveBeenCalled();
+  });
+  it('rejects a plaintext file containing a copied PDF descriptor before cache access', async () => {
+    mockFindFileById.mockResolvedValue({ ...file, filename: 'copied.txt', textFormat: 'text' });
+    expect((await request(buildApp()).get('/files/office-file/preview/pdf')).status).toBe(404);
+    expect(officePdf.readOfficePdf).not.toHaveBeenCalled();
+  });
+  it('rejects an own Office file containing a foreign hash even when that PDF is cached', async () => {
+    officePdf.officePdfKey.mockReturnValue('b'.repeat(64));
+    expect((await request(buildApp()).get('/files/office-file/preview/pdf')).status).toBe(409);
+    expect(officePdf.readOfficePdf).not.toHaveBeenCalled();
+    expect(officePdf.prepareOfficePdf).not.toHaveBeenCalled();
+  });
+  it('rejects additional requests before original I/O when both slots are occupied', async () => {
+    const { Readable } = require('stream');
+    let releaseReads;
+    const blocked = new Promise((resolve) => {
+      releaseReads = resolve;
+    });
+    let markStarted;
+    const started = new Promise((resolve) => {
+      markStarted = resolve;
+    });
+    let reads = 0;
+    const getDownloadStream = jest.fn(async () => {
+      if (++reads === 2) {
+        markStarted();
+      }
+      await blocked;
+      return Readable.from([Buffer.from('original')]);
+    });
+    getStrategyFunctions.mockReturnValue({ getDownloadStream });
+    const app = buildApp();
+    const first = request(app)
+      .get('/files/office-file/preview/pdf')
+      .then((response) => response);
+    const second = request(app)
+      .get('/files/office-file/preview/pdf')
+      .then((response) => response);
+    await started;
+    try {
+      const third = await request(app).get('/files/office-file/preview/pdf');
+      expect(third.status).toBe(503);
+      expect(third.headers['retry-after']).toBe('2');
+      expect(getDownloadStream).toHaveBeenCalledTimes(2);
+      expect(officePdf.readOfficePdf).not.toHaveBeenCalled();
+    } finally {
+      releaseReads();
+      const responses = await Promise.all([first, second]);
+      expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    }
+  });
+  it('rejects oversized original streams before hash calculation or cache access', async () => {
+    const { Readable } = require('stream');
+    getStrategyFunctions.mockReturnValue({
+      getDownloadStream: jest
+        .fn()
+        .mockResolvedValue(Readable.from([Buffer.alloc(10 * 1024 * 1024 + 1)])),
+    });
+    const response = await request(buildApp()).get('/files/office-file/preview/pdf');
+    expect(response.status).toBe(413);
+    expect(officePdf.readOfficePdf).not.toHaveBeenCalled();
+  });
+  it('denies another user before reading the cache', async () => {
+    mockGetFiles.mockResolvedValue([{ ...file, user: 'another-user' }]);
+    mockGetAgents.mockResolvedValue([]);
+    const res = await request(buildApp()).get('/files/office-file/preview/pdf');
+    expect(res.status).toBe(403);
+    expect(officePdf.readOfficePdf).not.toHaveBeenCalled();
+  });
+  it('rejects a deleted file before reading the cache', async () => {
+    mockGetFiles.mockResolvedValue([]);
+    const res = await request(buildApp()).get('/files/office-file/preview/pdf');
+    expect(res.status).toBe(404);
+    expect(officePdf.readOfficePdf).not.toHaveBeenCalled();
+  });
+  it('rejects a revision changed during rendering', async () => {
+    mockFindFileById
+      .mockResolvedValueOnce(file)
+      .mockResolvedValueOnce({ ...file, text: 'new revision' });
+    expect((await request(buildApp()).get('/files/office-file/preview/pdf')).status).toBe(409);
+  });
+  it('rebuilds a cache miss from authorized original storage without updating the original', async () => {
+    const { Readable } = require('stream');
+    const getDownloadStream = jest.fn().mockResolvedValue(Readable.from([Buffer.from('original')]));
+    getStrategyFunctions.mockReturnValue({ getDownloadStream });
+    officePdf.readOfficePdf.mockResolvedValueOnce(null);
+    officePdf.officePdfKey.mockReturnValue(key);
+    const res = await request(buildApp()).get('/files/office-file/preview/pdf');
+    expect(res.status).toBe(200);
+    expect(getDownloadStream).toHaveBeenCalledWith(expect.anything(), file.filepath);
+    expect(officePdf.prepareOfficePdf).toHaveBeenCalledWith(Buffer.from('original'), 'xlsx');
+    expect(mockUpdateFile).not.toHaveBeenCalled();
+  });
+  it('rejects a changed original rather than rendering stale metadata', async () => {
+    const { Readable } = require('stream');
+    getStrategyFunctions.mockReturnValue({
+      getDownloadStream: jest.fn().mockResolvedValue(Readable.from([Buffer.from('changed')])),
+    });
+    officePdf.officePdfKey.mockReturnValue('b'.repeat(64));
+    expect((await request(buildApp()).get('/files/office-file/preview/pdf')).status).toBe(409);
+    expect(officePdf.prepareOfficePdf).not.toHaveBeenCalled();
+  });
+});
 
 describe('GET /files/:file_id/preview', () => {
   beforeEach(() => {

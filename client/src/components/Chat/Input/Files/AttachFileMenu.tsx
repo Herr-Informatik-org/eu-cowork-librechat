@@ -45,6 +45,7 @@ import { useGetStartupConfig } from '~/data-provider';
 import { ephemeralAgentByConvoId } from '~/store';
 import { MenuItemProps } from '~/common';
 import { cn } from '~/utils';
+import UploadMenuItem from './UploadMenuItem';
 
 type FileUploadType =
   | 'image'
@@ -196,6 +197,7 @@ const AttachFileMenu = ({
       ) {
         items.push({
           label: localize('com_ui_upload_provider'),
+          render: <UploadMenuItem description={localize('com_ui_upload_provider_description')} />,
           onClick: () => {
             setToolResource(undefined);
             let fileType: Exclude<FileUploadType, 'image' | 'document'> = 'image_document';
@@ -214,6 +216,7 @@ const AttachFileMenu = ({
       } else {
         items.push({
           label: localize('com_ui_upload_image_input'),
+          render: <UploadMenuItem description={localize('com_ui_upload_image_description')} />,
           onClick: () => {
             setToolResource(undefined);
             onAction('image');
@@ -225,6 +228,7 @@ const AttachFileMenu = ({
       if (capabilities.contextEnabled) {
         items.push({
           label: localize('com_ui_upload_ocr_text'),
+          render: <UploadMenuItem description={localize('com_ui_upload_text_description')} />,
           onClick: () => {
             setToolResource(EToolResources.context);
             onAction();
@@ -236,6 +240,7 @@ const AttachFileMenu = ({
       if (capabilities.fileSearchEnabled && fileSearchAllowedByAgent) {
         items.push({
           label: localize('com_ui_upload_file_search'),
+          render: <UploadMenuItem description={localize('com_ui_upload_search_description')} />,
           onClick: () => {
             setToolResource(EToolResources.file_search);
             setEphemeralAgent((prev) => ({
@@ -251,6 +256,7 @@ const AttachFileMenu = ({
       if (capabilities.codeEnabled && codeAllowedByAgent) {
         items.push({
           label: localize('com_ui_upload_code_environment'),
+          render: <UploadMenuItem description={localize('com_ui_upload_code_description')} />,
           onClick: () => {
             setToolResource(EToolResources.execute_code);
             setEphemeralAgent((prev) => ({

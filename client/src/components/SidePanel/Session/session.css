@@ -1,0 +1,10 @@
+.session-workspace { isolation: isolate; }
+.session-empty { border: 1px dashed var(--border-light); border-radius: 0.75rem; }
+.session-file-row { padding: 0.875rem 0.5rem; border-bottom: 1px solid var(--border-light); }
+.session-file-icon { display: flex; width: 2rem; height: 2.25rem; align-items: center; justify-content: center; border: 1px solid var(--border-light); border-radius: 0.45rem; color: var(--text-secondary); background: var(--surface-secondary); }
+.session-link { display: inline-flex; align-items: center; gap: 0.25rem; border-radius: 0.25rem; color: var(--text-secondary); font-size: 0.6875rem; font-weight: 500; }
+.session-source { display: flex; gap: 0.65rem; padding: 0.625rem 0.5rem; border-radius: 0.5rem; }
+.session-details { border-top: 1px solid var(--border-light); padding: 1rem 0.5rem 0; }
+.session-details summary { cursor: pointer; }
+.session-focus:focus-visible { outline: 2px solid var(--text-secondary); outline-offset: 3px; }
+@media (hover: hover) and (pointer: fine) { .session-source:hover { background: var(--surface-hover); } .session-link:hover { color: var(--text-primary); text-decoration: underline; } }

@@ -10,6 +10,11 @@ const {
   startUploadSseStream,
   resolveUploadErrorMessage,
   verifyAgentUploadPermission,
+  parseOfficePdfReference,
+  readOfficePdf,
+  prepareOfficePdf,
+  officePdfKey,
+  OFFICE_PDF_MAX_BYTES,
 } = require('@librechat/api');
 const {
   Time,
@@ -40,6 +45,7 @@ const { Readable } = require('stream');
 const db = require('~/models');
 
 const router = express.Router();
+let activeOfficePdfRequests = 0;
 const AGENT_TOOL_RESOURCE_KEYS = new Set([
   EToolResources.execute_code,
   EToolResources.file_search,
@@ -396,6 +402,113 @@ const PREVIEW_LAZY_SWEEP_CUTOFF_MS = 2 * 60 * 1000;
  *
  * @route GET /files/:file_id/preview
  */
+router.get('/:file_id/preview/pdf', fileAccess, async (req, res) => {
+  // Admission precedes original reads and cache allocations, including cache hits.
+  if (activeOfficePdfRequests >= 2) {
+    res.setHeader('Retry-After', '2');
+    return res
+      .status(503)
+      .json({ message: 'Dokumentvorschau ist ausgelastet. Bitte erneut versuchen.' });
+  }
+  activeOfficePdfRequests++;
+  let processingDone = false;
+  let responseDone = false;
+  let released = false;
+  let originalStream;
+  const release = () => {
+    if (processingDone && responseDone && !released) {
+      released = true;
+      activeOfficePdfRequests--;
+    }
+  };
+  res.once('finish', () => {
+    responseDone = true;
+    release();
+  });
+  res.once('close', () => {
+    responseDone = true;
+    originalStream?.destroy();
+    release();
+  });
+  try {
+    // The descriptor is read from the authorized record, never from a user path or URL.
+    const file = await db.findFileById(req.params.file_id);
+    const reference = parseOfficePdfReference(file?.text);
+    const extension = /\.(docx|pptx|xlsx|xls|ods)$/i.exec(file?.filename ?? '')?.[1].toLowerCase();
+    if (
+      !extension ||
+      file.status === 'pending' ||
+      (reference && (file.textFormat !== 'html' || extension !== reference.format))
+    ) {
+      return res.status(404).json({ message: 'Keine PDF-Vorschau verfügbar' });
+    }
+    // A descriptor is not an authorization token. Bind every cache hit to the authorized original bytes.
+    if (checkOpenAIStorage(file.source)) {
+      return res.status(404).json({ message: 'Vorschau abgelaufen. Originaldatei herunterladen.' });
+    }
+    const { getDownloadStream } = getStrategyFunctions(file.source);
+    if (!getDownloadStream) {
+      return res.status(404).json({ message: 'Originaldatei ist nicht verfügbar' });
+    }
+    const stream = await getDownloadStream(req, file.storageKey || file.filepath);
+    originalStream = stream;
+    const timer = setTimeout(() => stream.destroy(new Error('Zeitlimit beim Lesen')), 10_000);
+    const chunks = [];
+    let size = 0;
+    try {
+      for await (const chunk of stream) {
+        size += chunk.length;
+        if (size > OFFICE_PDF_MAX_BYTES) {
+          stream.destroy();
+          return res.status(413).json({ message: 'Dokument überschreitet 10 MiB' });
+        }
+        chunks.push(chunk);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    const buffer = Buffer.concat(chunks);
+    const key = officePdfKey(buffer, extension);
+    if (reference && key !== reference.key) {
+      return res.status(409).json({ message: 'Dokument wurde geändert. Vorschau neu öffnen.' });
+    }
+    let pdf = await readOfficePdf(key);
+    if (!pdf) {
+      await prepareOfficePdf(buffer, extension);
+      pdf = await readOfficePdf(key);
+    }
+    if (!pdf) {
+      return res
+        .status(503)
+        .json({ message: 'Dokumentvorschau ist vorübergehend nicht verfügbar' });
+    }
+    // Re-check revision after rendering; an older request must not show a newer file's stale copy.
+    const current = await db.findFileById(req.params.file_id);
+    if (
+      !current ||
+      current.status === 'pending' ||
+      current.previewRevision !== file.previewRevision ||
+      current.filepath !== file.filepath ||
+      current.storageKey !== file.storageKey ||
+      current.filename !== file.filename ||
+      (reference && parseOfficePdfReference(current.text)?.key !== reference.key)
+    ) {
+      return res.status(409).json({ message: 'Dokument wurde geändert. Vorschau neu öffnen.' });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return res.send(pdf);
+  } catch (error) {
+    logger.warn('[/files/:file_id/preview/pdf] Vorschau nicht verfügbar:', error.message);
+    return res.status(503).json({ message: 'Dokumentvorschau ist vorübergehend nicht verfügbar' });
+  } finally {
+    processingDone = true;
+    release();
+  }
+});
+
 router.get('/:file_id/preview', fileAccess, async (req, res) => {
   try {
     const { file_id } = req.params;
