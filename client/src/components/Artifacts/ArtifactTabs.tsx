@@ -11,6 +11,7 @@ import { ArtifactPreview } from './ArtifactPreview';
 import { useShareContext } from '~/Providers';
 import { isPreviewOnlyArtifact } from '~/utils/artifacts';
 import OfficeDocumentPreview from './OfficeDocumentPreview';
+import SpreadsheetPreview from './SpreadsheetPreview';
 
 export default function ArtifactTabs({
   artifact,
@@ -59,7 +60,11 @@ export default function ArtifactTabs({
         tabIndex={-1}
       >
         {isPreviewOnlyArtifact(artifact.type) ? (
-          <OfficeDocumentPreview artifact={artifact} />
+          /\.(xlsx|xls|ods)$/i.test(artifact.title ?? '') && artifact.download?.file_id ? (
+            <SpreadsheetPreview artifact={artifact} />
+          ) : (
+            <OfficeDocumentPreview artifact={artifact} />
+          )
         ) : (
           <ArtifactPreview
             files={files}

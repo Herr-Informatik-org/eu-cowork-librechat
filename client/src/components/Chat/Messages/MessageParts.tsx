@@ -1,3 +1,4 @@
+import UserBubble from '~/components/Chat/Messages/ui/UserBubble';
 import React, { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { useRecoilValue } from 'recoil';
@@ -10,7 +11,6 @@ import {
   getHeaderPrefixForScreenReader,
 } from '~/utils';
 import { useMessageHelpers, useLocalize, useAttachments, useContentMetadata } from '~/hooks';
-import AuthorHeader from '~/components/Chat/Messages/Content/Parts/AuthorHeader';
 import MessageTimestamp from '~/components/Chat/Messages/ui/MessageTimestamp';
 import MessageIcon from '~/components/Chat/Messages/MessageIcon';
 import ContentParts from './Content/ContentParts';
@@ -80,17 +80,6 @@ function MessageParts(props: TMessageProps) {
     ],
   );
 
-  const authorHeader = useMemo(
-    () =>
-      isCreatedByUser === true ? undefined : (
-        <AuthorHeader
-          icon={<MessageIcon iconData={iconData} assistant={assistant} agent={agent} />}
-          label={name}
-        />
-      ),
-    [isCreatedByUser, iconData, assistant, agent, name],
-  );
-
   const { hasParallelContent } = useContentMetadata(message);
 
   if (!message) {
@@ -131,7 +120,7 @@ function MessageParts(props: TMessageProps) {
             )}
           >
             {!hasParallelContent && (
-              <div className="relative flex flex-shrink-0 flex-col items-center">
+              <div className="hidden">
                 <div className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full pt-0.5">
                   <MessageIcon iconData={iconData} assistant={assistant} agent={agent} />
                 </div>
@@ -145,7 +134,7 @@ function MessageParts(props: TMessageProps) {
               )}
             >
               {!hasParallelContent && (
-                <h2 className={cn('select-none font-semibold text-text-primary', fontSize)}>
+                <h2 className={cn('sr-only', fontSize)}>
                   <span className="sr-only">
                     {getHeaderPrefixForScreenReader(message, localize)}
                   </span>
@@ -155,23 +144,24 @@ function MessageParts(props: TMessageProps) {
               )}
               <div className="flex flex-col gap-1">
                 <div className="flex min-h-[20px] max-w-full flex-grow flex-col gap-0">
-                  <ContentParts
-                    edit={edit}
-                    isLast={isLast}
-                    enterEdit={enterEdit}
-                    siblingIdx={siblingIdx}
-                    attachments={attachments}
-                    isSubmitting={isSubmitting}
-                    searchResults={searchResults}
-                    manualSkills={message.manualSkills}
-                    messageId={message.messageId}
-                    authorHeader={authorHeader}
-                    setSiblingIdx={setSiblingIdx}
-                    isCreatedByUser={message.isCreatedByUser}
-                    conversationId={conversation?.conversationId}
-                    isLatestMessage={messageId === latestMessageId}
-                    content={message.content as Array<TMessageContentParts | undefined>}
-                  />
+                  <UserBubble active={!!isCreatedByUser && !edit}>
+                    <ContentParts
+                      edit={edit}
+                      isLast={isLast}
+                      enterEdit={enterEdit}
+                      siblingIdx={siblingIdx}
+                      attachments={attachments}
+                      isSubmitting={isSubmitting}
+                      searchResults={searchResults}
+                      manualSkills={message.manualSkills}
+                      messageId={message.messageId}
+                      setSiblingIdx={setSiblingIdx}
+                      isCreatedByUser={message.isCreatedByUser}
+                      conversationId={conversation?.conversationId}
+                      isLatestMessage={messageId === latestMessageId}
+                      content={message.content as Array<TMessageContentParts | undefined>}
+                    />
+                  </UserBubble>
                 </div>
                 {isLast && isSubmitting ? (
                   <div className="mt-1 h-[31px] bg-transparent" />

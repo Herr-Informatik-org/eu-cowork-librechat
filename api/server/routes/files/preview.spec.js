@@ -127,6 +127,73 @@ describe('GET /files/:file_id/preview/pdf', () => {
         .mockImplementation(() => Promise.resolve(Readable.from([Buffer.from('original')]))),
     });
   });
+
+  describe('workbook and original PDF views', () => {
+    const originalFetch = global.fetch;
+    beforeEach(() => {
+      process.env.OFFICE_PREVIEW_RENDERER_URL = 'http://renderer:8090';
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue({
+          ok: true,
+          body: require('stream').Readable.from([
+            Buffer.from(JSON.stringify({ sheets: [{ name: 'Übersicht' }] })),
+          ]),
+        });
+    });
+    afterEach(() => {
+      global.fetch = originalFetch;
+      delete process.env.OFFICE_PREVIEW_RENDERER_URL;
+    });
+    it('uses only the authorized original and fixed renderer endpoint for workbook data', async () => {
+      const response = await request(buildApp()).get('/files/office-file/preview/workbook');
+      expect(response.status).toBe(200);
+      expect(response.body.sheets[0].name).toBe('Übersicht');
+      expect(response.headers['cache-control']).toBe('private, no-store');
+      expect(global.fetch.mock.calls[0][0].href).toBe('http://renderer:8090/workbook?format=xlsx');
+      expect(global.fetch.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ body: Buffer.from('original'), redirect: 'error' }),
+      );
+      expect(mockUpdateFile).not.toHaveBeenCalled();
+    });
+    it('denies workbook access to another user before renderer I/O', async () => {
+      mockGetFiles.mockResolvedValue([{ ...file, user: 'other-user' }]);
+      expect((await request(buildApp()).get('/files/office-file/preview/workbook')).status).toBe(
+        403,
+      );
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+    it('rejects a workbook changed while rendering', async () => {
+      mockFindFileById
+        .mockResolvedValueOnce(file)
+        .mockResolvedValueOnce({ ...file, previewRevision: 'new' });
+      expect((await request(buildApp()).get('/files/office-file/preview/workbook')).status).toBe(
+        409,
+      );
+    });
+    it('rejects malformed renderer output', async () => {
+      global.fetch.mockResolvedValue({
+        ok: true,
+        body: require('stream').Readable.from([Buffer.from('{"sheets":[]}')]),
+      });
+      expect((await request(buildApp()).get('/files/office-file/preview/workbook')).status).toBe(
+        503,
+      );
+    });
+    it('serves an original PDF without conversion or changing bytes', async () => {
+      const pdf = { ...file, filename: 'test.pdf', text: '' };
+      mockFindFileById.mockResolvedValue(pdf);
+      const bytes = Buffer.from('%PDF-1.7\noriginal');
+      getStrategyFunctions.mockReturnValue({
+        getDownloadStream: async () => require('stream').Readable.from([bytes]),
+      });
+      const response = await request(buildApp()).get('/files/office-file/preview/pdf');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(bytes);
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(officePdf.prepareOfficePdf).not.toHaveBeenCalled();
+    });
+  });
   it('serves only the authorized file PDF with no shared cache', async () => {
     const res = await request(buildApp()).get('/files/office-file/preview/pdf');
     expect(res.status).toBe(200);

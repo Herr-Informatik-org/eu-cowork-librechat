@@ -10,7 +10,7 @@ import {
   getMessageAriaLabel,
 } from '~/utils';
 import { useAttachments, useLocalize, useMessageActions, useContentMetadata } from '~/hooks';
-import AuthorHeader from '~/components/Chat/Messages/Content/Parts/AuthorHeader';
+import UserBubble from '~/components/Chat/Messages/ui/UserBubble';
 import MessageTimestamp from '~/components/Chat/Messages/ui/MessageTimestamp';
 import ContentParts from '~/components/Chat/Messages/Content/ContentParts';
 import PlaceholderRow from '~/components/Chat/Messages/ui/PlaceholderRow';
@@ -132,17 +132,6 @@ const ContentRender = memo(function ContentRender({
     ],
   );
 
-  const authorHeader = useMemo(
-    () =>
-      msg?.isCreatedByUser === true ? undefined : (
-        <AuthorHeader
-          icon={<MessageIcon iconData={iconData} assistant={assistant} agent={agent} />}
-          label={messageLabel ?? ''}
-        />
-      ),
-    [msg?.isCreatedByUser, iconData, assistant, agent, messageLabel],
-  );
-
   const { hasParallelContent } = useContentMetadata(msg);
 
   if (!msg) {
@@ -180,7 +169,7 @@ const ContentRender = memo(function ContentRender({
       )}
     >
       {!hasParallelContent && (
-        <div className="relative flex flex-shrink-0 flex-col items-center">
+        <div className="hidden">
           <div className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full">
             <MessageIcon iconData={iconData} assistant={assistant} agent={agent} />
           </div>
@@ -195,7 +184,7 @@ const ContentRender = memo(function ContentRender({
         )}
       >
         {!hasParallelContent && (
-          <h2 className={cn('select-none font-semibold', fontSize)}>
+          <h2 className={cn('sr-only', fontSize)}>
             <span className="sr-only">{getHeaderPrefixForScreenReader(msg, localize)}</span>
             {messageLabel}
             <MessageTimestamp value={msg.createdAt ?? msg.clientTimestamp} />
@@ -204,24 +193,25 @@ const ContentRender = memo(function ContentRender({
 
         <div className="flex flex-col gap-1">
           <div className="flex min-h-[20px] max-w-full flex-grow flex-col gap-0">
-            <ContentParts
-              edit={edit}
-              isLast={isLast}
-              enterEdit={enterEdit}
-              siblingIdx={siblingIdx}
-              messageId={msg.messageId}
-              attachments={attachments}
-              searchResults={searchResults}
-              manualSkills={msg.manualSkills}
-              authorHeader={authorHeader}
-              setSiblingIdx={setSiblingIdx}
-              isLatestMessage={isLatestMessage}
-              isSubmitting={isSubmitting}
-              isCreatedByUser={msg.isCreatedByUser}
-              createdAt={msg.createdAt ?? msg.clientTimestamp}
-              conversationId={conversation?.conversationId}
-              content={msg.content as Array<TMessageContentParts | undefined>}
-            />
+            <UserBubble active={!!msg.isCreatedByUser && !edit}>
+              <ContentParts
+                edit={edit}
+                isLast={isLast}
+                enterEdit={enterEdit}
+                siblingIdx={siblingIdx}
+                messageId={msg.messageId}
+                attachments={attachments}
+                searchResults={searchResults}
+                manualSkills={msg.manualSkills}
+                setSiblingIdx={setSiblingIdx}
+                isLatestMessage={isLatestMessage}
+                isSubmitting={isSubmitting}
+                isCreatedByUser={msg.isCreatedByUser}
+                createdAt={msg.createdAt ?? msg.clientTimestamp}
+                conversationId={conversation?.conversationId}
+                content={msg.content as Array<TMessageContentParts | undefined>}
+              />
+            </UserBubble>
           </div>
           {hasNoChildren && isSubmitting ? (
             <PlaceholderRow />

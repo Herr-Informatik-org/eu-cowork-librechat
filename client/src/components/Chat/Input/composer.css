@@ -21,7 +21,9 @@
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: 500;
-  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out;
 }
 .chat-premium-composer .chat-composer-tools button[role='checkbox'][aria-checked='true'] {
   border-color: var(--border-medium);
@@ -43,4 +45,21 @@
   .chat-premium-composer .chat-composer-tools button[role='checkbox'] {
     transition: none;
   }
+}
+
+.chat-premium-composer .artifact-composer-control {
+  border: 1px solid var(--border-medium);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-secondary);
+}
+.chat-premium-composer .artifact-composer-control button[role='checkbox'],
+.chat-premium-composer .artifact-options-toggle {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  height: 34px;
+}
+.chat-premium-composer .artifact-options-toggle {
+  border-left: 1px solid var(--border-light);
 }

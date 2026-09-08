@@ -2,6 +2,18 @@
 
 ## Änderungen – 8. September 2026
 
+- XLSX, XLS und ODS öffnen eine helle Tabellenansicht mit auswählbaren Zellen,
+  Formelzeile und Blatt-Tabs. Die Darstellung ist schreibgeschützt und lädt Daten
+  ausschliesslich über die authentifizierte Dateiroute und den lokalen Renderer.
+- PDF-Dateien lassen sich direkt in der Dokumentansicht öffnen. Originaldownload
+  und Dateiberechtigungen bleiben erhalten.
+- Eigene Nachrichten stehen rechts in einer Textblase; lange Inhalte lassen sich
+  auf- und zuklappen. Absender und Modellüberschriften sind nur noch für Screenreader
+  vorhanden. Der Artifacts-Schalter hat einen durchgehenden Rahmen.
+- Auch das Ausblenden des Arbeitsbereichs wartet nun die Ausfahranimation ab.
+  Schnelles Wiederöffnen unterbricht den Vorgang und behält die ausgewählte Datei.
+
+
 - Der rechte Arbeitsbereich hat drei Zustände: ausgeblendet, kompakte Kontextkachel
   und Dokument. Der Toggle behält die ausgewählte Datei beim Zuklappen; X schliesst
   sie zurück zur Kachel. Eine grosse reine Kontextliste entfällt, auch mobil.

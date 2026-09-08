@@ -10,7 +10,7 @@ import Artifacts from '~/components/Artifacts/Artifacts';
 import { SidePanelGroup } from '~/components/SidePanel';
 import { useSetFilesToDelete } from '~/hooks';
 import store from '~/store';
-import { sessionContextHidden } from '~/components/SidePanel/Session/state';
+import { sessionContextHidden, useSessionExit } from '~/components/SidePanel/Session/state';
 
 export default function Presentation({ children }: { children: React.ReactNode }) {
   const setContextHidden = useSetRecoilState(sessionContextHidden);
@@ -26,6 +26,7 @@ export default function Presentation({ children }: { children: React.ReactNode }
   const currentArtifactId = useRecoilValue(store.currentArtifactId);
 
   useResetArtifactsOnConversationChange();
+  useSessionExit();
   useEffect(() => {
     if (artifactsVisibility && currentArtifactId) setContextHidden(false);
   }, [artifactsVisibility, currentArtifactId, setContextHidden]);

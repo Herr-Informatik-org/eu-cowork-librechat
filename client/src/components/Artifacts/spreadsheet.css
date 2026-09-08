@@ -1,0 +1,111 @@
+.spreadsheet-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #fff;
+  color: #202020;
+  font-size: 13px;
+}
+.spreadsheet-formula {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  border-bottom: 1px solid #d8dce1;
+  padding: 0 12px;
+  background: #fafafa;
+}
+.spreadsheet-formula > span:first-child {
+  min-width: 48px;
+  font-variant-numeric: tabular-nums;
+}
+.spreadsheet-formula input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  color: #202020;
+  outline: none;
+}
+.spreadsheet-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.spreadsheet-scroll table {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
+}
+.spreadsheet-scroll th {
+  position: sticky;
+  background: #f3f4f6;
+  font-weight: 400;
+  text-align: center;
+  color: #515764;
+}
+.spreadsheet-scroll thead th {
+  top: 0;
+  z-index: 3;
+  height: 25px;
+}
+.spreadsheet-scroll tbody th {
+  left: 0;
+  z-index: 2;
+}
+.spreadsheet-scroll td,
+.spreadsheet-scroll th {
+  border-right: 1px solid #e4e7eb;
+  border-bottom: 1px solid #e4e7eb;
+}
+.spreadsheet-scroll td {
+  padding: 3px 6px;
+  overflow: hidden;
+  max-width: 600px;
+  cursor: cell;
+  vertical-align: middle;
+}
+.spreadsheet-scroll td[aria-selected='true'] {
+  outline: 2px solid #397ae9;
+  outline-offset: -2px;
+}
+.spreadsheet-scroll th.selected {
+  background: #dce8fc;
+  color: #174f9b;
+}
+.spreadsheet-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border-top: 1px solid #d8dce1;
+  background: #f7f8fa;
+}
+.spreadsheet-tabs button {
+  padding: 5px 12px;
+  border-radius: 7px;
+  white-space: nowrap;
+}
+.spreadsheet-tabs button[aria-selected='true'] {
+  background: #fff;
+  box-shadow: 0 1px 3px #0002;
+  color: #175a42;
+  font-weight: 600;
+}
+.spreadsheet-tabs button:focus-visible {
+  outline: 2px solid #397ae9;
+}
+.spreadsheet-status {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 10px;
+  color: #68707a;
+  font-size: 11px;
+  border-top: 1px solid #eceef1;
+}
+.spreadsheet-status button {
+  padding: 0 6px;
+}

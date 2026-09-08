@@ -1,4 +1,12 @@
 {
+  "com_ui_pdf_document_view": "PDF-Dokument",
+  "com_ui_sheet_loading": "Tabellenansicht wird geladen…",
+  "com_ui_sheet_unavailable": "Tabellenansicht nicht verfügbar.",
+  "com_ui_sheet_value": "Zellwert oder Formel",
+  "com_ui_sheet_tabs": "Tabellenblätter",
+  "com_ui_sheet_readonly": "Leseansicht · Änderungen im Chat beauftragen",
+  "com_ui_sheet_limited": "Begrenzter Ausschnitt. Die Originaldatei enthält alle Daten.",
+
   "com_ui_upload_provider_description": "Für Bilder und unterstützte Dokumente. Übermittelt die Datei an den gewählten KI-Anbieter.",
   "com_ui_upload_image_description": "Ein Bild an den gewählten KI-Anbieter senden, um Fragen dazu zu stellen.",
   "com_ui_upload_text_description": "Text auslesen und dem Gespräch hinzufügen. Das ursprüngliche Layout wird nicht übernommen.",

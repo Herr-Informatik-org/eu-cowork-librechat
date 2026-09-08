@@ -9,12 +9,12 @@ import store from '~/store';
 
 /** Register only a reference. The private PDF route reads the authorized original lazily. */
 export function createOfficeFileArtifact(file: Partial<TFile>): Artifact | null {
-  const extension = /\.(docx|pptx|xlsx|xls|ods)$/i.exec(file.filename ?? '')?.[1].toLowerCase();
+  const extension = /\.(docx|pptx|xlsx|xls|ods|pdf)$/i.exec(file.filename ?? '')?.[1].toLowerCase();
   if (!file.file_id || !extension) {
     return null;
   }
   let type: string = TOOL_ARTIFACT_TYPES.SPREADSHEET;
-  if (extension === 'docx') {
+  if (extension === 'docx' || extension === 'pdf') {
     type = TOOL_ARTIFACT_TYPES.DOCX;
   } else if (extension === 'pptx') {
     type = TOOL_ARTIFACT_TYPES.PRESENTATION;

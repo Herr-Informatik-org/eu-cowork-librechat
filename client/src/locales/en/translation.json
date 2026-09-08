@@ -1,4 +1,12 @@
 {
+  "com_ui_pdf_document_view": "PDF document",
+  "com_ui_sheet_loading": "Loading workbook…",
+  "com_ui_sheet_unavailable": "Workbook view unavailable.",
+  "com_ui_sheet_value": "Cell value or formula",
+  "com_ui_sheet_tabs": "Worksheets",
+  "com_ui_sheet_readonly": "Read-only · Request changes in chat",
+  "com_ui_sheet_limited": "Limited preview. The original file contains all data.",
+
   "com_ui_upload_provider_description": "For images and supported documents. Sends the file to the selected AI provider.",
   "com_ui_upload_image_description": "Send an image to the selected AI provider to ask questions about it.",
   "com_ui_upload_text_description": "Extract text and add it to the conversation. The original layout is not preserved.",

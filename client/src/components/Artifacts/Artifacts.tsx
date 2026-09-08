@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import copy from 'copy-to-clipboard';
 import * as Tabs from '@radix-ui/react-tabs';
 import { Code, Play, RefreshCw, X } from 'lucide-react';
-import { useSetRecoilState, useResetRecoilState } from 'recoil';
+import { useRecoilState } from 'recoil';
 import { Button, Spinner, useMediaQuery, Radio } from '@librechat/client';
 import type { SandpackPreviewRef } from '@codesandbox/sandpack-react';
 import CopyButton from '~/components/Messages/Content/CopyButton';
@@ -14,7 +14,7 @@ import { isCodeOnlyArtifact, isPreviewOnlyArtifact } from '~/utils/artifacts';
 import { displayFilename } from '~/components/Chat/Messages/Content/Parts/attachmentTypes';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
-import store from '~/store';
+import { sessionClosing } from '~/components/SidePanel/Session/state';
 
 const MAX_BLUR_AMOUNT = 32;
 const MAX_BACKDROP_OPACITY = 0.3;
@@ -26,7 +26,8 @@ export default function Artifacts() {
   const isMobile = useMediaQuery('(max-width: 868px)');
   const previewRef = useRef<SandpackPreviewRef>();
   const [isVisible, setIsVisible] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
+  const [closing, setClosing] = useRecoilState(sessionClosing);
+  const isClosing = closing != null;
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [height, setHeight] = useState(90);
@@ -35,8 +36,6 @@ export default function Artifacts() {
   const [isCopied, setIsCopied] = useState(false);
   const dragStartY = useRef(0);
   const dragStartHeight = useRef(90);
-  const setArtifactsVisible = useSetRecoilState(store.artifactsVisibility);
-  const resetCurrentArtifactId = useResetRecoilState(store.currentArtifactId);
 
   const allTabOptions = useMemo(
     () => [
@@ -178,21 +177,7 @@ export default function Artifacts() {
     setTimeout(() => setIsRefreshing(false), 750);
   };
 
-  const closeArtifacts = () => {
-    if (isMobile) {
-      setIsClosing(true);
-      setIsVisible(false);
-      setTimeout(() => {
-        resetCurrentArtifactId();
-        setArtifactsVisible(false);
-        setIsClosing(false);
-        setHeight(90);
-      }, 250);
-    } else {
-      resetCurrentArtifactId();
-      setArtifactsVisible(false);
-    }
-  };
+  const closeArtifacts = () => setClosing('close');
 
   const backdropOpacity =
     blurAmount > 0
@@ -229,8 +214,8 @@ export default function Artifacts() {
                   'fixed inset-x-0 bottom-0 z-[100] rounded-t-[20px] shadow-[0_-10px_60px_rgba(0,0,0,0.35)]',
                   isVisible && !isClosing
                     ? 'translate-y-0 opacity-100'
-                    : 'duration-250 translate-y-full opacity-0 transition-all',
-                  isDragging ? '' : 'transition-all duration-300',
+                    : 'translate-y-full opacity-0',
+                  isDragging ? '!transition-none' : '',
                 )
               : cn(
                   'h-full',

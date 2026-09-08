@@ -1,3 +1,4 @@
+import UserBubble from '~/components/Chat/Messages/ui/UserBubble';
 import React, { useCallback, useMemo, memo } from 'react';
 import { useAtomValue } from 'jotai';
 import { useRecoilValue } from 'recoil';
@@ -177,7 +178,7 @@ const MessageRender = memo(function MessageRender({
       )}
     >
       {!hasParallelContent && (
-        <div className="relative flex flex-shrink-0 flex-col items-center">
+        <div className="hidden">
           <div className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full">
             <MessageIcon iconData={iconData} assistant={assistant} agent={agent} />
           </div>
@@ -192,7 +193,7 @@ const MessageRender = memo(function MessageRender({
         )}
       >
         {!hasParallelContent && (
-          <h2 className={cn('select-none font-semibold', fontSize)}>
+          <h2 className={cn('sr-only', fontSize)}>
             <span className="sr-only">{getHeaderPrefixForScreenReader(msg, localize)}</span>
             {messageLabel}
             <MessageTimestamp value={msg.createdAt ?? msg.clientTimestamp} />
@@ -201,22 +202,24 @@ const MessageRender = memo(function MessageRender({
 
         <div className="flex flex-col gap-1">
           <div className="flex min-h-[20px] max-w-full flex-grow flex-col gap-0">
-            <MessageContext.Provider value={messageContextValue}>
-              <MessageContent
-                ask={ask}
-                edit={edit}
-                isLast={isLast}
-                text={msg.text || ''}
-                message={msg}
-                enterEdit={enterEdit}
-                error={!!(msg.error ?? false)}
-                isSubmitting={isSubmitting}
-                unfinished={msg.unfinished ?? false}
-                isCreatedByUser={msg.isCreatedByUser ?? true}
-                siblingIdx={siblingIdx ?? 0}
-                setSiblingIdx={setSiblingIdx ?? (() => ({}))}
-              />
-            </MessageContext.Provider>
+            <UserBubble active={!!msg.isCreatedByUser && !edit}>
+              <MessageContext.Provider value={messageContextValue}>
+                <MessageContent
+                  ask={ask}
+                  edit={edit}
+                  isLast={isLast}
+                  text={msg.text || ''}
+                  message={msg}
+                  enterEdit={enterEdit}
+                  error={!!(msg.error ?? false)}
+                  isSubmitting={isSubmitting}
+                  unfinished={msg.unfinished ?? false}
+                  isCreatedByUser={msg.isCreatedByUser ?? true}
+                  siblingIdx={siblingIdx ?? 0}
+                  setSiblingIdx={setSiblingIdx ?? (() => ({}))}
+                />
+              </MessageContext.Provider>
+            </UserBubble>
           </div>
           {hasNoChildren && isSubmitting ? (
             <PlaceholderRow />

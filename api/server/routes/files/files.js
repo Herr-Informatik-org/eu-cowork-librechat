@@ -402,112 +402,159 @@ const PREVIEW_LAZY_SWEEP_CUTOFF_MS = 2 * 60 * 1000;
  *
  * @route GET /files/:file_id/preview
  */
-router.get('/:file_id/preview/pdf', fileAccess, async (req, res) => {
-  // Admission precedes original reads and cache allocations, including cache hits.
-  if (activeOfficePdfRequests >= 2) {
-    res.setHeader('Retry-After', '2');
-    return res
-      .status(503)
-      .json({ message: 'Dokumentvorschau ist ausgelastet. Bitte erneut versuchen.' });
-  }
-  activeOfficePdfRequests++;
-  let processingDone = false;
-  let responseDone = false;
-  let released = false;
-  let originalStream;
-  const release = () => {
-    if (processingDone && responseDone && !released) {
-      released = true;
-      activeOfficePdfRequests--;
+router.get(
+  ['/:file_id/preview/pdf', '/:file_id/preview/workbook'],
+  fileAccess,
+  async (req, res) => {
+    const workbook = req.path.endsWith('/workbook');
+    // Admission precedes original reads and cache allocations, including cache hits.
+    if (activeOfficePdfRequests >= 2) {
+      res.setHeader('Retry-After', '2');
+      return res
+        .status(503)
+        .json({ message: 'Dokumentvorschau ist ausgelastet. Bitte erneut versuchen.' });
     }
-  };
-  res.once('finish', () => {
-    responseDone = true;
-    release();
-  });
-  res.once('close', () => {
-    responseDone = true;
-    originalStream?.destroy();
-    release();
-  });
-  try {
-    // The descriptor is read from the authorized record, never from a user path or URL.
-    const file = await db.findFileById(req.params.file_id);
-    const reference = parseOfficePdfReference(file?.text);
-    const extension = /\.(docx|pptx|xlsx|xls|ods)$/i.exec(file?.filename ?? '')?.[1].toLowerCase();
-    if (
-      !extension ||
-      file.status === 'pending' ||
-      (reference && (file.textFormat !== 'html' || extension !== reference.format))
-    ) {
-      return res.status(404).json({ message: 'Keine PDF-Vorschau verfügbar' });
-    }
-    // A descriptor is not an authorization token. Bind every cache hit to the authorized original bytes.
-    if (checkOpenAIStorage(file.source)) {
-      return res.status(404).json({ message: 'Vorschau abgelaufen. Originaldatei herunterladen.' });
-    }
-    const { getDownloadStream } = getStrategyFunctions(file.source);
-    if (!getDownloadStream) {
-      return res.status(404).json({ message: 'Originaldatei ist nicht verfügbar' });
-    }
-    const stream = await getDownloadStream(req, file.storageKey || file.filepath);
-    originalStream = stream;
-    const timer = setTimeout(() => stream.destroy(new Error('Zeitlimit beim Lesen')), 10_000);
-    const chunks = [];
-    let size = 0;
-    try {
-      for await (const chunk of stream) {
-        size += chunk.length;
-        if (size > OFFICE_PDF_MAX_BYTES) {
-          stream.destroy();
-          return res.status(413).json({ message: 'Dokument überschreitet 10 MiB' });
-        }
-        chunks.push(chunk);
+    activeOfficePdfRequests++;
+    let processingDone = false;
+    let responseDone = false;
+    let released = false;
+    let originalStream;
+    const release = () => {
+      if (processingDone && responseDone && !released) {
+        released = true;
+        activeOfficePdfRequests--;
       }
-    } finally {
-      clearTimeout(timer);
-    }
-    const buffer = Buffer.concat(chunks);
-    const key = officePdfKey(buffer, extension);
-    if (reference && key !== reference.key) {
-      return res.status(409).json({ message: 'Dokument wurde geändert. Vorschau neu öffnen.' });
-    }
-    let pdf = await readOfficePdf(key);
-    if (!pdf) {
-      await prepareOfficePdf(buffer, extension);
-      pdf = await readOfficePdf(key);
-    }
-    if (!pdf) {
+    };
+    res.once('finish', () => {
+      responseDone = true;
+      release();
+    });
+    res.once('close', () => {
+      responseDone = true;
+      originalStream?.destroy();
+      release();
+    });
+    try {
+      // The descriptor is read from the authorized record, never from a user path or URL.
+      const file = await db.findFileById(req.params.file_id);
+      const reference = parseOfficePdfReference(file?.text);
+      const extension = /\.(docx|pptx|xlsx|xls|ods|pdf)$/i
+        .exec(file?.filename ?? '')?.[1]
+        .toLowerCase();
+      if (
+        !extension ||
+        (workbook && !['xlsx', 'xls', 'ods'].includes(extension)) ||
+        file.status === 'pending' ||
+        (reference && (file.textFormat !== 'html' || extension !== reference.format))
+      ) {
+        return res.status(404).json({ message: 'Keine PDF-Vorschau verfügbar' });
+      }
+      // A descriptor is not an authorization token. Bind every cache hit to the authorized original bytes.
+      if (checkOpenAIStorage(file.source)) {
+        return res
+          .status(404)
+          .json({ message: 'Vorschau abgelaufen. Originaldatei herunterladen.' });
+      }
+      const { getDownloadStream } = getStrategyFunctions(file.source);
+      if (!getDownloadStream) {
+        return res.status(404).json({ message: 'Originaldatei ist nicht verfügbar' });
+      }
+      const stream = await getDownloadStream(req, file.storageKey || file.filepath);
+      originalStream = stream;
+      const timer = setTimeout(() => stream.destroy(new Error('Zeitlimit beim Lesen')), 10_000);
+      const chunks = [];
+      let size = 0;
+      try {
+        for await (const chunk of stream) {
+          size += chunk.length;
+          if (size > OFFICE_PDF_MAX_BYTES) {
+            stream.destroy();
+            return res.status(413).json({ message: 'Dokument überschreitet 10 MiB' });
+          }
+          chunks.push(chunk);
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+      const buffer = Buffer.concat(chunks);
+      let pdf;
+      if (workbook) {
+        const target = new URL(process.env.OFFICE_PREVIEW_RENDERER_URL ?? '');
+        if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) {
+          throw new Error('Ungültige Renderer-Adresse');
+        }
+        target.pathname = '/workbook';
+        target.search = `format=${extension}`;
+        target.hash = '';
+        const response = await fetch(target, {
+          method: 'POST',
+          body: buffer,
+          redirect: 'error',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          signal: AbortSignal.timeout(45000),
+        });
+        if (!response.ok || !response.body) throw new Error('Tabellenansicht nicht verfügbar');
+        const chunks = [];
+        let length = 0;
+        for await (const chunk of response.body) {
+          length += chunk.length;
+          if (length > OFFICE_PDF_MAX_BYTES) throw new Error('Tabellenvorschau zu gross');
+          chunks.push(chunk);
+        }
+        pdf = Buffer.concat(chunks);
+        const parsed = JSON.parse(pdf.toString('utf8'));
+        if (!Array.isArray(parsed.sheets) || !parsed.sheets.length || parsed.sheets.length > 20) {
+          throw new Error('Ungültige Tabellenvorschau');
+        }
+      } else if (extension === 'pdf') {
+        if (!buffer.subarray(0, 1024).includes(Buffer.from('%PDF-'))) {
+          return res.status(422).json({ message: 'Keine gültige PDF-Datei' });
+        }
+        pdf = buffer;
+      } else {
+        const key = officePdfKey(buffer, extension);
+        if (reference && key !== reference.key) {
+          return res.status(409).json({ message: 'Dokument wurde geändert. Vorschau neu öffnen.' });
+        }
+        pdf = await readOfficePdf(key);
+        if (!pdf) {
+          await prepareOfficePdf(buffer, extension);
+          pdf = await readOfficePdf(key);
+        }
+        if (!pdf)
+          return res
+            .status(503)
+            .json({ message: 'Dokumentvorschau ist vorübergehend nicht verfügbar' });
+      }
+      // Re-check revision after rendering; an older request must not show a newer file's stale copy.
+      const current = await db.findFileById(req.params.file_id);
+      if (
+        !current ||
+        current.status === 'pending' ||
+        current.previewRevision !== file.previewRevision ||
+        current.filepath !== file.filepath ||
+        current.storageKey !== file.storageKey ||
+        current.filename !== file.filename ||
+        (reference && parseOfficePdfReference(current.text)?.key !== reference.key)
+      ) {
+        return res.status(409).json({ message: 'Dokument wurde geändert. Vorschau neu öffnen.' });
+      }
+      res.setHeader('Content-Type', workbook ? 'application/json' : 'application/pdf');
+      res.setHeader('Content-Disposition', workbook ? 'inline' : 'inline; filename="preview.pdf"');
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.send(pdf);
+    } catch (error) {
+      logger.warn('[/files/:file_id/preview/pdf] Vorschau nicht verfügbar:', error.message);
       return res
         .status(503)
         .json({ message: 'Dokumentvorschau ist vorübergehend nicht verfügbar' });
+    } finally {
+      processingDone = true;
+      release();
     }
-    // Re-check revision after rendering; an older request must not show a newer file's stale copy.
-    const current = await db.findFileById(req.params.file_id);
-    if (
-      !current ||
-      current.status === 'pending' ||
-      current.previewRevision !== file.previewRevision ||
-      current.filepath !== file.filepath ||
-      current.storageKey !== file.storageKey ||
-      current.filename !== file.filename ||
-      (reference && parseOfficePdfReference(current.text)?.key !== reference.key)
-    ) {
-      return res.status(409).json({ message: 'Dokument wurde geändert. Vorschau neu öffnen.' });
-    }
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"');
-    res.setHeader('Cache-Control', 'private, no-store');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    return res.send(pdf);
-  } catch (error) {
-    logger.warn('[/files/:file_id/preview/pdf] Vorschau nicht verfügbar:', error.message);
-    return res.status(503).json({ message: 'Dokumentvorschau ist vorübergehend nicht verfügbar' });
-  } finally {
-    processingDone = true;
-    release();
-  }
-});
+  },
+);
 
 router.get('/:file_id/preview', fileAccess, async (req, res) => {
   try {

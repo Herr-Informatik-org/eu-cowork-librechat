@@ -1,12 +1,13 @@
 import { useParams } from 'react-router-dom';
 import { useRecoilValue } from 'recoil';
 import { Constants } from 'librechat-data-provider';
-import { sessionContextHidden } from './state';
+import { sessionContextHidden, sessionClosing } from './state';
 import SessionPanel from './Panel';
 import store from '~/store';
 
 export default function SessionWidget() {
   const { conversationId } = useParams();
+  const closing = useRecoilValue(sessionClosing);
   const panelVisible = useRecoilValue(sessionContextHidden);
   const artifactId = useRecoilValue(store.currentArtifactId);
   const artifactsVisible = useRecoilValue(store.artifactsVisibility);
@@ -19,7 +20,7 @@ export default function SessionWidget() {
   )
     return null;
   return (
-    <div className="session-widget-slot">
+    <div className="session-widget-slot" data-closing={closing === 'hide'}>
       <SessionPanel variant="widget" />
     </div>
   );
