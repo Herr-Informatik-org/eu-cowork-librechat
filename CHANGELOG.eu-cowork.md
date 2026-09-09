@@ -1,5 +1,10 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-09 — Nachrichtennavigation links im Chat
+
+- Die Sprungnavigation ist auf Desktop wieder sichtbar, nun am linken Rand des Chatbereichs. Marker, Pfeile und Textvorschau sind entsprechend gespiegelt. Der Nachrichteninhalt erhält Platz für die Leiste; auf schmalen Mobilansichten bleibt sie ausgeblendet.
+- Bestehende Tastatur-, Scroll- und Drag-Navigation bleibt erhalten. Verifiziert mit 72 Navigationstests, Typecheck, Frontend-Build und lokaler Browserprüfung.
+
 ## 2026-09-08 — Ergebnisliste ohne interne Arbeitsdateien
 
 - Code-Ausgaben unter `_work/` bleiben in der temporären Ausführungssitzung und werden nicht in den dauerhaften Chat-Dateispeicher kopiert. Fertige Ausgaben ausserhalb dieses reservierten Ordners bleiben unverändert.

@@ -10,6 +10,7 @@ import { steerOverlayHeightFamily } from '~/store/steer';
 import { MessagesViewProvider } from '~/Providers';
 import { fontSizeAtom } from '~/store/fontSize';
 import MultiMessage from './MultiMessage';
+import MessageNav from './MessageNav';
 import { cn } from '~/utils';
 import store from '~/store';
 
@@ -124,7 +125,7 @@ function MessagesViewContent({
           >
             <div
               ref={contentRef}
-              className="flex flex-col pb-9 pt-14 dark:bg-transparent"
+              className="flex flex-col pb-9 pt-14 dark:bg-transparent md:pl-16"
               style={
                 steerOverlayHeight > 0
                   ? { paddingBottom: `calc(2.25rem + ${steerOverlayHeight}px)` }
@@ -160,13 +161,14 @@ function MessagesViewContent({
             </div>
           </div>
 
+          <MessageNav scrollableRef={scrollableRef} />
+
           <ScrollButton
             scrollableRef={scrollableRef}
             messagesEndRef={messagesEndRef}
             scrollHandler={handleSmoothToRef}
             onNearBottomChange={handleNearBottomChange}
           />
-
         </div>
       </div>
     </>

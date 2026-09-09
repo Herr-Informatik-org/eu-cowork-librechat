@@ -194,7 +194,7 @@ export function magnifyFalloff(distance: number, influence: number): number {
 }
 
 const indicatorButtonClasses = cn(
-  'flex h-1.5 w-full items-center justify-end rounded-sm transition-opacity duration-300',
+  'flex h-1.5 w-full items-center justify-start rounded-sm transition-opacity duration-300',
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-xheavy',
 );
 
@@ -214,7 +214,7 @@ const MessageIndicator = memo(function MessageIndicator({
   label: string;
   onSelect: (id: string) => void;
 }) {
-  const baseSize = entry.isEnd ? 'mr-[4.5px] h-[3px] w-[3px]' : 'h-[3px] w-3';
+  const baseSize = entry.isEnd ? 'ml-[4.5px] h-[3px] w-[3px]' : 'h-[3px] w-3';
   return (
     <button
       type="button"
@@ -239,7 +239,7 @@ const MessageIndicator = memo(function MessageIndicator({
 });
 
 const chevronButtonClasses = cn(
-  '-mr-1 rounded-md p-0.5 text-text-tertiary opacity-40 transition-[color,opacity] duration-300',
+  '-ml-1 rounded-md p-0.5 text-text-tertiary opacity-40 transition-[color,opacity] duration-300',
   'group-hover/nav:text-text-secondary group-hover/nav:opacity-100',
   'group-focus-within/nav:text-text-secondary group-focus-within/nav:opacity-100',
   'group-hover/nav:hover:text-text-primary',
@@ -300,9 +300,9 @@ function MessageNav({ scrollableRef }: { scrollableRef: React.RefObject<HTMLDivE
   const tipShownRef = useRef(false);
   const tipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tipElRef = useRef<HTMLDivElement | null>(null);
-  const tipPosRef = useRef({ top: 0, right: 0 });
+  const tipPosRef = useRef({ top: 0, left: 0 });
 
-  const [tip, setTip] = useState<{ id: string; top: number; right: number } | null>(null);
+  const [tip, setTip] = useState<{ id: string; top: number; left: number } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const entryById = useMemo(() => {
@@ -673,12 +673,12 @@ function MessageNav({ scrollableRef }: { scrollableRef: React.RefObject<HTMLDivE
     };
   }, [entries, measureRibs]);
 
-  const positionTip = useCallback((top: number, right: number) => {
-    tipPosRef.current = { top, right };
+  const positionTip = useCallback((top: number, left: number) => {
+    tipPosRef.current = { top, left };
     const el = tipElRef.current;
     if (el) {
       el.style.top = `${top}px`;
-      el.style.right = `${right}px`;
+      el.style.left = `${left}px`;
     }
   }, []);
 
@@ -688,7 +688,7 @@ function MessageNav({ scrollableRef }: { scrollableRef: React.RefObject<HTMLDivE
         setTip(null);
         return;
       }
-      setTip({ id, top: tipPosRef.current.top, right: tipPosRef.current.right });
+      setTip({ id, top: tipPosRef.current.top, left: tipPosRef.current.left });
     },
     [entryById],
   );
@@ -709,8 +709,8 @@ function MessageNav({ scrollableRef }: { scrollableRef: React.RefObject<HTMLDivE
   }, []);
 
   const focusTooltip = useCallback(
-    (id: string, top: number, right: number) => {
-      positionTip(top, right);
+    (id: string, top: number, left: number) => {
+      positionTip(top, left);
       if (focusedIdRef.current === id) {
         return;
       }
@@ -737,8 +737,8 @@ function MessageNav({ scrollableRef }: { scrollableRef: React.RefObject<HTMLDivE
   const showEndTip = useCallback(
     (el: HTMLElement) => {
       const rect = el.getBoundingClientRect();
-      const left = columnRef.current?.getBoundingClientRect().left ?? rect.left;
-      focusTooltip(MESSAGES_END_ID, rect.top + rect.height / 2, window.innerWidth - left + 8);
+      const right = columnRef.current?.getBoundingClientRect().right ?? rect.right;
+      focusTooltip(MESSAGES_END_ID, rect.top + rect.height / 2, right + 8);
     },
     [focusTooltip],
   );
@@ -797,8 +797,8 @@ function MessageNav({ scrollableRef }: { scrollableRef: React.RefObject<HTMLDivE
     }
     if (nearestId != null && nearestD <= MAG_INFLUENCE && !isDraggingRef.current) {
       const top = colRect.top - scrollTop + nearestCenter;
-      const right = window.innerWidth - colRect.left + 8;
-      focusTooltip(nearestId, top, right);
+      const left = colRect.right + 8;
+      focusTooltip(nearestId, top, left);
     } else {
       clearTooltip();
     }
@@ -1274,8 +1274,8 @@ function MessageNav({ scrollableRef }: { scrollableRef: React.RefObject<HTMLDivE
       aria-label={localize('com_ui_message_nav')}
       aria-keyshortcuts="Shift+Alt+M"
       className={cn(
-        'group/nav absolute right-2 top-1/2 z-40 hidden max-h-[min(24rem,calc(100%-2rem))]',
-        '-translate-y-1/2 flex-col items-end gap-1.5 px-1.5 py-2 md:flex',
+        'group/nav absolute left-2 top-1/2 z-40 hidden max-h-[min(24rem,calc(100%-2rem))]',
+        '-translate-y-1/2 flex-col items-start gap-1.5 px-1.5 py-2 md:flex',
       )}
     >
       <button
@@ -1357,7 +1357,7 @@ function MessageNav({ scrollableRef }: { scrollableRef: React.RefObject<HTMLDivE
             style={{
               position: 'fixed',
               top: tip.top,
-              right: tip.right,
+              left: tip.left,
               transform: 'translateY(-50%)',
               zIndex: 999,
             }}
