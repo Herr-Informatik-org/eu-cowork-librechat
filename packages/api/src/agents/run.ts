@@ -37,6 +37,7 @@ import type { BaseMessage } from '@librechat/agents/langchain/messages';
 import type { AppConfig, IUser } from '@librechat/data-schemas';
 import type { ToolInputValidationError } from '~/agents/toolValidation';
 import type { SubagentUsageEvent } from '~/agents/usage';
+import { usageCreditHook } from '~/middleware/usageCredit';
 import type * as t from '~/types';
 import {
   CHECK_BACKGROUND_TASK_NAME,
@@ -1522,6 +1523,12 @@ export async function createRun({
    * this guard is defense in depth).
    */
   let hooks = hitl?.hooks;
+  if (process.env.HOSTED_USAGE_REQUIRED === 'true') {
+    hooks = hooks ?? new HookRegistry();
+    for (const event of ['RunStart', 'PreemptBoundary', 'PreToolUse', 'PostToolBatch', 'PreCompact'] as const) {
+      hooks.register(event, { hooks: [usageCreditHook], timeout: 15000 });
+    }
+  }
   /** Activity labels register BEFORE the steer drain: the label must claim
    *  its slot while the batch's tool parts are still the content tail. If a
    *  steer drained first, its injected part would flush the tool block in

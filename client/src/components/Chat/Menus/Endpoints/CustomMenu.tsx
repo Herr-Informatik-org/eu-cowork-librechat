@@ -69,7 +69,7 @@ export const CustomMenu = React.forwardRef<HTMLDivElement, CustomMenuProps>(func
           'w-[var(--menu-width,auto)] min-w-[300px] flex-col overflow-auto rounded-xl border border-border-light',
           'bg-presentation text-sm text-text-primary shadow-lg',
           parent ? 'px-0.5 py-0.5' : 'px-3 py-2',
-          'max-w-[calc(100vw-4rem)] sm:max-h-[calc(65vh)] sm:max-w-[400px]',
+          'max-w-[calc(100vw-4rem)] sm:max-h-[min(80vh,var(--popover-available-height))] sm:max-w-[400px]',
           searchable && 'p-0',
         )}
       >

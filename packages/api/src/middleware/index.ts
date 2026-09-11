@@ -15,6 +15,7 @@ export {
 export { preAuthTenantMiddleware } from './preAuthTenant';
 export * from './concurrency';
 export * from './checkBalance';
+export * from './usageCredit';
 export * from './remoteAgentAuth';
 export * from './share';
 export * from './messageFilterPii';

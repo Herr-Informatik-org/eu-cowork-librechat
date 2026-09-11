@@ -6,6 +6,7 @@ import { useFavorites, useLocalize, useIsActiveItem } from '~/hooks';
 import { useModelSelectorContext } from '../ModelSelectorContext';
 import { CustomMenuItem as MenuItem } from '../CustomMenu';
 import SpecDescription from './SpecDescription';
+import ModelInsight from './ModelInsight';
 import SpecIcon from './SpecIcon';
 import { cn } from '~/utils';
 
@@ -50,6 +51,7 @@ export function ModelSpecItem({ spec, isSelected }: ModelSpecItemProps) {
         <div className="flex min-w-0 flex-col gap-1">
           <span className="truncate text-left">{spec.label}</span>
           <SpecDescription description={spec.description} />
+          <ModelInsight insight={spec.insight} />
         </div>
       </div>
       <button

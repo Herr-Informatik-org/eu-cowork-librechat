@@ -18,6 +18,12 @@ export type TModelSpec = {
   default?: boolean;
   softDefault?: boolean;
   description?: string;
+  insight?: {
+    intelligence?: number;
+    tokenCost?: number;
+    inputs?: ('text' | 'image' | 'audio' | 'video')[];
+    note?: string;
+  };
   /**
    * Optional group name for organizing specs in the UI selector.
    * - If it matches an endpoint name (e.g., "openAI", "groq"), the spec appears nested under that endpoint
@@ -96,6 +102,12 @@ export const tModelSpecSchema = z.object({
   default: z.boolean().optional(),
   softDefault: z.boolean().optional(),
   description: z.string().optional(),
+  insight: z.object({
+    intelligence: z.number().int().min(1).max(5).optional(),
+    tokenCost: z.number().int().min(1).max(5).optional(),
+    inputs: z.array(z.enum(['text', 'image', 'audio', 'video'])).optional(),
+    note: z.string().max(300).optional(),
+  }).optional(),
   group: z.string().optional(),
   groupIcon: z.union([z.string(), eModelEndpointSchema]).optional(),
   showIconInMenu: z.boolean().optional(),

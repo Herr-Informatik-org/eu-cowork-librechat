@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-11 — Modellkarten und gehostetes Testguthaben
+
+- Modellkarten zeigen relative Leistungs- und Kostenstufen mit fünf Symbolen sowie
+  Eingabearten. Alle vier kuratierten Karten bleiben im Menü übersichtlich sichtbar.
+- Gehostete Instanzen prüfen das gemeinsame Testguthaben vor Modellanfragen und an
+  Agenten-Fortsetzungsgrenzen. Bei fehlender Verbrauchsprüfung bleibt Inferenz gesperrt.
+- Native Konfigurationsänderungen gehosteter Modellzugänge brauchen die signierte
+  Betreiberverbindung; Selbstbetrieb bleibt unverändert.
+- Verifiziert mit Middleware-Regressionstests, API-/Frontend-Build und echten lokalen
+  Modellantworten; Kosten bereits laufender Provideranfragen können noch nachlaufen.
+
 ## 2026-09-09 — Nachrichtennavigation links im Chat
 
 - Die Sprungnavigation ist auf Desktop wieder sichtbar, nun am linken Rand des Chatbereichs. Marker, Pfeile und Textvorschau sind entsprechend gespiegelt. Der Nachrichteninhalt erhält Platz für die Leiste; auf schmalen Mobilansichten bleibt sie ausgeblendet.

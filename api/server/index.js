@@ -12,6 +12,7 @@ const mongoSanitize = require('express-mongo-sanitize');
 const { logger, runAsSystem } = require('@librechat/data-schemas');
 const {
   isEnabled,
+  usageCreditMiddleware,
   apiNotFound,
   createMetrics,
   ErrorController,
@@ -206,6 +207,8 @@ const startServer = async () => {
   app.use(express.json({ limit: '3mb' }));
   app.use(express.urlencoded({ extended: true, limit: '3mb' }));
   app.use(handleJsonParseError);
+  app.use('/api', usageCreditMiddleware);
+  app.get('/api/usage-credit/capability', (_req, res) => res.json({ version: 1 }));
 
   /**
    * Express 5 Compatibility: Make req.query writable for mongoSanitize
