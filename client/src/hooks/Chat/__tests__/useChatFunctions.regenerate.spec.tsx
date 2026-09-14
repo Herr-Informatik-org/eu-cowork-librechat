@@ -2,6 +2,7 @@ import { renderHook, act } from '@testing-library/react';
 import { Constants, EModelEndpoint } from 'librechat-data-provider';
 import type { TConversation, TMessage, TSubmission } from 'librechat-data-provider';
 import useChatFunctions from '../useChatFunctions';
+import type { ExtendedFile } from '~/common';
 
 const mockNavigate = jest.fn();
 const mockSetShowStopButton = jest.fn();
@@ -65,6 +66,7 @@ jest.mock('~/utils', () => ({
   createDualMessageContent: jest.fn(() => []),
   getRouteChatProjectId: jest.fn(() => null),
   requestChatFocus: jest.fn(),
+  hasStreamStartFailed: jest.fn(() => false),
 }));
 
 const userMessage = (messageId: string, parentMessageId = '00000000-0000-0000-0000-000000000000') =>
@@ -98,10 +100,15 @@ const conversation = (conversationId: string) =>
 function renderAsk(
   messages: TMessage[] | undefined,
   conversationId = 'conversation-1',
-  options: { endpoint?: TConversation['endpoint']; isSubmitting?: boolean } = {},
+  options: {
+    endpoint?: TConversation['endpoint'];
+    isSubmitting?: boolean;
+    files?: Map<string, ExtendedFile>;
+  } = {},
 ) {
   const setMessages = jest.fn();
   const setSubmission = jest.fn();
+  const setFiles = jest.fn();
   const getMessages = jest.fn(() => messages);
   const immutableConversation = conversation(conversationId);
   if ('endpoint' in options) {
@@ -110,6 +117,8 @@ function renderAsk(
   const hook = renderHook(() =>
     useChatFunctions({
       isSubmitting: options.isSubmitting ?? false,
+      files: options.files,
+      setFiles,
       latestMessage: messages?.at(-1) ?? null,
       conversation: immutableConversation,
       getMessages,
@@ -118,7 +127,7 @@ function renderAsk(
     }),
   );
 
-  return { ...hook, getMessages, setMessages, setSubmission };
+  return { ...hook, getMessages, setMessages, setSubmission, setFiles };
 }
 
 describe('useChatFunctions ask', () => {
@@ -290,5 +299,94 @@ describe('useChatFunctions regenerate', () => {
       setMessages.mock.calls.at(-1)?.[0].map((message: TMessage) => message.messageId),
     ).toEqual(['user-1', 'assistant-1_']);
     expect(messages.at(-1)?.messageId).toBe('assistant-1_');
+  });
+});
+
+describe('image-only submissions', () => {
+  const image: ExtendedFile = {
+    file_id: 'image-one',
+    type: 'image/png',
+    filepath: '/images/image.png',
+    size: 120,
+    progress: 1,
+  };
+  const history = [userMessage('user-1'), assistantMessage('assistant-1', 'user-1')];
+
+  it('submits an image with empty text and preserves the current support conversation', () => {
+    const { result, setSubmission, setFiles } = renderAsk(history, 'conversation-1', {
+      files: new Map([[image.file_id, image]]),
+    });
+    act(() => {
+      result.current.ask({ text: '   ' });
+    });
+    expect(setSubmission).toHaveBeenCalledTimes(1);
+    const submission: TSubmission = setSubmission.mock.calls[0][0];
+    expect(submission.userMessage).toMatchObject({
+      text: '',
+      parentMessageId: 'assistant-1',
+      conversationId: 'conversation-1',
+      files: [expect.objectContaining({ file_id: image.file_id })],
+    });
+    expect(submission.messages.slice(0, 2)).toEqual(history);
+    expect(setFiles).toHaveBeenCalledWith(new Map());
+  });
+
+  it('starts a new conversation with an image and no text', () => {
+    const { result, setSubmission } = renderAsk(undefined, Constants.NEW_CONVO, {
+      files: new Map([[image.file_id, image]]),
+    });
+    act(() => {
+      result.current.ask({ text: '' });
+    });
+    expect(setSubmission).toHaveBeenCalledTimes(1);
+    expect(setSubmission.mock.calls[0][0].userMessage).toMatchObject({
+      text: '',
+      files: [expect.objectContaining({ file_id: image.file_id })],
+    });
+  });
+
+  it('does not consume an image while its upload is pending', () => {
+    const { result, setSubmission, setFiles } = renderAsk(history, 'conversation-1', {
+      files: new Map([[image.file_id, { ...image, progress: 0.5 }]]),
+    });
+    act(() => {
+      expect(result.current.ask({ text: '' })).toBe(false);
+    });
+    expect(setSubmission).not.toHaveBeenCalled();
+    expect(setFiles).not.toHaveBeenCalled();
+  });
+
+  it('respects explicit empty overrides instead of using unrelated composer images', () => {
+    const { result, setSubmission, setFiles } = renderAsk(history, 'conversation-1', {
+      files: new Map([[image.file_id, image]]),
+    });
+    act(() => {
+      expect(result.current.ask({ text: '' }, { overrideFiles: [] })).toBe(false);
+    });
+    expect(setSubmission).not.toHaveBeenCalled();
+    expect(setFiles).not.toHaveBeenCalled();
+  });
+
+  it('accepts an explicit image override without consuming the composer draft', () => {
+    const { result, setSubmission, setFiles } = renderAsk(history);
+    act(() => {
+      result.current.ask({ text: '' }, { overrideFiles: [image] });
+    });
+    expect(setSubmission).toHaveBeenCalledTimes(1);
+    expect(setSubmission.mock.calls[0][0].userMessage.files).toEqual([image]);
+    expect(setFiles).not.toHaveBeenCalled();
+  });
+
+  it('regenerates the response to an image-only message using its saved attachment', () => {
+    const original = { ...userMessage('user-1'), text: '', files: [image] };
+    const { result, setSubmission } = renderAsk([
+      original,
+      assistantMessage('assistant-1', 'user-1'),
+    ]);
+    act(() => {
+      result.current.regenerate(assistantMessage('assistant-1', 'user-1'));
+    });
+    expect(setSubmission).toHaveBeenCalledTimes(1);
+    expect(setSubmission.mock.calls[0][0].userMessage.files).toEqual([image]);
   });
 });

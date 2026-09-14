@@ -1,5 +1,17 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-14 — Bildnachrichten ohne Pflichttext
+
+- Fertig hochgeladene Bilder lassen sich direkt senden, auch bei leerem Textfeld.
+  Bestehende Nachrichten und der Bezug zur letzten Antwort bleiben erhalten;
+  es wird kein künstlicher Begleittext eingefügt.
+- Unfertige Uploads und leere Entwürfe ohne Bild bleiben gesperrt. Erneutes
+  Generieren verwendet die Bilder der ursprünglichen Nachricht.
+- Geprüft mit 29 Tests des Nachrichtenversands, Typecheck, Lint, Frontend-Build
+  und einem echten lokalen Sol-Supportchat mit künstlichem Fehler-Screenshot.
+  Auch ein neuer Chat mit «Automatisch» nimmt das Bild per Enter an. Der gespeicherte
+  Bildbeitrag enthält leeren Text und bleibt nach Neuladen sichtbar.
+
 ## 2026-09-14 — Bildvorschau in der Dateiliste
 
 - Bilddateien aus dem Sitzungskontext öffnen eine echte Vorschau mit Zoom,

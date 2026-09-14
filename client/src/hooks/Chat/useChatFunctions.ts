@@ -41,6 +41,7 @@ import store, { useGetEphemeralAgent } from '~/store';
 import { startupConfigKey } from '~/data-provider';
 import useUserKey from '~/hooks/Input/useUserKey';
 import { useAuthContext } from '~/hooks';
+import { hasReadyImageAttachments } from '~/utils/imageAttachments';
 
 /** A revalidating cache younger than this is locally authoritative (the run
  * that just streamed wrote it) and stays sendable; older ones wait for the
@@ -293,7 +294,7 @@ export default function useChatFunctions({
     } = {},
   ) => {
     text = text.trim();
-    if (!!isSubmitting || text === '') {
+    if (isSubmitting) {
       return false;
     }
 
@@ -312,6 +313,16 @@ export default function useChatFunctions({
     }
 
     const cachedMessages = getMessages(conversationId);
+    const submittedFiles =
+      overrideFiles ??
+      (isRegenerate
+        ? (overrideMessages ?? cachedMessages)?.find((message) => message.messageId === messageId)
+            ?.files
+        : files?.values());
+    if (text === '' && !hasReadyImageAttachments(submittedFiles)) {
+      return false;
+    }
+
     const isExistingConversation = conversationId != null && conversationId !== Constants.NEW_CONVO;
     if (isExistingConversation && overrideMessages == null && cachedMessages == null) {
       logger.warn('[useChatFunctions] Refusing to send before existing conversation history loads');

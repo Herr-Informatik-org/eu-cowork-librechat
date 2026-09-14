@@ -50,6 +50,7 @@ import EditBadges from './EditBadges';
 import BadgeRow from './BadgeRow';
 import Mention from './Mention';
 import store from '~/store';
+import { hasReadyImageAttachments } from '~/utils/imageAttachments';
 import './composer.css';
 
 interface ChatFormProps {
@@ -398,8 +399,11 @@ const ChatForm = memo(function ChatForm({
 
   useQueryParams({ textAreaRef });
 
+  const hasImageAttachments =
+    !answerMode.active && !steering.duringRunActive && hasReadyImageAttachments(files.values());
+
   const { ref, ...registerProps } = methods.register('text', {
-    required: true,
+    validate: (text) => text.trim().length > 0 || hasImageAttachments,
     onChange: useCallback(
       (e: React.ChangeEvent<HTMLTextAreaElement>) =>
         methods.setValue('text', e.target.value, { shouldValidate: true }),
@@ -696,6 +700,7 @@ const ChatForm = memo(function ChatForm({
                         <SendButton
                           ref={submitButtonRef}
                           control={methods.control}
+                          hasImageAttachments={hasImageAttachments}
                           disabled={
                             filesLoading ||
                             disableInputs ||
