@@ -40,6 +40,7 @@ export * from './flow/manager';
 export * from './middleware';
 /* Memory */
 export * from './memory';
+export * from './brain';
 /* Model Specs */
 export * from './modelSpecs';
 /* Agents */

@@ -20,6 +20,21 @@ import ProgressText from './ProgressText';
 import { logger } from '~/utils';
 import store from '~/store';
 
+function getBrainActivityKey(name: string) {
+  switch (name) {
+    case 'brain_search':
+      return 'com_ui_brain_activity_search';
+    case 'brain_remember':
+      return 'com_ui_brain_activity_remember';
+    case 'brain_update':
+      return 'com_ui_brain_activity_update';
+    case 'brain_forget':
+      return 'com_ui_brain_activity_forget';
+    default:
+      return undefined;
+  }
+}
+
 export default function ToolCall({
   initialProgress = 0.1,
   isLast = false,
@@ -46,7 +61,9 @@ export default function ToolCall({
   onExpand?: () => void;
 }) {
   const localize = useLocalize();
-  const autoExpand = useRecoilValue(store.autoExpandTools);
+  const brainActivityKey = getBrainActivityKey(name);
+  const brainActivity = brainActivityKey ? localize(brainActivityKey) : undefined;
+  const autoExpand = useRecoilValue(store.autoExpandTools) && brainActivityKey == null;
   const hasOutput = (output?.length ?? 0) > 0;
   const [showInfo, setShowInfo] = useState(() => autoExpand && hasOutput);
   const { style: expandStyle, ref: expandRef } = useExpandCollapse(showInfo);
@@ -197,6 +214,9 @@ export default function ToolCall({
     if (cancelled) {
       return localize('com_ui_cancelled');
     }
+    if (brainActivity != null) {
+      return brainActivity;
+    }
     if (intent != null) {
       return intent;
     }
@@ -222,9 +242,12 @@ export default function ToolCall({
       <span className="sr-only" aria-live="polite" aria-atomic="true">
         {(() => {
           if (progress < 1 && !showCancelled) {
-            return function_name
-              ? localize('com_assistants_running_var', { 0: function_name })
-              : localize('com_assistants_running_action');
+            return (
+              brainActivity ??
+              (function_name
+                ? localize('com_assistants_running_var', { 0: function_name })
+                : localize('com_assistants_running_action'))
+            );
           }
           return getFinishedText();
         })()}
@@ -238,6 +261,7 @@ export default function ToolCall({
           progress={progress}
           onClick={handleToggleInfo}
           inProgressText={
+            brainActivity ??
             intent ??
             (function_name
               ? localize('com_assistants_running_var', { 0: function_name })

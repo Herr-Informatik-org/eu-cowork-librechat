@@ -146,6 +146,22 @@ function deepMerge<T extends AnyObject>(target: T, source: AnyObject, depth = 0,
     const currentPath = path ? `${path}.${key}` : key;
     const sourceVal = source[key];
     const targetVal = result[key];
+    // A complete learning-model selection is one unit. Retaining the previous
+    // model's parameters or agent id can change routing or break the new model.
+    // Partial updates such as enabled-only continue through the normal merge.
+    if (
+      currentPath === 'memory.agent' &&
+      sourceVal != null &&
+      typeof sourceVal === 'object' &&
+      !Array.isArray(sourceVal) &&
+      'provider' in sourceVal &&
+      'model' in sourceVal &&
+      typeof sourceVal.provider === 'string' &&
+      typeof sourceVal.model === 'string'
+    ) {
+      result[key] = deepMerge({} as AnyObject, sourceVal as AnyObject, depth + 1, currentPath);
+      continue;
+    }
     if (
       depth < MAX_MERGE_DEPTH &&
       sourceVal != null &&

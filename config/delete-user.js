@@ -76,6 +76,12 @@ async function gracefulExit(code = 0) {
 
   const uid = user._id.toString();
 
+  // Derived personal knowledge must be erased before deleting its source account.
+  if (process.env.BRAIN_API_URL?.trim()) {
+    const { requestBrain } = require('@librechat/api');
+    await requestBrain(uid, 'DELETE', '/v1/user');
+  }
+
   // 5) Build and run deletion tasks
   const tasks = [
     Action.deleteMany({ user: uid }),

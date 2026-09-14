@@ -348,6 +348,90 @@ describe('global shortcut dispatch', () => {
   });
 });
 
+describe('memory panel shortcut', () => {
+  beforeEach(() => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ openMemories: { mac: 'Meta+Shift+M', other: 'Control+Shift+M' } }),
+    );
+  });
+
+  function appendPanelButton(panelId: string, active = false) {
+    const button = document.createElement('button');
+    const onClick = jest.fn();
+    button.dataset.testid = `nav-panel-${panelId}`;
+    button.setAttribute('aria-pressed', String(active));
+    button.addEventListener('click', onClick);
+    document.body.appendChild(button);
+    return onClick;
+  }
+
+  function renderExpandedSidebar() {
+    return renderHarness(undefined, '/c/test-convo', (snapshot) => {
+      snapshot.set(store.sidebarExpanded, true);
+    });
+  }
+
+  it('prefers Brain when its navigation button is present', () => {
+    renderExpandedSidebar();
+    const openBrain = appendPanelButton('brain');
+    const openMemories = appendPanelButton('memories');
+
+    const event = dispatchKey({ key: 'm', ctrlKey: true, shiftKey: true });
+
+    expect(openBrain).toHaveBeenCalledTimes(1);
+    expect(openMemories).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('opens native memories when Brain is not offered', () => {
+    renderExpandedSidebar();
+    const openMemories = appendPanelButton('memories');
+
+    dispatchKey({ key: 'm', ctrlKey: true, shiftKey: true });
+
+    expect(openMemories).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fall back to native memories when Brain is already active', () => {
+    renderExpandedSidebar();
+    const openBrain = appendPanelButton('brain', true);
+    const openMemories = appendPanelButton('memories');
+
+    dispatchKey({ key: 'm', ctrlKey: true, shiftKey: true });
+
+    expect(openBrain).not.toHaveBeenCalled();
+    expect(openMemories).not.toHaveBeenCalled();
+  });
+
+  it('expands the sidebar before activating Brain', () => {
+    jest.useFakeTimers();
+    try {
+      const { getByTestId } = renderHarness(undefined, '/c/test-convo', (snapshot) => {
+        snapshot.set(store.sidebarExpanded, false);
+      });
+      const openBrain = appendPanelButton('brain');
+
+      dispatchKey({ key: 'm', ctrlKey: true, shiftKey: true });
+
+      expect(getByTestId('sidebar')).toHaveTextContent('true');
+      expect(openBrain).not.toHaveBeenCalled();
+      act(() => jest.advanceTimersByTime(350));
+      expect(openBrain).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('leaves the key event untouched when neither memory panel is available', () => {
+    renderExpandedSidebar();
+
+    const event = dispatchKey({ key: 'm', ctrlKey: true, shiftKey: true });
+
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
 describe('clipboard shortcuts', () => {
   it('copies the last response through the existing message copy button', () => {
     const firstCopy = jest.fn();

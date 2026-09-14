@@ -73,6 +73,7 @@ jest.mock('@librechat/api', () => ({
   ...jest.requireActual('@librechat/api'),
   needsRefresh: jest.fn(),
   getNewS3URL: jest.fn(),
+  requestBrain: jest.fn().mockResolvedValue({ deleted: true }),
 }));
 
 jest.mock('~/server/services/Files/process', () => ({
@@ -311,6 +312,35 @@ describe('deleteUserController', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    delete process.env.BRAIN_API_URL;
+  });
+
+  it('purges personal Brain before deleting the account or any source messages', async () => {
+    const { requestBrain } = require('@librechat/api');
+    const { deleteMessages, deleteUserById } = require('~/models');
+    process.env.BRAIN_API_URL = 'http://brain.test';
+    const userId = new mongoose.Types.ObjectId();
+    await deleteUserController({ user: { id: String(userId), _id: userId } }, mockRes);
+    expect(requestBrain).toHaveBeenCalledWith(String(userId), 'DELETE', '/v1/user');
+    expect(requestBrain.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteMessages.mock.invocationCallOrder[0],
+    );
+    expect(requestBrain.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteUserById.mock.invocationCallOrder[0],
+    );
+    expect(mockRes.status).toHaveBeenCalledWith(200);
+  });
+
+  it('preserves the account and sources when Brain cleanup cannot complete', async () => {
+    const { requestBrain } = require('@librechat/api');
+    const { deleteMessages, deleteUserById } = require('~/models');
+    process.env.BRAIN_API_URL = 'http://brain.test';
+    requestBrain.mockRejectedValueOnce(new Error('Brain unavailable'));
+    const userId = new mongoose.Types.ObjectId();
+    await deleteUserController({ user: { id: String(userId), _id: userId } }, mockRes);
+    expect(deleteMessages).not.toHaveBeenCalled();
+    expect(deleteUserById).not.toHaveBeenCalled();
+    expect(mockRes.status).toHaveBeenCalledWith(500);
   });
 
   it('should return 200 on successful deletion', async () => {

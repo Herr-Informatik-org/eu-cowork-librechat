@@ -3,6 +3,11 @@ import { EModelEndpoint } from 'librechat-data-provider';
 import useSideNavLinks from '../useSideNavLinks';
 
 const mockGrants: Record<string, boolean> = {};
+let mockBrainEnabled: boolean | undefined = true;
+jest.mock('~/data-provider/Brain', () => ({
+  useBrainStatusQuery: () => ({ data: { enabled: mockBrainEnabled } }),
+}));
+jest.mock('~/components/Brain', () => ({ BrainPanel: () => null }));
 jest.mock('~/hooks', () => ({
   useHasAccess: ({ permissionType, permission }: { permissionType: string; permission: string }) =>
     mockGrants[`${permissionType}.${permission}`] !== false,
@@ -32,13 +37,16 @@ const readIds = () =>
   ).result.current.map(({ id }) => id);
 
 describe('role-configured navigation', () => {
-  beforeEach(() => Object.keys(mockGrants).forEach((key) => delete mockGrants[key]));
+  beforeEach(() => {
+    Object.keys(mockGrants).forEach((key) => delete mockGrants[key]);
+    mockBrainEnabled = true;
+  });
   it.each([
     ['AGENTS', 'agents'],
     ['MCP_SERVERS', 'mcp-builder'],
     ['SKILLS', 'skills'],
     ['PROMPTS', 'prompts'],
-    ['MEMORIES', 'memories'],
+    ['MEMORIES', 'brain'],
   ])('hides %s management independently from tool use', (type, id) => {
     expect(readIds()).toContain(id);
     mockGrants[`${type}.VIEW`] = false;
@@ -51,5 +59,26 @@ describe('role-configured navigation', () => {
     mockGrants['AGENTS.CREATE'] = true;
     mockGrants['AGENTS.USE'] = false;
     expect(readIds()).not.toContain('agents');
+  });
+  it('shows Brain only when the service is enabled and memory is readable', () => {
+    expect(readIds()).toContain('brain');
+    mockBrainEnabled = false;
+    expect(readIds()).not.toContain('brain');
+    mockBrainEnabled = true;
+    mockGrants['MEMORIES.READ'] = false;
+    expect(readIds()).not.toContain('brain');
+    mockGrants['MEMORIES.READ'] = true;
+    mockGrants['MEMORIES.VIEW'] = false;
+    expect(readIds()).not.toContain('brain');
+  });
+  it('uses exactly one memory store and never flashes the legacy editor before status resolves', () => {
+    expect(readIds()).toContain('brain');
+    expect(readIds()).not.toContain('memories');
+    mockBrainEnabled = false;
+    expect(readIds()).toContain('memories');
+    expect(readIds()).not.toContain('brain');
+    mockBrainEnabled = undefined;
+    expect(readIds()).not.toContain('brain');
+    expect(readIds()).not.toContain('memories');
   });
 });

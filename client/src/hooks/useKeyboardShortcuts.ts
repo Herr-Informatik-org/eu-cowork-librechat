@@ -813,7 +813,12 @@ export function useShortcutActions(): ShortcutAction[] {
   const handleOpenAssistants = useCallback(() => handleOpenPanel('assistants'), [handleOpenPanel]);
   const handleOpenAgents = useCallback(() => handleOpenPanel('agents'), [handleOpenPanel]);
   const handleOpenPrompts = useCallback(() => handleOpenPanel('prompts'), [handleOpenPanel]);
-  const handleOpenMemories = useCallback(() => handleOpenPanel('memories'), [handleOpenPanel]);
+  const handleOpenMemories = useCallback(() => {
+    const panelId = document.querySelector('[data-testid="nav-panel-brain"]')
+      ? 'brain'
+      : 'memories';
+    return handleOpenPanel(panelId);
+  }, [handleOpenPanel]);
   const handleOpenParameters = useCallback(() => handleOpenPanel('parameters'), [handleOpenPanel]);
   const handleOpenFiles = useCallback(() => handleOpenPanel('files'), [handleOpenPanel]);
   const handleOpenBookmarks = useCallback(() => handleOpenPanel('bookmarks'), [handleOpenPanel]);

@@ -34,6 +34,8 @@ import { MemoryPanel } from '~/components/SidePanel/Memories';
 import FilesPanel from '~/components/SidePanel/Files/Panel';
 import { PromptsAccordion } from '~/components/Prompts';
 import { SkillsAccordion } from '~/components/Skills';
+import { BrainPanel } from '~/components/Brain';
+import { useBrainStatusQuery } from '~/data-provider/Brain';
 
 export default function useSideNavLinks({
   hidePanel,
@@ -109,6 +111,9 @@ export default function useSideNavLinks({
     permission: Permissions.VIEW,
   });
   const { availableMCPServers } = useMCPServerManager();
+  const { data: brainStatus } = useBrainStatusQuery(
+    hasAccessToMemories && hasAccessToReadMemories && showMemories,
+  );
 
   const { agentsConfig } = useGetAgentsConfig({ endpointsConfig });
   const { skillsEnabled } = useAgentCapabilities(agentsConfig?.capabilities);
@@ -175,13 +180,23 @@ export default function useSideNavLinks({
     }
 
     if (hasAccessToMemories && hasAccessToReadMemories && showMemories) {
-      links.push({
-        title: 'com_ui_memories',
-        label: '',
-        icon: Brain,
-        id: 'memories',
-        Component: MemoryPanel,
-      });
+      if (brainStatus?.enabled === true) {
+        links.push({
+          title: 'com_ui_brain',
+          label: '',
+          icon: Brain,
+          id: 'brain',
+          Component: BrainPanel,
+        });
+      } else if (brainStatus?.enabled === false) {
+        links.push({
+          title: 'com_ui_memories',
+          label: '',
+          icon: Brain,
+          id: 'memories',
+          Component: MemoryPanel,
+        });
+      }
     }
 
     if (hasAccessToBookmarks) {
@@ -265,6 +280,7 @@ export default function useSideNavLinks({
     showPrompts,
     showSkills,
     showMemories,
+    brainStatus?.enabled,
     showMCP,
   ]);
 

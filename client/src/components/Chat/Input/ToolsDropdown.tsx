@@ -20,6 +20,7 @@ import {
 import ArtifactsSubMenu from '~/components/Chat/Input/ArtifactsSubMenu';
 import MCPSubMenu from '~/components/Chat/Input/MCPSubMenu';
 import { useGetStartupConfig } from '~/data-provider';
+import { useBrainStatusQuery } from '~/data-provider/Brain';
 import { useBadgeRowContext } from '~/Providers';
 import { cn } from '~/utils';
 
@@ -68,7 +69,12 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
   });
 
   const canUseMemory = useHasMemoryAccess();
-  const showMemory = canUseMemory && memoryEnabled && user?.personalization?.memories !== false;
+  const { data: brainStatus } = useBrainStatusQuery(canUseMemory);
+  const showMemory =
+    canUseMemory &&
+    memoryEnabled &&
+    user?.personalization?.memories !== false &&
+    brainStatus?.enabled === false;
 
   const [isPopoverActive, setIsPopoverActive] = useState(false);
   const isDisabled = disabled ?? false;

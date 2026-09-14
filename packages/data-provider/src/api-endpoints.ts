@@ -496,6 +496,21 @@ export const verifyTwoFactorTemp = () => `${BASE_URL}/api/auth/2fa/verify-temp`;
 
 /* Memories */
 export const memories = () => `${BASE_URL}/api/memories`;
+export const brainGraph = (params: import('./types/brain').BrainGraphParams = {}) => {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value != null && value !== '') query.set(key, String(value));
+  }
+  return `${BASE_URL}/api/brain/graph${query.size ? `?${query}` : ''}`;
+};
+export const brainNodes = () => `${BASE_URL}/api/brain/nodes`;
+export const brainStatus = () => `${BASE_URL}/api/brain/status`;
+export const brainHistory = () => `${BASE_URL}/api/brain/history`;
+export const brainHistoryPause = () => `${brainHistory()}/pause`;
+export const brainNode = (id: string) => `${brainNodes()}/${encodeURIComponent(id)}`;
+export const brainExport = () => `${BASE_URL}/api/brain/export`;
+export const brainRecalls = (conversationId: string) =>
+  `${BASE_URL}/api/brain/recalls?conversationId=${encodeURIComponent(conversationId)}`;
 export const memory = (key: string, agentId?: string) =>
   `${memories()}/${encodeURIComponent(key)}${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''}`;
 export const memoryPreferences = () => `${memories()}/preferences`;

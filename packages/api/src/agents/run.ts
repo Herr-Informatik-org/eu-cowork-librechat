@@ -356,6 +356,7 @@ export function shouldReplayReasoningContent(
 
 type RunAgent = Omit<Agent, 'tools'> & {
   tools?: GenericTool[];
+  brainTools?: GenericTool[];
   maxContextTokens?: number;
   /** Pre-ratio context budget from initializeAgent. */
   baseContextTokens?: number;
@@ -1392,14 +1393,18 @@ export async function createRun({
       contextPruningConfig: summarization.contextPruning,
       maxToolResultChars: agent.maxToolResultChars,
     };
-    if (askGraphTools) {
+    const directGraphTools = [
+      ...(askGraphTools ?? []),
+      ...(!isSubagent ? (agent.brainTools ?? []) : []),
+    ];
+    if (directGraphTools.length > 0) {
       /**
        * Typed structurally — not as `AgentInputs['graphTools']` — because the
        * field ships in `@librechat/agents` > 3.2.57 (agents#289); older SDK
        * versions ignore it at runtime (the tool is then simply absent, never
        * broken). Inline the field in the literal once the dependency is bumped.
        */
-      (agentInput as AgentInputs & { graphTools?: GenericTool[] }).graphTools = askGraphTools;
+      (agentInput as AgentInputs & { graphTools?: GenericTool[] }).graphTools = directGraphTools;
     }
     return agentInput;
   };
@@ -1525,7 +1530,13 @@ export async function createRun({
   let hooks = hitl?.hooks;
   if (process.env.HOSTED_USAGE_REQUIRED === 'true') {
     hooks = hooks ?? new HookRegistry();
-    for (const event of ['RunStart', 'PreemptBoundary', 'PreToolUse', 'PostToolBatch', 'PreCompact'] as const) {
+    for (const event of [
+      'RunStart',
+      'PreemptBoundary',
+      'PreToolUse',
+      'PostToolBatch',
+      'PreCompact',
+    ] as const) {
       hooks.register(event, { hooks: [usageCreditHook], timeout: 15000 });
     }
   }

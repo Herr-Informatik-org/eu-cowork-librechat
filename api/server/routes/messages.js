@@ -8,6 +8,8 @@ const {
   sendFeedbackScore,
   traceIdForMessage,
   mergeQuotedTextForCount,
+  deleteBrainSources,
+  BrainServiceError,
 } = require('@librechat/api');
 const { findAllArtifacts, replaceArtifactContent } = require('~/server/services/Artifacts/update');
 const {
@@ -484,9 +486,16 @@ router.put(
 router.delete('/:conversationId/:messageId', validateMessageReq, async (req, res) => {
   try {
     const { conversationId, messageId } = req.params;
+    await deleteBrainSources(req.user.id, [conversationId], [messageId]);
     await db.deleteMessages({ messageId, conversationId, user: req.user.id });
     res.status(204).send();
   } catch (error) {
+    if (error instanceof BrainServiceError) {
+      return res.status(503).json({
+        error:
+          'Die Nachricht bleibt erhalten, bis auch ihre Brain-Quellen sicher gelöscht werden können. Bitte versuche es erneut.',
+      });
+    }
     logger.error('Error deleting message:', error);
     res.status(500).json({ error: 'Internal server error' });
   }

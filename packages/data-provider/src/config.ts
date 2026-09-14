@@ -1801,6 +1801,7 @@ export const transactionsSchema = z.object({
 
 export const DEFAULT_MEMORY_MAX_INPUT_TOKENS = 12000;
 
+// Explicit model selection wins when an override merges with an inherited agent id.
 export const memorySchema = z.object({
   disabled: z.boolean().optional(),
   validKeys: z.array(z.string()).optional(),
@@ -1813,14 +1814,14 @@ export const memorySchema = z.object({
     .union([
       z.object({
         enabled: z.boolean().optional(),
-        id: z.string(),
-      }),
-      z.object({
-        enabled: z.boolean().optional(),
         provider: z.string(),
         model: z.string(),
         instructions: z.string().optional(),
         model_parameters: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+      }),
+      z.object({
+        enabled: z.boolean().optional(),
+        id: z.string(),
       }),
     ])
     .optional(),

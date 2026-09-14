@@ -89,6 +89,12 @@ const {
   resolveYouTubeInjectionConfig,
   decrementPendingRequest,
   maybePrewarmCodeSandbox,
+  isBrainConfigured,
+  isBrainChatEligible,
+  attachBrainTools,
+  prepareBrainTurn,
+  learnConfiguredBrainWithUsage,
+  BrainLearningConfigurationError,
 } = require('@librechat/api');
 const {
   Run,
@@ -1058,7 +1064,7 @@ class AgentClient extends BaseClient {
      * original promise later still propagates either error.
      */
     const earlySharedContextPromise = Promise.all([
-      this.useMemory(),
+      this.useMemory(orderedMessages),
       resolveConfigServers(this.options.req),
     ]);
     void earlySharedContextPromise.catch(() => {});
@@ -1316,6 +1322,35 @@ class AgentClient extends BaseClient {
       agentScopedContextPromise,
     ]);
 
+    if (this.brainSession && !this.brainContext) {
+      const contextOverhead = await countTokens(
+        [
+          this.options.agent.instructions,
+          this.options.agent.additional_instructions,
+          augmentedPrompt,
+          ...agentScopedContext.values(),
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
+      this.brainSession.setContextBudget(
+        Math.max(
+          0,
+          (this.options.agent.maxContextTokens || 8192) - promptTokenTotal - contextOverhead - 1024,
+        ),
+      );
+      try {
+        this.brainContext = await this.brainSession.initialize();
+      } catch {
+        this.brainContext =
+          'Das persönliche Brain ist zurzeit nicht erreichbar. Verwende den aktuellen Chat; behaupte keinen erfolgten Erinnerungsabruf.';
+        logger.warn('[Brain] Persönlicher Abruf vorübergehend nicht verfügbar.');
+      }
+    }
+    if (this.brainContext) {
+      sharedRunContextParts.push(this.brainContext);
+    }
+
     /** Augmented prompt from RAG/context handlers */
     this.augmentedPrompt = augmentedPrompt;
     if (this.augmentedPrompt) {
@@ -1454,8 +1489,17 @@ class AgentClient extends BaseClient {
   /**
    * @returns {Promise<{ withKeys?: string; withoutKeys?: string } | undefined>}
    */
-  async useMemory() {
+  async useMemory(messages = []) {
     const user = this.options.req.user;
+    if (isBrainConfigured()) {
+      attachBrainTools(this.options.agent);
+      for (const agent of this.agentConfigs?.values() ?? []) {
+        attachBrainTools(agent);
+      }
+    }
+    if (this.options.req.body?.isTemporary) {
+      return;
+    }
     if (user.personalization?.memories === false) {
       return;
     }
@@ -1479,6 +1523,51 @@ class AgentClient extends BaseClient {
     }
 
     const userId = this.options.req.user.id + '';
+    if (isBrainConfigured() && process.env.BRAIN_ENABLED === 'false') {
+      return;
+    }
+    if (
+      isBrainChatEligible({
+        memoriesEnabled: user.personalization?.memories,
+        temporary: this.options.req.body?.isTemporary,
+        memoryDisabled: memoryConfig.disabled,
+      })
+    ) {
+      this.processMemory = undefined;
+      const prepared = await prepareBrainTurn({
+        user,
+        conversationId: this.conversationId,
+        messageId: this.responseMessageId,
+        sourceMessage: messages.at(-1),
+        countTokens,
+        dependencies: {
+          getUserById: db.getUserById,
+          getMessages: db.getMessages,
+          getRoleByName: db.getRoleByName,
+          getUserMemories: db.getUserMemories,
+        },
+        getBudget: () => {
+          const snapshot = this.contextUsageSink?.latest;
+          if (typeof snapshot?.remainingContextTokens !== 'number') {
+            return undefined;
+          }
+          const latestUsage =
+            this.usageEmitSink?.slice(this.contextUsageSink.latestUsageIndex ?? 0) ?? [];
+          const outputTokens = latestUsage.reduce(
+            (total, usage) => total + (usage.usage_type ? 0 : usage.output_tokens || 0),
+            0,
+          );
+          return {
+            remaining: Math.max(0, snapshot.remainingContextTokens - outputTokens - 512),
+            revision: this.contextUsageSink.count ?? 0,
+          };
+        },
+      });
+      this.brainSession = prepared.session;
+      this.brainContext = prepared.context;
+      attachBrainTools(this.options.agent, this.brainSession);
+      return;
+    }
     /** Memory partition of the primary agent; undefined = shared personal pool */
     const memoryAgentId = getMemoryAgentId(this.options.agent);
     this.processMemory = undefined;
@@ -2709,6 +2798,44 @@ class AgentClient extends BaseClient {
 
       this.finalizeSubagentContent();
       await this.settleActivityLabels();
+
+      if (this.brainSession && !abortController?.signal?.aborted) {
+        const session = this.brainSession;
+        const { req, agent } = this.options;
+        const endpointTokenConfig = this.options.endpointTokenConfig;
+        void learnConfiguredBrainWithUsage({
+          session,
+          modelOptions: {
+            req,
+            agent,
+            ids: { conversationId: this.conversationId, messageId: this.responseMessageId },
+            endpointTokenConfig,
+            db: { getUserKey: db.getUserKey, getUserKeyValues: db.getUserKeyValues },
+          },
+          dependencies: {
+            spendTokens: db.spendTokens,
+            spendStructuredTokens: db.spendStructuredTokens,
+            pricing: {
+              getMultiplier: db.getMultiplier,
+              getCacheMultiplier: db.getCacheMultiplier,
+            },
+            bulkWriteOps: {
+              insertMany: db.bulkInsertTransactions,
+              updateBalance: db.updateBalance,
+            },
+          },
+          usageConfig: {
+            balance: getBalanceConfig(req.config),
+            transactions: getTransactionsConfig(req.config),
+          },
+        }).catch((error) =>
+          logger.warn(
+            error instanceof BrainLearningConfigurationError
+              ? `[Brain] ${error.message}`
+              : '[Brain] Automatisches Lernen konnte nicht abgeschlossen werden.',
+          ),
+        );
+      }
 
       /** Flush subagent usage emits the sink fired without awaiting, so their
        *  persist/publish completes before we return and the job is cleaned up

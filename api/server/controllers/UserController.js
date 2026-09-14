@@ -10,6 +10,7 @@ const {
   extractWebSearchEnvVars,
   deleteAgentCheckpoints,
   deleteAllSharedLinksWithCleanup,
+  requestBrain,
 } = require('@librechat/api');
 const {
   Tools,
@@ -343,6 +344,10 @@ const deleteUserController = async (req, res) => {
       }
     }
 
+    // Remove derived personal knowledge before deleting its account and sources.
+    if (process.env.BRAIN_API_URL?.trim()) {
+      await requestBrain(String(user.id), 'DELETE', '/v1/user');
+    }
     await db.deleteMessages({ user: user.id });
     await db.deleteAllUserSessions({ userId: user.id });
     await db.deleteTransactions({ user: user.id });

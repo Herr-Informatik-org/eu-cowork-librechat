@@ -4,6 +4,7 @@ import { CheckboxButton } from '@librechat/client';
 import { defaultAgentCapabilities } from 'librechat-data-provider';
 import { useLocalize, useHasMemoryAccess, useAgentCapabilities, useAuthContext } from '~/hooks';
 import { useBadgeRowContext } from '~/Providers';
+import { useBrainStatusQuery } from '~/data-provider/Brain';
 
 function Memory() {
   const localize = useLocalize();
@@ -12,6 +13,7 @@ function Memory() {
   const { toggleState: memoryActive, debouncedChange, isPinned } = context?.memory ?? {};
 
   const canUseMemory = useHasMemoryAccess();
+  const { data: brainStatus } = useBrainStatusQuery(canUseMemory);
 
   const { memoryEnabled } = useAgentCapabilities(
     context?.agentsConfig?.capabilities ?? defaultAgentCapabilities,
@@ -19,7 +21,7 @@ function Memory() {
 
   const hasOptedOut = user?.personalization?.memories === false;
 
-  if (!canUseMemory || !memoryEnabled || hasOptedOut) {
+  if (!canUseMemory || !memoryEnabled || hasOptedOut || brainStatus?.enabled !== false) {
     return null;
   }
 

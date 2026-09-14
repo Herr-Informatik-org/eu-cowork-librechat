@@ -1,5 +1,20 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-14 — Persönliches Brain mit Chatverlauf und Chatbefehlen
+
+- Persönliches Gedächtnis mit adaptivem Abruf, belegten Quellen und automatischem
+  Lernen aus eigenen Chatbeiträgen; getrennt je Benutzer.
+- Wissenskarte im bestehenden hellen und dunklen Design ersetzt das persönliche
+  Memory-Panel. Erinnerungen lassen sich suchen, bearbeiten, vergessen und exportieren.
+- Auf Wunsch aus bisherigen eigenen Chats lernen, mit gespeichertem Fortschritt,
+  Pause und Fortsetzen. Speichern, gezieltes Korrigieren und Vergessen sind auch
+  direkt im normalen Chat möglich.
+- Ein separates Hintergrundmodell ist konfigurierbar. Temporäre Chats, Opt-out,
+  Berechtigungen, Quellenlöschung und persönliche Budgets werden berücksichtigt.
+- Verifiziert mit 80 API- und 89 Oberflächentests, API-Bündelung, Frontend-Build sowie
+  fünf lokalen Browserabläufen mit simuliertem Modellanbieter. Der separate
+  Brain-Dienst benötigt die passende Distribution; kein Produktivrollout.
+
 ## 2026-09-14 — Verarbeitungsregion auf Modellkarten
 
 - Kennzahl «Verarbeitung» neben Intelligenz und Tokenkosten, auch in Suchergebnissen.

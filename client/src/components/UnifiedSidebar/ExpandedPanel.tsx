@@ -14,6 +14,7 @@ import SidePanelNav from '~/components/SidePanel/Nav';
 import store from '~/store';
 
 const AccountSettings = lazy(() => import('~/components/Nav/AccountSettings'));
+const PRIMARY_PANEL_IDS = new Set(['conversations', 'brain', 'files']);
 
 const NewChatButton = memo(function NewChatButton({
   setActive,
@@ -138,8 +139,8 @@ function ExpandedPanel({
   const { active, setActive } = useActivePanel();
   const effectiveActive = resolveActivePanel(active, links);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const primaryLinks = links.filter((link) => ['conversations', 'files'].includes(link.id));
-  const toolLinks = links.filter((link) => !['conversations', 'files'].includes(link.id));
+  const primaryLinks = links.filter((link) => PRIMARY_PANEL_IDS.has(link.id));
+  const toolLinks = links.filter((link) => !PRIMARY_PANEL_IDS.has(link.id));
 
   const toggleLabel = expanded ? 'com_nav_close_sidebar' : 'com_nav_open_sidebar';
   const toggleClick = expanded ? onCollapse : onExpand;

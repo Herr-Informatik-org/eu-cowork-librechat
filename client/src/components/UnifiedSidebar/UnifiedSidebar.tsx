@@ -8,6 +8,7 @@ import { ChatContext, ChatFormProvider, ActivePanelProvider } from '~/Providers'
 import useUnifiedSidebarLinks from '~/hooks/Nav/useUnifiedSidebarLinks';
 import { useChatHelpers, useLocalize } from '~/hooks';
 import ExpandedPanel from './ExpandedPanel';
+import { BrainDialogProvider } from '~/components/Brain/Dialog';
 import Sidebar from './Sidebar';
 import { cn } from '~/utils';
 import store from '~/store';
@@ -132,46 +133,42 @@ function UnifiedSidebar() {
     return () => document.removeEventListener('keydown', handler);
   }, [isSmallScreen, expanded, handleCollapse]);
 
-  if (isSmallScreen) {
-    return (
-      <>
-        <div
-          className={cn(
-            'fixed left-0 top-0 z-[110] flex h-full bg-surface-primary-alt',
-            expanded ? 'translate-x-0' : '-translate-x-full',
-          )}
-          style={{
-            width: 'min(85vw, 380px)',
-            transition: `transform ${TRANSITION_MS}ms ${EASING}`,
-          }}
-          inert={!expanded ? '' : undefined}
-        >
-          <SidebarChatProvider>
-            <ActivePanelProvider>
-              <ExpandedPanel links={links} onCollapse={handleCollapse} />
-            </ActivePanelProvider>
-          </SidebarChatProvider>
-        </div>
-        <div
-          className={cn(
-            'fixed inset-0 z-[109] bg-black/50',
-            expanded ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
-          )}
-          style={{ transition: `opacity ${TRANSITION_MS}ms ${EASING}` }}
-          role="presentation"
-        >
-          <button
-            className="h-full w-full"
-            onClick={handleCollapse}
-            aria-label={localize('com_nav_close_sidebar')}
-            tabIndex={expanded ? 0 : -1}
-          />
-        </div>
-      </>
-    );
-  }
-
-  return (
+  const sidebar = isSmallScreen ? (
+    <>
+      <div
+        className={cn(
+          'fixed left-0 top-0 z-[110] flex h-full bg-surface-primary-alt',
+          expanded ? 'translate-x-0' : '-translate-x-full',
+        )}
+        style={{
+          width: 'min(85vw, 380px)',
+          transition: `transform ${TRANSITION_MS}ms ${EASING}`,
+        }}
+        inert={!expanded ? '' : undefined}
+      >
+        <SidebarChatProvider>
+          <ActivePanelProvider>
+            <ExpandedPanel links={links} onCollapse={handleCollapse} />
+          </ActivePanelProvider>
+        </SidebarChatProvider>
+      </div>
+      <div
+        className={cn(
+          'fixed inset-0 z-[109] bg-black/50',
+          expanded ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
+        )}
+        style={{ transition: `opacity ${TRANSITION_MS}ms ${EASING}` }}
+        role="presentation"
+      >
+        <button
+          className="h-full w-full"
+          onClick={handleCollapse}
+          aria-label={localize('com_nav_close_sidebar')}
+          tabIndex={expanded ? 0 : -1}
+        />
+      </div>
+    </>
+  ) : (
     <SidebarChatProvider>
       <ActivePanelProvider>
         <aside
@@ -198,6 +195,7 @@ function UnifiedSidebar() {
       </ActivePanelProvider>
     </SidebarChatProvider>
   );
+  return <BrainDialogProvider>{sidebar}</BrainDialogProvider>;
 }
 
 export default memo(UnifiedSidebar);

@@ -3,6 +3,7 @@ import { RecoilRoot } from 'recoil';
 import { Tools, Constants } from 'librechat-data-provider';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ToolCall from '../ToolCall';
+import store from '~/store';
 
 // Mock dependencies
 jest.mock('~/hooks', () => ({
@@ -19,6 +20,10 @@ jest.mock('~/hooks', () => ({
       com_assistants_allow_sites_you_trust: 'Only allow sites you trust',
       com_ui_via_server: `via ${values?.[0]}`,
       com_ui_tool_failed: 'failed',
+      com_ui_brain_activity_search: 'Looking up personal knowledge',
+      com_ui_brain_activity_remember: 'Saving a memory',
+      com_ui_brain_activity_update: 'Updating memory',
+      com_ui_brain_activity_forget: 'Forgetting a memory',
     };
     return translations[key] || key;
   },
@@ -111,8 +116,12 @@ describe('ToolCall', () => {
     isSubmitting: false,
   };
 
-  const renderWithRecoil = (component: React.ReactElement) => {
-    return render(<RecoilRoot>{component}</RecoilRoot>);
+  const renderWithRecoil = (component: React.ReactElement, autoExpand = false) => {
+    return render(
+      <RecoilRoot initializeState={({ set }) => set(store.autoExpandTools, autoExpand)}>
+        {component}
+      </RecoilRoot>,
+    );
   };
 
   beforeEach(() => {
@@ -291,6 +300,64 @@ describe('ToolCall', () => {
   });
 
   describe('tool call info visibility', () => {
+    it.each([
+      ['brain_search', 'Looking up personal knowledge'],
+      ['brain_remember', 'Saving a memory'],
+      ['brain_update', 'Updating memory'],
+      ['brain_forget', 'Forgetting a memory'],
+    ])('keeps %s technical details collapsed with a friendly activity label', (name, label) => {
+      renderWithRecoil(
+        <ToolCall {...mockProps} name={name} args={'{"intent":"Internal protocol trace"}'} />,
+        true,
+      );
+      const header = screen.getByTestId('progress-text');
+      expect(header).toHaveTextContent(label);
+      expect(header).not.toHaveTextContent(name);
+      const details = screen.getByTestId('tool-call-info').closest('[style]');
+      expect(details).toHaveStyle({ gridTemplateRows: '0fr', opacity: 0 });
+      fireEvent.click(header);
+      expect(details).toHaveStyle({ gridTemplateRows: '1fr', opacity: 1 });
+    });
+
+    it.each([
+      'testFunction',
+      'brain_search_custom',
+      `brain_search${Constants.mcp_delimiter}server`,
+    ])('preserves auto-expand and custom intent for other tools such as %s', (name) => {
+      renderWithRecoil(
+        <ToolCall {...mockProps} name={name} args={'{"intent":"Customer-defined activity"}'} />,
+        true,
+      );
+      expect(screen.getByTestId('progress-text')).toHaveTextContent('Customer-defined activity');
+      expect(screen.getByTestId('tool-call-info').closest('[style]')).toHaveStyle({
+        gridTemplateRows: '1fr',
+        opacity: 1,
+      });
+    });
+
+    it('keeps Brain collapsed when output arrives and uses the friendly live announcement', () => {
+      const content = (output: string | null, progress: number) => (
+        <RecoilRoot initializeState={({ set }) => set(store.autoExpandTools, true)}>
+          <ToolCall
+            {...mockProps}
+            name="brain_search"
+            output={output}
+            initialProgress={progress}
+            isSubmitting={progress < 1}
+          />
+        </RecoilRoot>
+      );
+      const view = render(content(null, 0.5));
+      expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
+        'Looking up personal knowledge',
+      );
+      view.rerender(content('Brain retrieval: {"items":[]}', 1));
+      expect(screen.getByTestId('tool-call-info').closest('[style]')).toHaveStyle({
+        gridTemplateRows: '0fr',
+        opacity: 0,
+      });
+    });
+
     it('should toggle tool call info expand/collapse when clicking header', () => {
       renderWithRecoil(<ToolCall {...mockProps} />);
 

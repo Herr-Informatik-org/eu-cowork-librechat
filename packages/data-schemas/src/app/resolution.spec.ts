@@ -29,6 +29,51 @@ const baseConfig = {
 } as unknown as AppConfig;
 
 describe('mergeConfigOverrides', () => {
+  it('replaces a complete memory model selection without retaining inherited agent settings', () => {
+    const base = {
+      memory: {
+        tokenLimit: 10000,
+        agent: {
+          id: 'legacy-id',
+          provider: 'Old',
+          model: 'old-model',
+          model_parameters: { reasoning_effort: 'max', temperature: 0.7 },
+        },
+      },
+    } as unknown as AppConfig;
+    const selected = { provider: 'New', model: 'new-model', enabled: true, model_parameters: {} };
+    const result = mergeConfigOverrides(base, [fakeConfig({ memory: { agent: selected } }, 10)]);
+    expect(result.memory).toEqual({ tokenLimit: 10000, agent: selected });
+    expect(base.memory?.agent).toHaveProperty('id', 'legacy-id');
+  });
+
+  it('preserves the selected memory model when only its enabled flag changes', () => {
+    const agent = {
+      provider: 'Existing',
+      model: 'existing-model',
+      model_parameters: { temperature: 0.2 },
+    };
+    const base = { memory: { agent } } as unknown as AppConfig;
+    const result = mergeConfigOverrides(base, [
+      fakeConfig({ memory: { agent: { enabled: false } } }, 10),
+    ]);
+    expect(result.memory?.agent).toEqual({ ...agent, enabled: false });
+  });
+
+  it('continues deep-merging complete model fields outside memory.agent', () => {
+    const base = {
+      summarization: { provider: 'Old', model: 'old', parameters: { temperature: 0.2 } },
+    } as unknown as AppConfig;
+    const result = mergeConfigOverrides(base, [
+      fakeConfig({ summarization: { provider: 'New', model: 'new' } }, 10),
+    ]);
+    expect(result.summarization).toEqual({
+      provider: 'New',
+      model: 'new',
+      parameters: { temperature: 0.2 },
+    });
+  });
+
   it('returns base config when configs array is empty', () => {
     expect(mergeConfigOverrides(baseConfig, [])).toBe(baseConfig);
   });

@@ -1,5 +1,16 @@
 import type { AxiosResponse } from 'axios';
 import type { TFileConfig } from './file-config';
+import type {
+  BrainGraph,
+  BrainGraphParams,
+  BrainNode,
+  BrainNodeInput,
+  BrainNodeUpdate,
+  BrainRecall,
+  BrainEdge,
+  BrainExport,
+  BrainHistoryStatus,
+} from './types/brain';
 import type * as t from './types';
 import * as permissions from './accessPermissions';
 import * as endpoints from './api-endpoints';
@@ -16,9 +27,46 @@ import request from './request';
 import * as s from './schemas';
 import * as r from './roles';
 
+export const getBrainHistory = (signal?: AbortSignal): Promise<BrainHistoryStatus> =>
+  request.get(endpoints.brainHistory(), { signal });
+export const startBrainHistory = (): Promise<BrainHistoryStatus> =>
+  request.post(endpoints.brainHistory(), {});
+export const pauseBrainHistory = (): Promise<BrainHistoryStatus> =>
+  request.post(endpoints.brainHistoryPause(), {});
+
 export function getLangfuseConnection(): Promise<t.TLangfuseConnectionStatus> {
   return request.get(endpoints.adminLangfuseConnection());
 }
+
+export const getBrainGraph = (
+  params?: BrainGraphParams,
+  signal?: AbortSignal,
+): Promise<BrainGraph> => request.get(endpoints.brainGraph(params), { signal });
+
+export const getBrainNode = (
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ node: BrainNode; edges: BrainEdge[] }> =>
+  request.get(endpoints.brainNode(id), { signal });
+
+export const createBrainNode = (data: BrainNodeInput): Promise<{ node: BrainNode }> =>
+  request.post(endpoints.brainNodes(), data);
+
+export const updateBrainNode = (id: string, data: BrainNodeUpdate): Promise<{ node: BrainNode }> =>
+  request.patch(endpoints.brainNode(id), data);
+
+export const deleteBrainNode = (id: string): Promise<{ deleted: true }> =>
+  request.delete(endpoints.brainNode(id));
+
+export const getBrainRecalls = (
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<{ recalls: BrainRecall[] }> =>
+  request.get(endpoints.brainRecalls(conversationId), { signal });
+
+export const exportBrain = (): Promise<BrainExport> => request.get(endpoints.brainExport());
+export const getBrainStatus = (signal?: AbortSignal): Promise<{ enabled: boolean }> =>
+  request.get(endpoints.brainStatus(), { signal });
 
 export function updateLangfuseConnection(
   payload: t.TUpdateLangfuseConnectionRequest,

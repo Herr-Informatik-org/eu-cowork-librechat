@@ -8,6 +8,8 @@ const {
   restoreTenantContextFromReq,
   deleteAllSharedLinksWithCleanup,
   deleteConvoSharedLinksWithCleanup,
+  purgeBrainConversations,
+  BrainServiceError,
 } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
 const { CacheKeys, EModelEndpoint } = require('librechat-data-provider');
@@ -144,6 +146,10 @@ router.delete('/', configMiddleware, async (req, res) => {
   }
 
   try {
+    const brainIds = await purgeBrainConversations(req.user.id, filter.conversationId);
+    if (brainIds) {
+      filter = { conversationId: { $in: brainIds } };
+    }
     const dbResponse = await db.deleteConvos(req.user.id, filter);
     // HITL: prune the deleted conversations' durable checkpoints — a paused run's
     // checkpoint would otherwise persist until the Mongo TTL. Never throws.
@@ -151,12 +157,20 @@ router.delete('/', configMiddleware, async (req, res) => {
       dbResponse.conversationIds,
       req.config?.endpoints?.[EModelEndpoint.agents]?.checkpointer,
     );
-    if (filter.conversationId) {
-      await db.deleteToolCalls(req.user.id, filter.conversationId);
-      await deleteConvoSharedLinksWithCleanup(req.user.id, filter.conversationId);
+    if (conversationId) {
+      await db.deleteToolCalls(req.user.id, conversationId);
+      await deleteConvoSharedLinksWithCleanup(req.user.id, conversationId);
     }
     res.status(201).json(dbResponse);
   } catch (error) {
+    if (error instanceof BrainServiceError) {
+      return res
+        .status(503)
+        .json({
+          error:
+            'Der Chat bleibt erhalten, bis auch seine Brain-Quellen sicher gelöscht werden können. Bitte versuche es erneut.',
+        });
+    }
     logger.error('Error clearing conversations', error);
     res.status(500).send('Error clearing conversations');
   }
@@ -164,7 +178,11 @@ router.delete('/', configMiddleware, async (req, res) => {
 
 router.delete('/all', configMiddleware, async (req, res) => {
   try {
-    const dbResponse = await db.deleteConvos(req.user.id, {});
+    const brainIds = await purgeBrainConversations(req.user.id);
+    const dbResponse = await db.deleteConvos(
+      req.user.id,
+      brainIds ? { conversationId: { $in: brainIds } } : {},
+    );
     // HITL: prune ALL the deleted conversations' durable checkpoints in one bulk pass.
     await deleteAgentCheckpoints(
       dbResponse.conversationIds,
@@ -174,6 +192,14 @@ router.delete('/all', configMiddleware, async (req, res) => {
     await deleteAllSharedLinksWithCleanup(req.user.id);
     res.status(201).json(dbResponse);
   } catch (error) {
+    if (error instanceof BrainServiceError) {
+      return res
+        .status(503)
+        .json({
+          error:
+            'Die Chats bleiben erhalten, bis auch ihre Brain-Quellen sicher gelöscht werden können. Bitte versuche es erneut.',
+        });
+    }
     logger.error('Error clearing conversations', error);
     res.status(500).send('Error clearing conversations');
   }
