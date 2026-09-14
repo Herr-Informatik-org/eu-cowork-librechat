@@ -1,4 +1,12 @@
 {
+  "com_ui_processing_region": "Processing",
+  "com_ui_processing_switzerland": "Switzerland",
+  "com_ui_processing_europe": "Europe",
+  "com_ui_processing_worldwide": "Worldwide",
+  "com_ui_processing_variable": "Varies by model",
+  "com_ui_processing_unknown": "Unknown",
+  "com_ui_processing_region_hint": "Configured region for model requests. Storage and external tools may use other regions. For automatic routing, all possible routes must be considered.",
+  "com_ui_processing_unknown_hint": "No processing region has been specified for this model card.",
   "com_ui_pdf_document_view": "PDF document",
   "com_ui_sheet_loading": "Loading workbook…",
   "com_ui_sheet_unavailable": "Workbook view unavailable.",

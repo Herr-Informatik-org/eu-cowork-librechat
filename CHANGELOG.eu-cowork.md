@@ -1,5 +1,13 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-14 — Verarbeitungsregion auf Modellkarten
+
+- Kennzahl «Verarbeitung» neben Intelligenz und Tokenkosten, auch in Suchergebnissen.
+- Schweizer Wappen und Europasymbol in Originalfarben, alle Icons einheitlich 14 Pixel.
+- Optionales Regionsfeld im Schema; fehlende Angaben erscheinen als «Unbekannt».
+- 21 Schema-/Komponententests, vollständiger Typecheck, Lint, Build und lokale
+  Browserprüfung des Menüs und der Suche bei Desktop- und Mobilbreite erfolgreich.
+
 ## 2026-09-14 — Bildnachrichten ohne Pflichttext
 
 - Fertig hochgeladene Bilder lassen sich direkt senden, auch bei leerem Textfeld.

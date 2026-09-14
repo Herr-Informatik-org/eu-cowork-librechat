@@ -1,4 +1,12 @@
 {
+  "com_ui_processing_region": "Verarbeitung",
+  "com_ui_processing_switzerland": "Schweiz",
+  "com_ui_processing_europe": "Europa",
+  "com_ui_processing_worldwide": "Weltweit",
+  "com_ui_processing_variable": "Je nach Modell",
+  "com_ui_processing_unknown": "Unbekannt",
+  "com_ui_processing_region_hint": "Konfigurierte Region für Modellanfragen. Speicherung und externe Werkzeuge können andere Regionen verwenden. Bei automatischer Auswahl müssen alle möglichen Modellrouten berücksichtigt werden.",
+  "com_ui_processing_unknown_hint": "Für diese Modellkarte ist noch keine Verarbeitungsregion angegeben.",
   "com_ui_pdf_document_view": "PDF-Dokument",
   "com_ui_sheet_loading": "Tabellenansicht wird geladen…",
   "com_ui_sheet_unavailable": "Tabellenansicht nicht verfügbar.",

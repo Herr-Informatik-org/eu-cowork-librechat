@@ -1,7 +1,8 @@
 import React from 'react';
 import { Brain, Coins, Image, MessageSquare, Mic, Video } from 'lucide-react';
 import type { TModelSpec } from 'librechat-data-provider';
-import { useLocalize } from '~/hooks';
+import useLocalize from '~/hooks/useLocalize';
+import ProcessingRegion from './ProcessingRegion';
 
 const modalities = [
   { key: 'text', label: 'Text', Icon: MessageSquare },
@@ -12,19 +13,18 @@ const modalities = [
 
 export default function ModelInsight({ insight }: { insight?: TModelSpec['insight'] }) {
   const localize = useLocalize();
-  if (!insight) return null;
   return (
     <div className="flex flex-col gap-1 text-text-secondary">
       <div
         className="flex flex-wrap gap-x-5 gap-y-2"
         title={
-          insight.note ??
+          insight?.note ??
           'Relative Einordnung im angebotenen Modellportfolio, kein Benchmark. Mehr Kostensymbole bedeuten höhere Tokenkosten.'
         }
       >
         {[
-          { label: 'Intelligenz', value: insight.intelligence, Icon: Brain },
-          { label: 'Tokenkosten', value: insight.tokenCost, Icon: Coins },
+          { label: 'Intelligenz', value: insight?.intelligence, Icon: Brain },
+          { label: 'Tokenkosten', value: insight?.tokenCost, Icon: Coins },
         ].map(({ label, value, Icon }) =>
           value == null ? null : (
             <div
@@ -47,8 +47,9 @@ export default function ModelInsight({ insight }: { insight?: TModelSpec['insigh
             </div>
           ),
         )}
+        <ProcessingRegion region={insight?.processingRegion} />
       </div>
-      {insight.inputs?.length ? (
+      {insight?.inputs?.length ? (
         <div
           className="flex items-center gap-2.5"
           aria-label={`Eingaben: ${modalities

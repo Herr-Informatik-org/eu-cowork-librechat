@@ -10,6 +10,16 @@ import {
 } from './schemas';
 import { MAX_SUBAGENTS } from './limits';
 
+export const modelProcessingRegionSchema = z.enum([
+  'switzerland',
+  'europe',
+  'worldwide',
+  'variable',
+  'unknown',
+]);
+
+export type TModelProcessingRegion = z.infer<typeof modelProcessingRegionSchema>;
+
 export type TModelSpec = {
   name: string;
   label: string;
@@ -21,6 +31,7 @@ export type TModelSpec = {
   insight?: {
     intelligence?: number;
     tokenCost?: number;
+    processingRegion?: TModelProcessingRegion;
     inputs?: ('text' | 'image' | 'audio' | 'video')[];
     note?: string;
   };
@@ -102,12 +113,15 @@ export const tModelSpecSchema = z.object({
   default: z.boolean().optional(),
   softDefault: z.boolean().optional(),
   description: z.string().optional(),
-  insight: z.object({
-    intelligence: z.number().int().min(1).max(5).optional(),
-    tokenCost: z.number().int().min(1).max(5).optional(),
-    inputs: z.array(z.enum(['text', 'image', 'audio', 'video'])).optional(),
-    note: z.string().max(300).optional(),
-  }).optional(),
+  insight: z
+    .object({
+      intelligence: z.number().int().min(1).max(5).optional(),
+      tokenCost: z.number().int().min(1).max(5).optional(),
+      processingRegion: modelProcessingRegionSchema.optional(),
+      inputs: z.array(z.enum(['text', 'image', 'audio', 'video'])).optional(),
+      note: z.string().max(300).optional(),
+    })
+    .optional(),
   group: z.string().optional(),
   groupIcon: z.union([z.string(), eModelEndpointSchema]).optional(),
   showIconInMenu: z.boolean().optional(),
