@@ -1,5 +1,17 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-14 — Bildvorschau in der Dateiliste
+
+- Bilddateien aus dem Sitzungskontext öffnen eine echte Vorschau mit Zoom,
+  Rücksetzen, Pixelgrösse und Originaldownload. PNG, JPEG, GIF, WebP, AVIF,
+  BMP, ICO und SVG werden anhand von Dateityp oder Endung erkannt.
+- Die Vorschau nutzt weiterhin den berechtigten Dateidownload. SVG wird als
+  Bild dargestellt; fremde Inhalte werden nicht als HTML eingebettet.
+- Abgebrochene Ladevorgänge liefern beim erneuten Öffnen keine veralteten
+  Ergebnisse. Temporäre Vorschau-URLs werden beim Schliessen freigegeben.
+- Geprüft mit 17 Regressionstests, Typecheck, Lint sowie einem echten lokalen
+  PNG-Upload und Browserprüfung auf Desktop und Mobilbreite.
+
 ## 2026-09-11 — Modellkarten und gehostetes Testguthaben
 
 - Modellkarten zeigen relative Leistungs- und Kostenstufen mit fünf Symbolen sowie

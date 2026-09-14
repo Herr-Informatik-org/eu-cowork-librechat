@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import copy from 'copy-to-clipboard';
 import { useRecoilValue, useSetRecoilState } from 'recoil';
 import { Download } from 'lucide-react';
@@ -9,6 +9,7 @@ import CopyButton from '~/components/Messages/Content/CopyButton';
 import { useShareContext } from '~/Providers';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
+import ImageFilePreview, { getImagePreviewMime } from './ImageFilePreview';
 import { createOfficeFileArtifact } from '~/components/SidePanel/Session/OfficeFilePreviewButton';
 
 interface FilePreviewDialogProps {
@@ -142,7 +143,9 @@ export default function FilePreviewDialog({
   const localize = useLocalize();
   const user = useRecoilValue(store.user);
   const { shareId } = useShareContext();
-  const { refetch: downloadOwned } = useFileDownload(user?.id ?? '', fileId, { direct: false });
+  const { refetch: downloadOwned } = useFileDownload(user?.id ?? '', fileId, {
+    direct: false,
+  });
   const { refetch: downloadShared } = useSharedFileDownload(shareId, fileId);
   // Use the share route only for snapshotted files (filepath rewritten to the
   // share path); otherwise fall back to the owner route.
@@ -154,7 +157,6 @@ export default function FilePreviewDialog({
   const [loading, setLoading] = useState(false);
   const [previewError, setPreviewError] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
-  const loadingRef = useRef(false);
 
   const setArtifacts = useSetRecoilState(store.artifactsState);
   const setCurrentArtifact = useSetRecoilState(store.currentArtifactId);
@@ -162,65 +164,78 @@ export default function FilePreviewDialog({
   const officeArtifact = useMemo(
     () =>
       !shareId
-        ? createOfficeFileArtifact({ file_id: fileId, filename: fileName, filepath: filePath })
+        ? createOfficeFileArtifact({
+            file_id: fileId,
+            filename: fileName,
+            filepath: filePath,
+          })
         : null,
     [shareId, fileId, fileName, filePath],
   );
   useEffect(() => {
     if (!open || !officeArtifact) return;
-    setArtifacts((previous) => ({ ...previous, [officeArtifact.id]: officeArtifact }));
+    setArtifacts((previous) => ({
+      ...previous,
+      [officeArtifact.id]: officeArtifact,
+    }));
     setCurrentArtifact(officeArtifact.id);
     showArtifacts(true);
     onOpenChange(false);
   }, [open, officeArtifact, setArtifacts, setCurrentArtifact, showArtifacts, onOpenChange]);
-  const previewKind = officeArtifact
-    ? false
+  const imageMime = getImagePreviewMime(fileName, fileType);
+  const filePreviewKind = imageMime
+    ? 'image'
     : canPreviewByMime(fileType) || canPreviewByExt(fileName);
+  const previewKind = officeArtifact ? false : filePreviewKind;
 
-  const cancelledRef = useRef(false);
-
-  const loadPreview = useCallback(async () => {
-    if (!fileId || !previewKind || loadingRef.current) {
-      return;
-    }
-    loadingRef.current = true;
-    cancelledRef.current = false;
-    setLoading(true);
+  useEffect(() => {
+    setFileContent(null);
+    setFileBlobUrl(null);
     setPreviewError(false);
+    setLoading(false);
+    setIsCopied(false);
+    if (!open || !fileId || !previewKind) return;
 
-    try {
-      const result = await downloadFile();
-      if (cancelledRef.current || !result.data) {
-        if (!cancelledRef.current) {
-          setPreviewError(true);
+    let cancelled = false;
+    let previewUrl: string | undefined;
+    const controller = new AbortController();
+    setLoading(true);
+
+    async function loadPreview() {
+      try {
+        const result = await downloadFile();
+        if (cancelled) return;
+        if (result.isError || !result.data) throw new Error('File download unavailable');
+        const response = await fetch(result.data, {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('File download failed');
+        const blob = await response.blob();
+        if (cancelled) return;
+
+        if (previewKind === 'text') {
+          const content = await blob.text();
+          if (!cancelled) setFileContent(content);
+          return;
         }
-        return;
-      }
-
-      const resp = await fetch(result.data);
-      const blob = await resp.blob();
-
-      if (cancelledRef.current) {
-        return;
-      }
-
-      if (previewKind === 'text') {
-        setFileContent(await blob.text());
-      } else {
-        const typed = new Blob([blob], { type: 'application/pdf' });
-        setFileBlobUrl(URL.createObjectURL(typed));
-      }
-    } catch {
-      if (!cancelledRef.current) {
-        setPreviewError(true);
-      }
-    } finally {
-      loadingRef.current = false;
-      if (!cancelledRef.current) {
-        setLoading(false);
+        const typed = new Blob([blob], {
+          type: previewKind === 'image' ? imageMime : 'application/pdf',
+        });
+        previewUrl = URL.createObjectURL(typed);
+        setFileBlobUrl(previewUrl);
+      } catch {
+        if (!cancelled) setPreviewError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }
-  }, [fileId, previewKind, downloadFile]);
+    void loadPreview();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [open, fileId, fileName, previewKind, imageMime, downloadFile]);
 
   const handleDownload = useCallback(async () => {
     if (!fileId) {
@@ -237,31 +252,6 @@ export default function FilePreviewDialog({
     }
   }, [downloadFile, fileId, fileName]);
 
-  useEffect(() => {
-    if (open && previewKind && !fileContent && !fileBlobUrl) {
-      loadPreview();
-    }
-  }, [open, previewKind, fileContent, fileBlobUrl, loadPreview]);
-
-  useEffect(() => {
-    return () => {
-      if (fileBlobUrl) {
-        URL.revokeObjectURL(fileBlobUrl);
-      }
-    };
-  }, [fileBlobUrl]);
-
-  useEffect(() => {
-    if (!open) {
-      cancelledRef.current = true;
-      setFileContent(null);
-      setFileBlobUrl(null);
-      setPreviewError(false);
-      setLoading(false);
-      setIsCopied(false);
-    }
-  }, [open]);
-
   const handleCopy = useCallback(() => {
     if (!fileContent) {
       return;
@@ -277,7 +267,7 @@ export default function FilePreviewDialog({
     [pages, pageRelevance],
   );
 
-  const metaParts: string[] = [displayType];
+  const metaParts: string[] = previewKind === 'image' ? [] : [displayType];
   if (relevance != null && relevance > 0) {
     metaParts.push(`${localize('com_ui_relevance')}: ${Math.round(relevance * 100)}%`);
   }
@@ -331,14 +321,17 @@ export default function FilePreviewDialog({
               </span>
             </div>
           )}
-          {fileBlobUrl && (
+          {fileBlobUrl && previewKind === 'image' && (
+            <ImageFilePreview key={fileBlobUrl} src={fileBlobUrl} fileName={fileName} />
+          )}
+          {fileBlobUrl && previewKind === 'pdf' && (
             <iframe
               src={fileBlobUrl}
               title={`${localize('com_ui_preview')}: ${fileName}`}
               className="h-[70vh] w-full rounded-lg border border-border-light"
             />
           )}
-          {fileContent && (
+          {fileContent !== null && (
             <>
               <div className="pointer-events-none sticky top-0 z-10 flex justify-end pr-1">
                 <CopyButton
