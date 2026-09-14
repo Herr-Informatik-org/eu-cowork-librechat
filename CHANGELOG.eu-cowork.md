@@ -1,5 +1,22 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-15 — Desktop-Benachrichtigungen für fertige Antworten
+
+- Neuer Schalter unter Einstellungen → Allgemein → Barrierefreiheit. Einmalige
+  Browserfreigabe, Einstellung je Benutzer und Browser.
+- Fertige Antworten melden sich nur bei verborgenem Chat-Tab oder Browserfenster
+  ohne Fokus. Ein Klick öffnet den zugehörigen Chat; die Meldung enthält weder
+  Chat-Titel noch Antworttext.
+- Abgebrochene, fehlerhafte und unvollständige Antworten lösen keine Meldung aus.
+  Wiederholte Abschlussereignisse werden unterdrückt; bestätigte Abschlüsse nach
+  Wiederverbindung werden berücksichtigt.
+- Verifiziert mit 116 automatisierten Tests, Typprüfung, Lint, Frontend-Build
+  und einem lokalen Chrome-Ablauf mit simuliertem Modell und kontrolliertem
+  Hintergrundzustand. Die tatsächliche Betriebssystem-Banneranzeige bleibt
+  Teil der Zielinstanz-Abnahme.
+- Lokale Umsetzung im Fork. Für bestehende Instanzen ist ein neues Chat-Image
+  erforderlich; kein Produktivrollout mit dieser Änderung.
+
 ## 2026-09-14 — Brain lernt aus zusammenhängenden Gesprächen
 
 - Gesprächsanalyse berücksichtigt Benutzerreaktionen, Assistentenvorschläge,

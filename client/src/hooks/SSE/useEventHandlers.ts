@@ -39,6 +39,7 @@ import {
   queueTitleGeneration,
   markTitleGenerationProcessed,
 } from '~/data-provider';
+import useCompletionNotification from '~/hooks/useCompletionNotification';
 import useFocusRegeneratedResponse from '~/hooks/Chat/useFocusRegeneratedResponse';
 import { shouldResetSubagentAtomsOnConversationChange } from './cleanup';
 import useAttachmentHandler from '~/hooks/SSE/useAttachmentHandler';
@@ -305,6 +306,7 @@ export default function useEventHandlers({
   const lastAnnouncementTimeRef = useRef(Date.now());
   const { conversationId: paramId } = useParams();
   const { token } = useAuthContext();
+  const notifyCompleted = useCompletionNotification();
 
   const { contentHandler, resetContentHandler } = useContentHandler({ setMessages, getMessages });
   /** `refetchType: 'all'` so cached-but-unmounted skill queries refresh too —
@@ -668,6 +670,7 @@ export default function useEventHandlers({
 
   const finalHandler = useCallback(
     (data: TFinalResData, submission: EventSubmission) => {
+      notifyCompleted(data, submission);
       finishConversationActivity(submission, {
         ...data,
         conversationId: data.conversation?.conversationId,
@@ -915,6 +918,7 @@ export default function useEventHandlers({
       applyAgentTemplate,
       attachmentHandler,
       restorePendingQuotes,
+      notifyCompleted,
     ],
   );
 
@@ -1099,7 +1103,7 @@ export default function useEventHandlers({
             return;
           }
           if (data.final === true) {
-            finalHandler(data, submission);
+            finalHandler({ ...data, final: false }, submission);
           } else {
             cancelHandler(data, submission);
           }
@@ -1142,6 +1146,7 @@ export default function useEventHandlers({
   );
 
   return {
+    notifyCompleted,
     stepHandler,
     syncHandler,
     finalHandler,

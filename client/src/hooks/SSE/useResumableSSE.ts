@@ -1022,6 +1022,7 @@ export default function useResumableSSE(
   const {
     stepHandler: rawStepHandler,
     finalHandler,
+    notifyCompleted,
     errorHandler,
     clearStepMaps,
     messageHandler,
@@ -2341,6 +2342,12 @@ export default function useResumableSSE(
         } else if (event.terminalStatus === 'error') {
           reconciliationOutcome = 'error';
         }
+        if (reconciliationOutcome === 'completed') {
+          notifyCompleted(
+            { final: true, conversation: { conversationId: reconciliationConvoId } },
+            currentSubmission,
+          );
+        }
         setRunEnd({
           conversationId: reconciliationConvoId,
           outcome: reconciliationOutcome,
@@ -3024,6 +3031,12 @@ export default function useResumableSSE(
           } else if (status.status === 'aborted') {
             recoveryOutcome = 'aborted';
           }
+          if (recoveryOutcome === 'completed') {
+            notifyCompleted(
+              { final: true, conversation: { conversationId: recoveryConvoId } },
+              currentSubmission,
+            );
+          }
           setRunEnd({
             conversationId: recoveryConvoId,
             outcome: recoveryOutcome,
@@ -3108,6 +3121,7 @@ export default function useResumableSSE(
       setActiveRunId,
       setShowStopButton,
       finalHandler,
+      notifyCompleted,
       createdHandler,
       attachmentHandler,
       titleHandler,

@@ -1,4 +1,11 @@
 {
+  "com_ui_desktop_notifications": "Desktop-Benachrichtigungen",
+  "com_ui_notifications_description": "Meldet fertige Antworten, wenn der Chat-Tab oder das Browserfenster im Hintergrund ist. Gilt für dein Konto in diesem Browser.",
+  "com_ui_notifications_unsupported": "Desktop-Benachrichtigungen sind in diesem Browser oder ohne HTTPS nicht verfügbar.",
+  "com_ui_notifications_blocked": "Benachrichtigungen sind blockiert. Erlaube sie in den Website-Einstellungen deines Browsers.",
+  "com_ui_notifications_failed": "Die Einstellung konnte nicht gespeichert werden. Prüfe die Browserberechtigungen und versuche es erneut.",
+  "com_ui_notification_complete_title": "Antwort fertig",
+  "com_ui_notification_complete_body": "Deine Antwort ist bereit. Klicke hier, um den Chat zu öffnen.",
   "com_ui_brain_source_context_count": "{{count}} additional messages provided context",
   "com_ui_brain_source_context_explanation": "Surrounding messages helped interpret the evidence, including replies and corrections. They are tracked so deleting their conversation also removes memories that depend on it.",
   "com_ui_brain_rebuild_activated": "Your new Brain version is now active.",

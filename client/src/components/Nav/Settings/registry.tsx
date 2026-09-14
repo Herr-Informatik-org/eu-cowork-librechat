@@ -15,6 +15,7 @@ import {
   AutoSendTextSelector,
   DecibelSelector,
 } from '../SettingsTabs/Speech/STT';
+import Notifications from '../SettingsTabs/General/Notifications';
 import DisplayUsernameMessages from '../SettingsTabs/Account/DisplayUsernameMessages';
 import ConversationModeSwitch from '../SettingsTabs/Speech/ConversationModeSwitch';
 import EnableTwoFactorItem from '../SettingsTabs/Account/TwoFactorAuthentication';
@@ -114,6 +115,14 @@ export const registry: SettingEntry[] = [
     }),
   },
   // General · Accessibility
+  {
+    id: 'desktopNotifications',
+    tab: GENERAL,
+    section: 'accessibility',
+    labelKey: 'com_ui_desktop_notifications',
+    keywords: ['notification', 'desktop', 'background', 'Benachrichtigung'],
+    Component: Notifications,
+  },
   {
     id: 'keepScreenAwake',
     tab: GENERAL,

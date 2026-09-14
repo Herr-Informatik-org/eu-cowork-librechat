@@ -203,6 +203,7 @@ jest.mock('~/hooks/Chat/useSteerConvert', () => ({
 
 const mockErrorHandler = jest.fn();
 const mockFinalHandler = jest.fn();
+const mockNotifyCompleted = jest.fn();
 const mockCreatedHandler = jest.fn();
 const mockStepHandler = jest.fn();
 const mockTitleHandler = jest.fn();
@@ -217,6 +218,7 @@ jest.mock('~/hooks/SSE/useEventHandlers', () => {
     default: jest.fn(() => ({
       errorHandler: mockErrorHandler,
       finalHandler: mockFinalHandler,
+      notifyCompleted: mockNotifyCompleted,
       createdHandler: mockCreatedHandler,
       attachmentHandler: jest.fn(),
       stepHandler: mockStepHandler,
@@ -2167,6 +2169,10 @@ describe('useResumableSSE', () => {
       queryKey: [QueryKeys.messages, CONV_ID],
       refetchType: 'none',
     });
+    expect(mockNotifyCompleted).toHaveBeenCalledWith(
+      { final: true, conversation: { conversationId: CONV_ID } },
+      submission,
+    );
     expect(mockSettleAppliedSteerParts).toHaveBeenCalledWith(CONV_ID, persisted);
     expect(mockSetRunEnd).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId: CONV_ID, outcome: 'completed' }),
