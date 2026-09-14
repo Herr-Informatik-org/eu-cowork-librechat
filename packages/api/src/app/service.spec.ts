@@ -1,4 +1,6 @@
 import type { AppConfig } from '@librechat/data-schemas';
+import { specsConfigSchema } from 'librechat-data-provider';
+import { sanitizeModelSpecs } from '~/modelSpecs';
 import {
   createAppConfigService,
   _resetOverrideStrictCache,
@@ -58,6 +60,63 @@ function createDeps(overrides = {}) {
 
 describe('createAppConfigService', () => {
   describe('getAppConfig', () => {
+    it('refreshes central model fields for an existing group after a base edit and cache invalidation', async () => {
+      const cards = ['luna', 'sol', 'astra', 'auto'].map((name) => ({
+        name,
+        label: name,
+        default: name === 'auto',
+        preset: { endpoint: 'OpenRouter', model: name, promptPrefix: 'Current instructions' },
+        insight: { processingRegion: 'worldwide' },
+      }));
+      const legacyCards = cards
+        .filter(({ name }) => name !== 'astra')
+        .map((entry) => ({
+          ...entry,
+          insight: {},
+          preset: { ...entry.preset, promptPrefix: 'Old instructions' },
+        }));
+      const base = {
+        principalType: 'role',
+        principalId: '__base__',
+        priority: 10,
+        isActive: true,
+        overrides: { modelSpecs: { list: cards } },
+      };
+      const group = {
+        principalType: 'group',
+        principalId: 'GL',
+        priority: 30,
+        isActive: true,
+        overrides: { modelSpecs: { list: legacyCards, addedEndpoints: ['agents'] } },
+      };
+      const deps = createDeps({
+        getUserPrincipals: jest.fn().mockResolvedValue([
+          { principalType: 'role', principalId: 'USER' },
+          { principalType: 'group', principalId: 'GL' },
+        ]),
+        getApplicableConfigs: jest.fn().mockResolvedValue([base, group]),
+      });
+      const { getAppConfig, clearOverrideCache } = createAppConfigService(deps);
+      const options = { role: 'USER', userId: 'member', tenantId: 'tenant-a' };
+      const first = await getAppConfig(options);
+      expect(first.modelSpecs?.list?.map(({ name }) => name)).toEqual(['luna', 'sol', 'auto']);
+      expect(first.modelSpecs?.list?.[0].insight?.processingRegion).toBe('worldwide');
+
+      cards[0] = {
+        ...cards[0],
+        insight: { processingRegion: 'europe' },
+        preset: { ...cards[0].preset, model: 'updated-model' },
+      };
+      await clearOverrideCache('tenant-a');
+      const updated = await getAppConfig(options);
+      expect(updated.modelSpecs?.list?.[0].preset?.model).toBe('updated-model');
+      const publicConfig = sanitizeModelSpecs(specsConfigSchema.parse(updated.modelSpecs));
+      expect(publicConfig?.list?.[0].insight?.processingRegion).toBe('europe');
+      expect(publicConfig?.list?.[0].preset).not.toHaveProperty('promptPrefix');
+      expect(updated.modelSpecs?.addedEndpoints).toEqual(['agents']);
+      expect(group.overrides.modelSpecs.list[0].insight).toEqual({});
+    });
+
     it('loads base config on first call', async () => {
       const deps = createDeps();
       const { getAppConfig } = createAppConfigService(deps);

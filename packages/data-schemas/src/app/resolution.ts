@@ -3,6 +3,7 @@ import {
   BASE_ONLY_CONFIG_SECTIONS,
   INTERFACE_PERMISSION_FIELDS,
   PERMISSION_SUB_KEYS,
+  PrincipalType,
 } from 'librechat-data-provider';
 import type { TCustomConfig } from 'librechat-data-provider';
 import type { AppConfig, IConfig } from '~/types';
@@ -154,7 +155,7 @@ function deepMerge<T extends AnyObject>(target: T, source: AnyObject, depth = 0,
       sourceVal != null &&
       typeof sourceVal === 'object' &&
       !Array.isArray(sourceVal) &&
-      (sourceVal.inherit === true ||
+      (('inherit' in sourceVal && sourceVal.inherit === true) ||
         ('provider' in sourceVal &&
           'model' in sourceVal &&
           typeof sourceVal.provider === 'string' &&
@@ -198,22 +199,59 @@ function deepMerge<T extends AnyObject>(target: T, source: AnyObject, depth = 0,
   return result as T;
 }
 
-/**
- * Merge DB config overrides into a base AppConfig.
- *
- * Configs are sorted by priority ascending (lowest first, highest wins).
- * Each config's `overrides` is deep-merged into the base config in order.
- */
+function isBaseConfig(config: IConfig): boolean {
+  return (
+    config.principalType === PrincipalType.ROLE &&
+    config.principalId?.toString() === BASE_CONFIG_PRINCIPAL_ID
+  );
+}
+
+/** Legacy scoped lists identify visible cards; their saved definitions are not authoritative. */
+function modelSpecSelection(configs: IConfig[]): Set<string> | undefined {
+  let selection: Set<string> | undefined;
+  for (const config of configs) {
+    if (isBaseConfig(config)) {
+      continue;
+    }
+    if (config.tombstones?.some((path) => path === 'modelSpecs' || path === 'modelSpecs.list')) {
+      selection = undefined;
+    }
+    const list = config.overrides?.modelSpecs?.list;
+    if (Array.isArray(list)) {
+      selection = new Set(
+        list.map((spec) => spec?.name).filter((name): name is string => typeof name === 'string'),
+      );
+    }
+  }
+  return selection;
+}
+
+/** Resolve scoped card selections against the current YAML + database base catalog. */
 export function mergeConfigOverrides(baseConfig: AppConfig, configs: IConfig[]): AppConfig {
   if (!configs || configs.length === 0) {
     return baseConfig;
   }
 
   const sorted = [...configs].sort((a, b) => a.priority - b.priority);
+  const merged = applyConfigOverrides(baseConfig, sorted);
+  const selection = modelSpecSelection(sorted);
+  if (selection === undefined || !Array.isArray(merged.modelSpecs?.list)) {
+    return merged;
+  }
 
+  const central = applyConfigOverrides(baseConfig, sorted.filter(isBaseConfig));
+  const catalog = Array.isArray(central.modelSpecs?.list) ? central.modelSpecs.list : [];
+  const list = catalog.filter((spec) => typeof spec?.name === 'string' && selection.has(spec.name));
+  if (list.length > 0 && !list.some((spec) => spec.default === true)) {
+    list[0] = { ...list[0], default: true };
+  }
+  return { ...merged, modelSpecs: { ...merged.modelSpecs, list } };
+}
+
+function applyConfigOverrides(baseConfig: AppConfig, configs: IConfig[]): AppConfig {
   let merged = { ...baseConfig };
-  for (const config of sorted) {
-    const isBasePrincipal = config.principalId?.toString() === BASE_CONFIG_PRINCIPAL_ID;
+  for (const config of configs) {
+    const isBasePrincipal = isBaseConfig(config);
     if (Array.isArray(config.tombstones)) {
       for (const path of config.tombstones) {
         if (

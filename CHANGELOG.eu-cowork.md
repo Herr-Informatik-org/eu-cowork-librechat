@@ -1,5 +1,18 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-15 — Zentrale Modellkarten trotz Gruppen- und Rollenauswahl
+
+- Gespeicherte Kartenkopien in Gruppen, Rollen und Benutzerregeln werden nur noch
+  als Namensauswahl ausgewertet. Herkunft, Modellroute, Prompt und weitere Felder
+  kommen aus dem aktuellen zentralen Katalog (YAML plus Basis-Override).
+- Die höchstpriorisierte Auswahl gewinnt weiterhin; zentrale Reihenfolge und
+  gültiger Standard bleiben erhalten. Entfernte Karten verschwinden, neue Karten
+  erweitern keine eingeschränkte Auswahl. Bestehende Regeln benötigen keine Migration.
+- 95 Prüfungen zur Konfigurationskaskade, Benutzerkonfiguration und öffentlichen
+  Menüantwort erfolgreich, einschliesslich der GL-Auswahl ohne Astra und einer
+  zentralen Änderung nach Cache-Invalidierung. Datenbibliothek gebaut und typgeprüft.
+- Lokale Fehlerkorrektur; für die interne Instanz ist ein neues Chat-Image erforderlich.
+
 ## 2026-09-15 — Desktop-Benachrichtigungen für fertige Antworten
 
 - Neuer Schalter unter Einstellungen → Allgemein → Barrierefreiheit. Einmalige
