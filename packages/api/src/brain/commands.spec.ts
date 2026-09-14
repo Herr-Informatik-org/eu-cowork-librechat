@@ -4,7 +4,15 @@ import type { BrainSessionOptions } from './session';
 
 jest.mock('./client', () => ({ requestBrain: jest.fn(), isBrainConfigured: () => true }));
 const request = jest.mocked(requestBrain);
-const node = { id: 'atlas', text: 'Atlas nutzt CHF für Offerten.', title: 'Atlas', version: 4 };
+const node = {
+  kind: 'decision',
+  scope: 'Atlas',
+  tags: [],
+  id: 'atlas',
+  text: 'Atlas nutzt CHF für Offerten.',
+  title: 'Atlas',
+  version: 4,
+};
 const options: BrainSessionOptions = {
   userId: 'alice',
   conversationId: 'chat',
@@ -157,5 +165,154 @@ describe('direct personal Brain commands', () => {
     expect(bodies[0].requestId).toBe(bodies[1].requestId);
     expect(bodies[0].requestId).not.toBe(bodies[2].requestId);
     expect(bodies[0].requestId).toMatch(/^history:/);
+  });
+});
+
+const contextualMessages = [
+  {
+    id: 'question',
+    role: 'user' as const,
+    text: 'Welche Währung sollen wir für Atlas verwenden?',
+    parentId: undefined,
+    contentHash: 'question-hash',
+    createdAt: options.source.createdAt,
+  },
+  {
+    id: 'proposal',
+    role: 'assistant' as const,
+    text: 'Für Atlas verwenden wir EUR für Offerten.',
+    parentId: 'question',
+    contentHash: 'proposal-hash',
+    createdAt: options.source.createdAt,
+  },
+  {
+    id: 'message',
+    role: 'user' as const,
+    text: 'Ja, merke dir das für Atlas.',
+    parentId: 'proposal',
+    contentHash: 'command-hash',
+    createdAt: options.source.createdAt,
+  },
+];
+const contextualEvidence = [
+  { messageId: 'proposal', quote: 'EUR für Offerten' },
+  { messageId: 'message', quote: 'Ja, merke dir das für Atlas.' },
+];
+const canonical = {
+  quote: 'Ja, merke dir das für Atlas.',
+  text: 'Für Atlas ist EUR für Offerten vereinbart.',
+  title: 'Atlas Währung',
+  kind: 'decision',
+  scope: 'Atlas',
+  basis: 'confirmed',
+  claimState: 'agreed',
+  evidence: contextualEvidence,
+};
+
+describe('referential Brain commands', () => {
+  beforeEach(() => request.mockReset());
+  const contextual = {
+    source: { ...options.source, text: contextualMessages[2].text },
+    loadConversation: async () => contextualMessages,
+    authorizeConversation: async () => true,
+  };
+
+  it('exposes original message IDs on demand and stores canonical evidence plus all interpreted dependencies', async () => {
+    const session = await loaded(contextual);
+    const context = JSON.parse(String(await invoke(session, 'brain_context', { query: 'Atlas' })));
+    expect(context.currentMessageId).toBe('message');
+    expect(context.messages.map((message: { id: string }) => message.id)).toEqual([
+      'question',
+      'proposal',
+      'message',
+    ]);
+    request.mockResolvedValueOnce({ nodes: [{ ...node, text: canonical.text }], skipped: 0 });
+    await invoke(session, 'brain_remember', { facts: [canonical] });
+    expect(request).toHaveBeenCalledWith(
+      'alice',
+      'POST',
+      '/v1/ingest',
+      expect.objectContaining({
+        explicit: true,
+        sourceMessages: [
+          expect.objectContaining({ id: 'question', role: 'user', contentHash: 'question-hash' }),
+          expect.objectContaining({
+            id: 'proposal',
+            role: 'assistant',
+            text: contextualMessages[1].text,
+          }),
+          expect.objectContaining({
+            id: 'message',
+            role: 'user',
+            text: contextualMessages[2].text,
+          }),
+        ],
+        facts: [
+          expect.objectContaining({
+            text: canonical.text,
+            scope: 'Atlas',
+            basis: 'confirmed',
+            claimState: 'agreed',
+            evidence: contextualEvidence,
+            sourceMessageIds: ['question', 'proposal', 'message'],
+          }),
+        ],
+      }),
+    );
+    const body = request.mock.calls[0][3] as { sourceMessages: object[] };
+    expect(body.sourceMessages[0]).not.toHaveProperty('text');
+  });
+  it('rejects assistant-only, invented and non-current evidence', async () => {
+    const session = await loaded(contextual);
+    for (const evidence of [
+      [{ messageId: 'proposal', quote: 'EUR für Offerten' }],
+      [...contextualEvidence, { messageId: 'other-branch', quote: 'fake' }],
+      [
+        { messageId: 'question', quote: 'Welche Währung' },
+        { messageId: 'proposal', quote: 'EUR für Offerten' },
+      ],
+      [{ messageId: 'message', quote: 'Die Änderung ist bereits abgeschlossen.' }],
+    ])
+      await invoke(session, 'brain_remember', { facts: [{ ...canonical, evidence }] });
+    expect(request).not.toHaveBeenCalled();
+  });
+  it('keeps UPDATE-only permission, original classification and optimistic version on contextual correction', async () => {
+    const session = await loaded({ ...contextual, canWrite: false, canPersist: async () => false });
+    request.mockResolvedValueOnce({
+      nodes: [{ ...node, text: 'Atlas nutzt EUR für Offerten.', version: 5 }],
+      skipped: 0,
+    });
+    const result = JSON.parse(
+      String(
+        await invoke(session, 'brain_update', {
+          id: node.id,
+          oldText: 'CHF',
+          newText: 'EUR',
+          evidence: contextualEvidence,
+          basis: 'confirmed',
+          claimState: 'agreed',
+        }),
+      ),
+    );
+    expect(result.updated).toBe(true);
+    expect(request).toHaveBeenCalledWith(
+      'alice',
+      'POST',
+      '/v1/ingest',
+      expect.objectContaining({
+        facts: [
+          expect.objectContaining({
+            supersedesId: 'atlas',
+            expectedVersion: 4,
+            text: 'Atlas nutzt EUR für Offerten.',
+          }),
+        ],
+      }),
+    );
+  });
+  it('does not write a reference after its supporting context changes', async () => {
+    const session = await loaded({ ...contextual, authorizeConversation: async () => false });
+    await invoke(session, 'brain_remember', { facts: [canonical] });
+    expect(request).not.toHaveBeenCalled();
   });
 });

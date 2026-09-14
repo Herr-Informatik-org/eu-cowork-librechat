@@ -2,7 +2,8 @@ import React, { useEffect, useId, useState } from 'react';
 import { Button } from '@librechat/client';
 import { Check, ChevronDown, History as HistoryIcon, Pause, Play } from 'lucide-react';
 import useLocalize from '~/hooks/useLocalize';
-import { useBrainHistory } from '~/data-provider/Brain';
+import { useBrainHistory, useBrainRebuild } from '~/data-provider/Brain';
+import Rebuild from './Rebuild';
 
 const stateKeys = {
   idle: 'com_ui_brain_history_ready',
@@ -17,20 +18,40 @@ export default function History({ enabled }: { enabled: boolean }) {
   const id = useId();
   const [expanded, setExpanded] = useState(false);
   const { history, start, pause } = useBrainHistory(enabled);
+  const rebuildState = useBrainRebuild(enabled);
+  const draft = rebuildState.rebuild.data?.rebuild;
   const data = history.data;
   const state = data?.status ?? 'idle';
   const active = state === 'running';
+  const hasDraft = !!draft;
   useEffect(() => {
-    if (state === 'running' || state === 'paused' || state === 'failed') setExpanded(true);
-  }, [state]);
-  const pending = start.isLoading || pause.isLoading;
+    if (state === 'running' || state === 'paused' || state === 'failed' || hasDraft)
+      setExpanded(true);
+  }, [state, hasDraft]);
+  const pending =
+    start.isLoading ||
+    pause.isLoading ||
+    rebuildState.start.isLoading ||
+    rebuildState.activate.isLoading ||
+    rebuildState.discard.isLoading ||
+    rebuildState.rollback.isLoading;
   const processed = Math.max(0, data?.processed ?? 0);
   const total = Math.max(processed, data?.total ?? 0);
+  const contextual = data?.schemaVersion === 2 && data.unit === 'chats';
+  const legacy = !!data && !contextual && state !== 'idle';
+  const resumable =
+    contextual &&
+    draft?.status === 'building' &&
+    draft.id === data?.rebuildId &&
+    (state === 'paused' || state === 'failed');
+  const canPause =
+    active && contextual && draft?.status === 'building' && draft.id === data?.rebuildId;
+  const canStart = !canPause && (!draft || resumable);
   if (!enabled) return null;
 
   const startLabel = () => {
-    if (state === 'completed') return localize('com_ui_brain_history_check_new');
-    if (state === 'paused' || state === 'failed') return localize('com_ui_brain_history_resume');
+    if (resumable) return localize('com_ui_brain_history_resume');
+    if (state !== 'idle') return localize('com_ui_brain_rebuild_start');
     return localize('com_ui_brain_history_start');
   };
 
@@ -79,12 +100,21 @@ export default function History({ enabled }: { enabled: boolean }) {
           )}
           {data && (
             <>
-              {state !== 'idle' && (
+              {legacy && (
+                <p className="brain-rebuild-note">{localize('com_ui_brain_history_legacy')}</p>
+              )}
+              {state !== 'idle' && !legacy && (
                 <div className="brain-history-progress">
                   <div className="brain-history-progress-heading" role="status">
                     {state === 'completed' && <Check size={16} aria-hidden="true" />}
-                    <strong>{localize(stateKeys[state])}</strong>
-                    <span>{localize('com_ui_brain_history_processed', { processed, total })}</span>
+                    <strong>
+                      {draft?.status === 'ready'
+                        ? localize('com_ui_brain_rebuild_review')
+                        : localize(stateKeys[state])}
+                    </strong>
+                    <span>
+                      {localize('com_ui_brain_history_chats_processed', { processed, total })}
+                    </span>
                   </div>
                   <progress
                     aria-label={localize('com_ui_brain_history_progress')}
@@ -92,11 +122,16 @@ export default function History({ enabled }: { enabled: boolean }) {
                     value={active && total === 0 ? undefined : processed}
                   />
                   <p>
-                    {localize('com_ui_brain_history_results', {
+                    {localize('com_ui_brain_history_chat_results', {
                       saved: data.saved,
                       skipped: data.skipped,
                     })}
                   </p>
+                  {data.processedSections != null && (
+                    <p className="brain-muted">
+                      {localize('com_ui_brain_history_sections', { count: data.processedSections })}
+                    </p>
+                  )}
                 </div>
               )}
               {data.error && (
@@ -110,7 +145,7 @@ export default function History({ enabled }: { enabled: boolean }) {
                 </p>
               )}
               <div className="brain-history-actions">
-                {active ? (
+                {canPause && (
                   <Button
                     className="brain-button"
                     variant="outline"
@@ -127,26 +162,40 @@ export default function History({ enabled }: { enabled: boolean }) {
                       ? localize('com_ui_brain_history_pausing')
                       : localize('com_ui_brain_history_pause')}
                   </Button>
-                ) : (
+                )}
+                {canStart && (
                   <Button
                     className="brain-button"
                     size="sm"
                     data-testid="brain-history-start"
-                    disabled={pending || !data.available || history.isError}
+                    disabled={
+                      pending ||
+                      !data.available ||
+                      history.isError ||
+                      rebuildState.rebuild.isError ||
+                      !rebuildState.rebuild.data ||
+                      (active && contextual)
+                    }
                     onClick={() => {
                       pause.reset();
-                      start.mutate();
+                      if (resumable) start.mutate();
+                      else {
+                        start.reset();
+                        rebuildState.start.mutate();
+                      }
                     }}
                   >
                     <Play size={14} aria-hidden="true" />
-                    {start.isLoading ? localize('com_ui_brain_history_starting') : startLabel()}
+                    {start.isLoading || rebuildState.start.isLoading
+                      ? localize('com_ui_brain_history_starting')
+                      : startLabel()}
                   </Button>
                 )}
-                {active && <p>{localize('com_ui_brain_history_background')}</p>}
-                {state === 'completed' && <p>{localize('com_ui_brain_history_incremental')}</p>}
+                {active && contextual && <p>{localize('com_ui_brain_history_background')}</p>}
               </div>
             </>
           )}
+          <Rebuild state={rebuildState} disabled={pending || !data?.available || history.isError} />
           {(start.isError || pause.isError) && (
             <p className="brain-error" role="alert">
               {localize('com_ui_brain_history_action_failed')}

@@ -4,8 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { dataService, QueryKeys } from 'librechat-data-provider';
 import type { ReactNode } from 'react';
 import type { BrainHistoryStatus } from 'librechat-data-provider';
-import { useBrainHistory } from '~/data-provider/Brain';
+import { useBrainHistory, useBrainRebuild } from '~/data-provider/Brain';
 import History from '../History';
+import { rebuildFixture } from './fixtures';
 
 let mockUserId: string | undefined = 'user-one';
 jest.mock('librechat-data-provider', () => {
@@ -31,6 +32,9 @@ jest.mock('~/hooks/useLocalize', () => ({
 }));
 
 const status = (changes: Partial<BrainHistoryStatus> = {}): BrainHistoryStatus => ({
+  schemaVersion: 2,
+  unit: 'chats',
+  rebuildId: 'rebuild-one',
   status: 'idle',
   total: 12,
   processed: 0,
@@ -59,6 +63,22 @@ beforeEach(() => {
   jest.spyOn(dataService, 'getBrainHistory').mockResolvedValue(status());
   jest.spyOn(dataService, 'startBrainHistory').mockResolvedValue(status({ status: 'running' }));
   jest.spyOn(dataService, 'pauseBrainHistory').mockResolvedValue(status({ status: 'paused' }));
+  jest
+    .spyOn(dataService, 'getBrainRebuild')
+    .mockResolvedValue({ rebuild: null, rollbackAvailable: false });
+  jest.spyOn(dataService, 'startBrainRebuild').mockImplementation(async () => {
+    jest.mocked(dataService.getBrainHistory).mockResolvedValue(status({ status: 'running' }));
+    return rebuildFixture();
+  });
+  jest
+    .spyOn(dataService, 'activateBrainRebuild')
+    .mockResolvedValue({ rebuild: null, rollbackAvailable: true });
+  jest
+    .spyOn(dataService, 'discardBrainRebuild')
+    .mockResolvedValue({ rebuild: null, rollbackAvailable: false });
+  jest
+    .spyOn(dataService, 'rollbackBrainRebuild')
+    .mockResolvedValue({ rebuild: null, rollbackAvailable: false });
 });
 afterEach(() => {
   clients.splice(0).forEach((client) => client.clear());
@@ -70,15 +90,18 @@ test('explains personal scope, model and cost before an explicit start; opening 
   await waitFor(() => expect(dataService.getBrainHistory).toHaveBeenCalledTimes(1));
   expect(screen.queryByTestId('brain-history-start')).not.toBeInTheDocument();
   fireEvent.click(screen.getByTestId('brain-history-open'));
-  expect(await screen.findByText(/your own saved messages/)).toBeInTheDocument();
+  expect(await screen.findByText(/your own saved conversations/)).toBeInTheDocument();
   expect(screen.getByText(/Configured test model.*costs/)).toBeInTheDocument();
   expect(dataService.startBrainHistory).not.toHaveBeenCalled();
+  expect(dataService.startBrainRebuild).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Start now' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Start now' }));
-  await waitFor(() => expect(dataService.startBrainHistory).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(dataService.startBrainRebuild).toHaveBeenCalledTimes(1));
   expect(await screen.findByRole('button', { name: 'Pause' })).toBeInTheDocument();
 });
 
 test('pauses and resumes the current run without discarding its progress', async () => {
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuildFixture());
   jest
     .mocked(dataService.getBrainHistory)
     .mockResolvedValue(status({ status: 'running', processed: 4, saved: 2 }));
@@ -88,12 +111,13 @@ test('pauses and resumes the current run without discarding its progress', async
   render(<History enabled />, setup());
   fireEvent.click(await screen.findByRole('button', { name: 'Pause' }));
   expect(await screen.findByRole('button', { name: 'Resume' })).toBeInTheDocument();
-  expect(screen.getByText('4 of 12 messages reviewed')).toBeInTheDocument();
+  expect(screen.getByText('4 of 12 chats reviewed')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
   await waitFor(() => expect(dataService.startBrainHistory).toHaveBeenCalledTimes(1));
 });
 
 test('restores a paused server run after reopening without automatically resuming it', async () => {
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuildFixture());
   jest
     .mocked(dataService.getBrainHistory)
     .mockResolvedValue(status({ status: 'paused', processed: 7 }));
@@ -101,7 +125,7 @@ test('restores a paused server run after reopening without automatically resumin
   expect(await screen.findByRole('button', { name: 'Resume' })).toBeInTheDocument();
   first.unmount();
   render(<History enabled />, setup());
-  expect(await screen.findByText('7 of 12 messages reviewed')).toBeInTheDocument();
+  expect(await screen.findByText('7 of 12 chats reviewed')).toBeInTheDocument();
   expect(dataService.startBrainHistory).not.toHaveBeenCalled();
 });
 
@@ -114,9 +138,13 @@ test('reports running progress and refreshes this user knowledge when the server
   context.client.setQueryData([QueryKeys.brain, 'user-one', 'graph', {}], { nodes: [] });
   context.client.setQueryData([QueryKeys.brain, 'user-two', 'graph', {}], { nodes: [] });
   render(<History enabled />, context);
-  expect(await screen.findByText('3 of 12 messages reviewed')).toBeInTheDocument();
+  expect(await screen.findByText('3 of 12 chats reviewed')).toBeInTheDocument();
   expect(
-    await screen.findByText('4 memories saved · 2 messages skipped', {}, { timeout: 4000 }),
+    await screen.findByText(
+      '4 memories prepared · 2 chats without new memories',
+      {},
+      { timeout: 4000 },
+    ),
   ).toBeInTheDocument();
   expect(screen.getByRole('progressbar')).toHaveAttribute('value', '12');
   expect(
@@ -125,7 +153,7 @@ test('reports running progress and refreshes this user knowledge when the server
   expect(
     context.client.getQueryState([QueryKeys.brain, 'user-two', 'graph', {}])?.isInvalidated,
   ).toBe(false);
-  expect(screen.getByRole('button', { name: 'Check new chats' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Rebuild from chats' })).toBeInTheDocument();
   expect(dataService.startBrainHistory).not.toHaveBeenCalled();
 });
 
@@ -154,11 +182,12 @@ test('offers a retry for an unavailable status without pretending there is an em
 });
 
 test('refetches uncertain mutation results and keeps protocol errors out of the UI', async () => {
-  jest.mocked(dataService.startBrainHistory).mockRejectedValue(new Error('internal stack trace'));
+  jest.mocked(dataService.startBrainRebuild).mockRejectedValue(new Error('internal stack trace'));
   render(<History enabled />, setup());
   fireEvent.click(screen.getByTestId('brain-history-open'));
-  fireEvent.click(await screen.findByRole('button', { name: 'Start now' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('The action could not be confirmed');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Start now' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Start now' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('The change could not be confirmed');
   expect(screen.queryByText('internal stack trace')).not.toBeInTheDocument();
   await waitFor(() => expect(dataService.getBrainHistory).toHaveBeenCalledTimes(2));
 });
@@ -264,4 +293,149 @@ test('also cancels a status read started while the pause request is in flight', 
     context.client.getQueryData<BrainHistoryStatus>([QueryKeys.brain, 'user-one', 'history'])
       ?.status,
   ).toBe('paused');
+});
+
+test('legacy message jobs offer a separate rebuild and cannot be resumed as contextual jobs', async () => {
+  jest.mocked(dataService.getBrainHistory).mockResolvedValue(
+    status({
+      schemaVersion: undefined,
+      unit: 'messages',
+      status: 'paused',
+      processed: 22,
+      total: 336,
+    }),
+  );
+  render(<History enabled />, setup());
+  expect(
+    await screen.findByText(/earlier import reviewed individual messages/),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+  expect(screen.queryByText('22 of 336 chats reviewed')).not.toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Rebuild from chats' })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Rebuild from chats' }));
+  await waitFor(() => expect(dataService.startBrainRebuild).toHaveBeenCalledTimes(1));
+  expect(dataService.startBrainHistory).not.toHaveBeenCalled();
+});
+
+test.each(['paused', 'running'] as const)(
+  'does not operate a %s history job belonging to another rebuild',
+  async (jobStatus) => {
+    jest
+      .mocked(dataService.getBrainHistory)
+      .mockResolvedValue(status({ status: jobStatus, rebuildId: 'older-rebuild' }));
+    jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuildFixture());
+    render(<History enabled />, setup());
+    await screen.findByRole('button', { name: 'Discard new version' });
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+    expect(dataService.startBrainHistory).not.toHaveBeenCalled();
+    expect(dataService.pauseBrainHistory).not.toHaveBeenCalled();
+  },
+);
+
+test('a ready preview keeps old knowledge active until the user activates the exact reviewed revision', async () => {
+  jest
+    .mocked(dataService.getBrainHistory)
+    .mockResolvedValue(status({ status: 'completed', processedSections: 19 }));
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuildFixture('ready'));
+  render(<History enabled />, setup());
+  expect(await screen.findByRole('button', { name: 'Use new version' })).toBeEnabled();
+  expect(screen.getByText(/current knowledge stays active/)).toBeInTheDocument();
+  expect(screen.getByText('19 conversation sections reviewed')).toBeInTheDocument();
+  expect(dataService.activateBrainRebuild).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText('View changes and sources'));
+  expect(screen.getByText('Projekt Abendrot')).toBeInTheDocument();
+  expect(screen.getByText('Old fragment')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Use new version' }));
+  await waitFor(() =>
+    expect(dataService.activateBrainRebuild).toHaveBeenCalledWith('rebuild-one', 7),
+  );
+  expect(
+    await screen.findByRole('button', { name: 'Return to previous version' }),
+  ).toBeInTheDocument();
+});
+
+test('a conflicting activation reloads the preview and requires a fresh explicit activation', async () => {
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuildFixture('ready'));
+  jest.mocked(dataService.activateBrainRebuild).mockImplementation(async () => {
+    const updated = rebuildFixture('ready');
+    if (updated.rebuild) updated.rebuild.revision = 8;
+    jest.mocked(dataService.getBrainRebuild).mockResolvedValue(updated);
+    throw new Error('private conflict detail');
+  });
+  const context = setup();
+  render(<History enabled />, context);
+  fireEvent.click(await screen.findByRole('button', { name: 'Use new version' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('The change could not be confirmed');
+  await waitFor(() => expect(dataService.getBrainRebuild).toHaveBeenCalledTimes(2));
+  expect(dataService.activateBrainRebuild).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText('private conflict detail')).not.toBeInTheDocument();
+  jest
+    .mocked(dataService.activateBrainRebuild)
+    .mockResolvedValue({ rebuild: null, rollbackAvailable: true });
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Use new version' })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Use new version' }));
+  await waitFor(() =>
+    expect(dataService.activateBrainRebuild).toHaveBeenLastCalledWith('rebuild-one', 8),
+  );
+});
+
+test('discarding a draft uses its identifier without deleting active memories', async () => {
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuildFixture());
+  const deletion = jest.spyOn(dataService, 'deleteBrainNode');
+  render(<History enabled />, setup());
+  fireEvent.click(await screen.findByRole('button', { name: 'Discard new version' }));
+  await waitFor(() => expect(dataService.discardBrainRebuild).toHaveBeenCalledWith('rebuild-one'));
+  expect(deletion).not.toHaveBeenCalled();
+  expect(dataService.activateBrainRebuild).not.toHaveBeenCalled();
+});
+
+test('rollback requires one explicit confirmation and is not automatic when the panel opens', async () => {
+  jest
+    .mocked(dataService.getBrainRebuild)
+    .mockResolvedValue({ rebuild: null, rollbackAvailable: true });
+  render(<History enabled />, setup());
+  fireEvent.click(screen.getByTestId('brain-history-open'));
+  fireEvent.click(await screen.findByRole('button', { name: 'Return to previous version' }));
+  expect(
+    screen.getByText(/Recent personal changes and deliberate deletions remain protected/),
+  ).toBeInTheDocument();
+  expect(dataService.rollbackBrainRebuild).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Return to previous version' }));
+  await waitFor(() => expect(dataService.rollbackBrainRebuild).toHaveBeenCalledTimes(1));
+});
+
+test('a late activation response only invalidates the user who initiated the rebuild', async () => {
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuildFixture('ready'));
+  const context = setup();
+  context.client.setQueryData([QueryKeys.brain, 'user-one', 'graph', {}], { nodes: [] });
+  context.client.setQueryData([QueryKeys.brain, 'user-two', 'graph', {}], { nodes: [] });
+  const view = renderHook(() => useBrainRebuild(true), context);
+  await waitFor(() => expect(view.result.current.rebuild.data?.rebuild?.status).toBe('ready'));
+  let finishActivation!: (value: { rebuild: null; rollbackAvailable: boolean }) => void;
+  jest.mocked(dataService.activateBrainRebuild).mockReturnValue(
+    new Promise((resolve) => {
+      finishActivation = resolve;
+    }),
+  );
+  act(() => view.result.current.activate.mutate({ id: 'rebuild-one', revision: 7 }));
+  await waitFor(() => expect(dataService.activateBrainRebuild).toHaveBeenCalledTimes(1));
+  mockUserId = 'user-two';
+  jest
+    .mocked(dataService.getBrainRebuild)
+    .mockResolvedValue({ rebuild: null, rollbackAvailable: false });
+  view.rerender();
+  await waitFor(() => expect(view.result.current.rebuild.data?.rollbackAvailable).toBe(false));
+  await act(async () => finishActivation({ rebuild: null, rollbackAvailable: true }));
+  expect(
+    context.client.getQueryState([QueryKeys.brain, 'user-one', 'graph', {}])?.isInvalidated,
+  ).toBe(true);
+  expect(
+    context.client.getQueryState([QueryKeys.brain, 'user-two', 'graph', {}])?.isInvalidated,
+  ).toBe(false);
+  expect(view.result.current.rebuild.data?.rollbackAvailable).toBe(false);
 });

@@ -29,6 +29,25 @@ const baseConfig = {
 } as unknown as AppConfig;
 
 describe('mergeConfigOverrides', () => {
+  it('replaces bootstrap targets and explicit inheritance without retaining YAML parameters', () => {
+    const old = { provider: 'Old', model: 'old', model_parameters: { temperature: 0.9 } };
+    const base = { memory: { agent: old, bootstrapAgent: old } } as unknown as AppConfig;
+    const bootstrapAgent = { provider: 'New', model: 'new', model_parameters: {} };
+    const agent = { inherit: true, enabled: false };
+    const result = mergeConfigOverrides(base, [fakeConfig({ memory: { agent, bootstrapAgent } }, 10)]);
+    expect(result.memory).toEqual({ agent, bootstrapAgent });
+    const inherited = mergeConfigOverrides(result, [fakeConfig({ memory: { bootstrapAgent: { inherit: true } } }, 20)]);
+    expect(inherited.memory?.bootstrapAgent).toEqual({ inherit: true });
+    expect(base.memory?.agent).toEqual(old);
+  });
+
+  it('allows explicitly clearing inherited organisation text while preserving the new version', () => {
+    const base = { memory: { organizationContext: { text: 'Old company', version: 'old' } } } as unknown as AppConfig;
+    const organizationContext = { text: '', version: 'cleared' };
+    const result = mergeConfigOverrides(base, [fakeConfig({ memory: { organizationContext } }, 10)]);
+    expect(result.memory?.organizationContext).toEqual(organizationContext);
+  });
+
   it('replaces a complete memory model selection without retaining inherited agent settings', () => {
     const base = {
       memory: {

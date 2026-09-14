@@ -1,10 +1,13 @@
 const { FakeChatModel } = require('@librechat/agents');
 const baseHook = require('./fake-model');
-const BRAIN_FACT =
-  'Alpenblick verwendet für Offerten ausschliesslich CHF und erwartet eine Zusammenfassung auf Deutsch.';
+const {
+  BRAIN_FACT,
+  COMMAND_FACT,
+  HISTORY_FACT,
+  HISTORY_PROMPT,
+  HISTORY_SUGGESTION,
+} = require('./fake-brain-fixtures');
 const SEARCH_CALL_ID = 'call_e2e_brain_search';
-const COMMAND_FACT = 'Projekt Orion verwendet CHF für Angebote und Deutsch für Zusammenfassungen.';
-const HISTORY_FACT = 'Projekt Morgenrot verwendet einen festen Freigabeprozess mit zwei Personen.';
 
 function messageType(message) {
   return message?.getType?.() ?? message?._getType?.() ?? message?.role ?? message?.type;
@@ -38,6 +41,11 @@ module.exports = function brainModelHook(run, context) {
 
     async *_streamResponseChunks(messages, options, runManager) {
       const query = latestUserText(messages) || initialQuery;
+      if (query === HISTORY_PROMPT) {
+        this.responses = [HISTORY_SUGGESTION];
+        yield* super._streamResponseChunks(messages, options, runManager);
+        return;
+      }
       if (!query.includes('E2E_BRAIN_PROBE') && !query.includes('E2E_BRAIN_COMMAND')) {
         yield* baseModel._streamResponseChunks(messages, options, runManager);
         return;

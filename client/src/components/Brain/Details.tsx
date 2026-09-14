@@ -7,6 +7,19 @@ import useLocalize from '~/hooks/useLocalize';
 import { useBrainMutations, useBrainNodeQuery } from '~/data-provider/Brain';
 import { brainKinds, kindColors, kindKeys, sourceHref } from './layout';
 
+const claimStateKeys = {
+  stated: 'com_ui_brain_claim_stated',
+  agreed: 'com_ui_brain_claim_agreed',
+  planned: 'com_ui_brain_claim_planned',
+  completed: 'com_ui_brain_claim_completed',
+  revoked: 'com_ui_brain_claim_revoked',
+} as const;
+const basisKeys = {
+  direct: 'com_ui_brain_basis_direct',
+  confirmed: 'com_ui_brain_basis_confirmed',
+  derived: 'com_ui_brain_derived',
+} as const;
+
 export function NodeForm({
   node,
   onSave,
@@ -164,6 +177,8 @@ export default function Details({
   const [conflict, setConflict] = useState(false);
   const node = query.data?.node ?? nodes.find((item) => item.id === id);
   const nodeEdges = query.data?.edges ?? edges.filter((edge) => edge.from === id || edge.to === id);
+  const confidenceKey =
+    node?.confidence === 'confirmed' ? 'com_ui_brain_confirmed' : 'com_ui_brain_derived';
   if (query.isError)
     return (
       <aside className="brain-details">
@@ -190,6 +205,10 @@ export default function Details({
         {localize('com_ui_brain_loading')}
       </aside>
     );
+
+  const evidenceSources = node.sources.filter((source) => !source.dependency || source.excerpt);
+  const contextSourceCount =
+    node.sourceDependencyCount ?? node.sources.length - evidenceSources.length;
 
   const save = (input: BrainNodeInput) =>
     update.mutate(
@@ -251,11 +270,7 @@ export default function Details({
         <>
           <h2 className="brain-node-title">{node.title}</h2>
           <div className="brain-node-badges">
-            <span>
-              {node.confidence === 'confirmed'
-                ? localize('com_ui_brain_confirmed')
-                : localize('com_ui_brain_derived')}
-            </span>
+            <span>{localize(node.basis ? basisKeys[node.basis] : confidenceKey)}</span>
             {node.status !== 'active' && (
               <span>
                 {node.status === 'superseded'
@@ -264,8 +279,25 @@ export default function Details({
               </span>
             )}
             {node.scope && <span>{node.scope}</span>}
+            {node.claimState && <span>{localize(claimStateKeys[node.claimState])}</span>}
           </div>
           <p className="brain-node-text">{node.text}</p>
+          {(node.validFrom || node.validUntil) && (
+            <dl className="brain-validity">
+              {node.validFrom && (
+                <div>
+                  <dt>{localize('com_ui_brain_valid_from')}</dt>
+                  <dd>{new Date(node.validFrom).toLocaleDateString()}</dd>
+                </div>
+              )}
+              {node.validUntil && (
+                <div>
+                  <dt>{localize('com_ui_brain_valid_until')}</dt>
+                  <dd>{new Date(node.validUntil).toLocaleDateString()}</dd>
+                </div>
+              )}
+            </dl>
+          )}
           {canEdit && (
             <div className="brain-node-actions">
               <Button
@@ -336,11 +368,11 @@ export default function Details({
           )}
           <section className="brain-detail-section">
             <h3>{localize('com_ui_brain_sources')}</h3>
-            {node.sources.length === 0 ? (
+            {evidenceSources.length === 0 ? (
               <p className="brain-muted">{localize('com_ui_brain_no_source')}</p>
             ) : (
               <ol className="brain-source-list">
-                {[...node.sources]
+                {[...evidenceSources]
                   .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
                   .map((source) => {
                     const href =
@@ -350,6 +382,18 @@ export default function Details({
                         <span className="brain-source-date">
                           {new Date(source.createdAt).toLocaleDateString()}
                         </span>
+                        {source.role && (
+                          <span className="brain-source-role">
+                            {source.role === 'assistant'
+                              ? localize('com_ui_brain_source_assistant')
+                              : localize('com_ui_brain_source_user')}
+                          </span>
+                        )}
+                        {source.dependency && (
+                          <span className="brain-muted">
+                            {localize('com_ui_brain_source_context')}
+                          </span>
+                        )}
                         {href ? (
                           <a href={href} onClick={onNavigate}>
                             {source.label || localize('com_ui_brain_open_chat')}
@@ -367,6 +411,14 @@ export default function Details({
                     );
                   })}
               </ol>
+            )}
+            {contextSourceCount > 0 && (
+              <details className="brain-source-context">
+                <summary>
+                  {localize('com_ui_brain_source_context_count', { count: contextSourceCount })}
+                </summary>
+                <p className="brain-muted">{localize('com_ui_brain_source_context_explanation')}</p>
+              </details>
             )}
           </section>
           {nodeEdges.length > 0 && (

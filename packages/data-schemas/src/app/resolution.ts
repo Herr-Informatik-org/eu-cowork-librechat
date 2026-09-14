@@ -150,14 +150,15 @@ function deepMerge<T extends AnyObject>(target: T, source: AnyObject, depth = 0,
     // model's parameters or agent id can change routing or break the new model.
     // Partial updates such as enabled-only continue through the normal merge.
     if (
-      currentPath === 'memory.agent' &&
+      (currentPath === 'memory.agent' || currentPath === 'memory.bootstrapAgent') &&
       sourceVal != null &&
       typeof sourceVal === 'object' &&
       !Array.isArray(sourceVal) &&
-      'provider' in sourceVal &&
-      'model' in sourceVal &&
-      typeof sourceVal.provider === 'string' &&
-      typeof sourceVal.model === 'string'
+      (sourceVal.inherit === true ||
+        ('provider' in sourceVal &&
+          'model' in sourceVal &&
+          typeof sourceVal.provider === 'string' &&
+          typeof sourceVal.model === 'string'))
     ) {
       result[key] = deepMerge({} as AnyObject, sourceVal as AnyObject, depth + 1, currentPath);
       continue;

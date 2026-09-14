@@ -1802,6 +1802,24 @@ export const transactionsSchema = z.object({
 export const DEFAULT_MEMORY_MAX_INPUT_TOKENS = 12000;
 
 // Explicit model selection wins when an override merges with an inherited agent id.
+export const memoryAgentSchema = z.union([
+  z.object({
+    enabled: z.boolean().optional(),
+    provider: z.string(),
+    model: z.string(),
+    instructions: z.string().optional(),
+    model_parameters: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+  }),
+  z.object({
+    enabled: z.boolean().optional(),
+    id: z.string(),
+  }),
+  z.object({
+    enabled: z.boolean().optional(),
+    inherit: z.literal(true),
+  }).strict(),
+]);
+
 export const memorySchema = z.object({
   disabled: z.boolean().optional(),
   validKeys: z.array(z.string()).optional(),
@@ -1810,21 +1828,13 @@ export const memorySchema = z.object({
   maxInputTokens: z.number().int().positive().optional().default(DEFAULT_MEMORY_MAX_INPUT_TOKENS),
   personalize: z.boolean().default(true),
   messageWindowSize: z.number().optional().default(5),
-  agent: z
-    .union([
-      z.object({
-        enabled: z.boolean().optional(),
-        provider: z.string(),
-        model: z.string(),
-        instructions: z.string().optional(),
-        model_parameters: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
-      }),
-      z.object({
-        enabled: z.boolean().optional(),
-        id: z.string(),
-      }),
-    ])
-    .optional(),
+  agent: memoryAgentSchema.optional(),
+  bootstrapAgent: memoryAgentSchema.optional(),
+  organizationContext: z.object({
+    text: z.string().max(20000),
+    version: z.string().trim().min(1).max(100),
+  }).optional(),
+  useMcpContext: z.boolean().optional(),
 });
 
 export type TMemoryConfig = DeepPartial<z.infer<typeof memorySchema>>;

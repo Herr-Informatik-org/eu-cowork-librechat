@@ -507,6 +507,10 @@ export const brainNodes = () => `${BASE_URL}/api/brain/nodes`;
 export const brainStatus = () => `${BASE_URL}/api/brain/status`;
 export const brainHistory = () => `${BASE_URL}/api/brain/history`;
 export const brainHistoryPause = () => `${brainHistory()}/pause`;
+export const brainRebuild = () => `${BASE_URL}/api/brain/rebuild`;
+export const brainRebuildAction = (id: string, action: 'activate' | 'discard') =>
+  `${brainRebuild()}/${encodeURIComponent(id)}/${action}`;
+export const brainRebuildRollback = () => `${brainRebuild()}/rollback`;
 export const brainNode = (id: string) => `${brainNodes()}/${encodeURIComponent(id)}`;
 export const brainExport = () => `${BASE_URL}/api/brain/export`;
 export const brainRecalls = (conversationId: string) =>

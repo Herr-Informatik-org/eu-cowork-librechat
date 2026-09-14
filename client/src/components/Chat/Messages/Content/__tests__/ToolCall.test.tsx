@@ -21,6 +21,7 @@ jest.mock('~/hooks', () => ({
       com_ui_via_server: `via ${values?.[0]}`,
       com_ui_tool_failed: 'failed',
       com_ui_brain_activity_search: 'Looking up personal knowledge',
+      com_ui_brain_activity_context: 'Reading conversation context',
       com_ui_brain_activity_remember: 'Saving a memory',
       com_ui_brain_activity_update: 'Updating memory',
       com_ui_brain_activity_forget: 'Forgetting a memory',
@@ -302,6 +303,7 @@ describe('ToolCall', () => {
   describe('tool call info visibility', () => {
     it.each([
       ['brain_search', 'Looking up personal knowledge'],
+      ['brain_context', 'Reading conversation context'],
       ['brain_remember', 'Saving a memory'],
       ['brain_update', 'Updating memory'],
       ['brain_forget', 'Forgetting a memory'],

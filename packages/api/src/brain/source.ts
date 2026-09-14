@@ -1,7 +1,9 @@
 import type { BrainSessionOptions } from './session';
+import { conversationText } from './conversation';
 
 interface PersistedSource {
   text?: string;
+  content?: unknown[];
   isCreatedByUser?: boolean;
   isTemporary?: boolean;
   addedConvo?: boolean;
@@ -26,6 +28,6 @@ export async function isBrainSourcePersisted(
       message.isCreatedByUser === true &&
       message.isTemporary !== true &&
       message.addedConvo !== true &&
-      message.text === options.source.text,
+      conversationText(message) === options.source.text,
   );
 }

@@ -1,5 +1,26 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-14 — Brain lernt aus zusammenhängenden Gesprächen
+
+- Gesprächsanalyse berücksichtigt Benutzerreaktionen, Assistentenvorschläge,
+  Korrekturen und den jeweiligen Projekt- oder Kundenbezug. Eigenständige
+  Wissensaussagen behalten genaue Belege und werden vor der Übernahme geprüft.
+- Getrennte Modelle für Erstaufbau und laufendes Lernen; optionaler versionierter
+  Unternehmenskontext und freigegebene Verbindungsnamen als schwache Hinweise.
+- Neuaufbau mit getrenntem Entwurf, Vorschau, bewusster Übernahme und befristeter
+  Rückkehr. Manuelle Änderungen und Löschentscheidungen bleiben geschützt.
+- Gesprächsabschnitte werden mit Zwischenstand verarbeitet; wiederholtes Starten
+  setzt den Fortschritt nicht zurück. Direkte Chatbefehle können ihren Bezug aus
+  dem aktuellen Gespräch erhalten.
+- Bestehende interne Daten bleiben bis zu einem bewusst gestarteten Neuaufbau
+  erhalten. Keine Modellevaluierung und kein Produktivrollout ausgeführt.
+
+## 2026-09-14 — Brain-Zeitlimit und Fehlerdiagnose
+
+- Langsame gültige Lernaufrufe dürfen standardmässig bis zu 120 Sekunden benötigen.
+- Importfehler werden mit unterscheidbarer Ursache und Referenz angezeigt und lokal für die Admin-Ansicht protokolliert. Auch automatisches Lernen und Brain-Anfragen liefern Diagnoseereignisse.
+- Rohfehler und Quelltexte bleiben ausserhalb des Protokolls; eine gestörte Protokolldatenbank blockiert die Fehlerbehandlung nicht.
+
 ## 2026-09-14 — Persönliches Brain mit Chatverlauf und Chatbefehlen
 
 - Persönliches Gedächtnis mit adaptivem Abruf, belegten Quellen und automatischem

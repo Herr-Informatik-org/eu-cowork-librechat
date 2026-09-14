@@ -6,12 +6,23 @@ const {
   createBrainHistoryRuntime,
 } = require('@librechat/api');
 const db = require('~/models');
+const { reportBrainFailure } = require('~/server/services/BrainDiagnostics');
 const { getAppConfig } = require('~/server/services/Config');
+const { getAccessibleMcpServerNames, userCanUseMCPServers } = require('~/server/services/MCP');
 const { requireJwtAuth, configMiddleware } = require('~/server/middleware');
 
 const router = express.Router();
 router.use(requireJwtAuth, configMiddleware, express.json({ limit: '100kb' }));
 const history = createBrainHistoryRuntime({
+  connectionHints: async (req) => {
+    if (!(await userCanUseMCPServers(req.user, req))) return [];
+    const names = await getAccessibleMcpServerNames(String(req.user.id), req.user.role);
+    return names
+      .filter((name) => /^[\p{L}\p{N} ._-]{1,80}$/u.test(name))
+      .sort()
+      .slice(0, 30);
+  },
+  reportFailure: reportBrainFailure,
   store: createMongoBrainHistoryStore({
     jobs: () => mongoose.connection.collection('eucowork_brain_history'),
     messages: () => mongoose.connection.collection('messages'),
@@ -34,6 +45,12 @@ const history = createBrainHistoryRuntime({
     upsertBalanceFields: db.upsertBalanceFields,
   },
 });
-router.use(createBrainRouter({ getRoleByName: db.getRoleByName, history }));
+router.use(
+  createBrainRouter({
+    getRoleByName: db.getRoleByName,
+    history,
+    reportFailure: reportBrainFailure,
+  }),
+);
 
 module.exports = router;

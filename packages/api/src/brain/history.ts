@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { BrainHistoryStatus } from 'librechat-data-provider';
 import type { ServerRequest } from '~/types';
 import type { BrainCandidate } from './session';
+import type { BrainReviewCheckpoint } from './review';
 import type {
   BrainHistoryJob,
   BrainHistoryMessage,
@@ -9,12 +10,20 @@ import type {
   BrainHistoryStore,
 } from './historyStore';
 
-export class BrainHistoryError extends Error {}
+import type { BrainFailureReporter, BrainFailureStage } from './diagnostics';
+import {
+  BrainOperationError,
+  classifyBrainFailure,
+  createBrainFailureReporter,
+} from './diagnostics';
+
+export class BrainHistoryError extends BrainOperationError {}
 
 export interface BrainHistoryAvailability {
   available: boolean;
   reason?: string;
   modelLabel?: string;
+  analysisFingerprint?: string;
 }
 
 export interface BrainHistoryProcessor {
@@ -27,6 +36,9 @@ export interface BrainHistoryProcessor {
     canContinue: () => Promise<boolean>;
     onFacts: (facts: BrainCandidate[]) => Promise<void>;
     onBilling: (state: 'started' | 'complete') => Promise<void>;
+    review?: BrainReviewCheckpoint;
+    rebuildId?: string;
+    onReview?: (review: BrainReviewCheckpoint) => Promise<void>;
   }): Promise<void>;
   ingest(input: {
     req: ServerRequest;
@@ -34,13 +46,15 @@ export interface BrainHistoryProcessor {
     text: string;
     facts: BrainCandidate[];
     canContinue: () => Promise<boolean>;
+    rebuildId?: string;
   }): Promise<number>;
+  complete?(req: ServerRequest, rebuildId: string): Promise<void>;
 }
 
 export interface BrainHistoryService {
   status(req: ServerRequest): Promise<BrainHistoryStatus>;
-  start(req: ServerRequest): Promise<BrainHistoryStatus>;
-  pause(req: ServerRequest): Promise<BrainHistoryStatus>;
+  start(req: ServerRequest, options?: { rebuildId: string }): Promise<BrainHistoryStatus>;
+  pause(req: ServerRequest, rebuildId?: string): Promise<BrainHistoryStatus>;
   settle(ownerId: string): Promise<void>;
 }
 
@@ -65,8 +79,15 @@ function publicStatus(
     processed: job?.processed ?? 0,
     saved: job?.saved ?? 0,
     skipped: job?.skipped ?? 0,
-    ...availability,
-    ...(job?.error ? { error: job.error } : {}),
+    available: availability.available,
+    reason: availability.reason,
+    schemaVersion: job?.schemaVersion,
+    unit: job?.schemaVersion === 2 ? 'chats' : 'messages',
+    rebuildId: job?.rebuildId,
+    processedSections: job?.processedSections,
+    ...(job?.error
+      ? { error: job.error, errorCode: job.errorCode, incidentId: job.incidentId }
+      : {}),
     modelLabel: availability.modelLabel ?? job?.modelLabel,
   };
 }
@@ -76,10 +97,12 @@ export function createBrainHistoryService({
   store,
   processor,
   now = () => new Date(),
+  reportFailure = createBrainFailureReporter(),
 }: {
   store: BrainHistoryStore;
   processor: BrainHistoryProcessor;
   now?: () => Date;
+  reportFailure?: BrainFailureReporter;
 }): BrainHistoryService {
   const workers = new Map<string, Promise<void>>();
 
@@ -96,6 +119,9 @@ export function createBrainHistoryService({
     const ownerId = String(req.user!.id);
     let job = claimed;
     let active = true;
+    let stage: BrainFailureStage = 'source';
+    let currentSource: BrainHistoryMessage | null = null;
+    let stepStarted = now().getTime();
     const update = async (fields: Partial<BrainHistoryJob>) => {
       if (!active || !(await store.update(ownerId, token, fields))) {
         active = false;
@@ -118,8 +144,16 @@ export function createBrainHistoryService({
         .then((ok) => {
           if (!ok) active = false;
         })
-        .catch(() => {
+        .catch((error) => {
           active = false;
+          void reportFailure({
+            failure: classifyBrainFailure(error, 'heartbeat'),
+            userId: ownerId,
+            operation: 'history',
+            stage: 'heartbeat',
+            modelLabel: job.modelLabel,
+            processed: job.processed,
+          }).catch(() => undefined);
         });
     }, leaseMs / 3);
     heartbeat.unref?.();
@@ -135,17 +169,36 @@ export function createBrainHistoryService({
           await update({ status: 'paused', error: availability.reason });
           return;
         }
+        if (job.schemaVersion === 2 && job.analysisFingerprint !== availability.analysisFingerprint)
+          throw new BrainHistoryError(
+            'Die Modell- oder Kontextvorgabe wurde geändert. Bitte den Neuaufbau mit der aktuellen Vorgabe neu starten.',
+          );
         if (availability.modelLabel !== job.modelLabel)
           await update({ modelLabel: availability.modelLabel });
+        stage = 'source';
+        stepStarted = now().getTime();
         const pending = job.pending;
-        const source = pending
-          ? await store.source(ownerId, pending.message.messageId, pending.message.conversationId)
-          : await store.next(ownerId, job.cursor, job.cutoff);
+        const loadSource = (conversationId: string, messageId: string) =>
+          job.schemaVersion === 2
+            ? store.conversation!(ownerId, conversationId, job.cutoff)
+            : store.source(ownerId, messageId, conversationId);
+        let source: BrainHistoryMessage | null;
+        if (pending)
+          source = await loadSource(pending.message.conversationId, pending.message.messageId);
+        else if (job.schemaVersion === 2)
+          source = await store.nextConversation!(ownerId, job.cursor, job.cutoff);
+        else source = await store.next(ownerId, job.cursor, job.cutoff);
+        currentSource = source;
         if (!source && !pending) {
+          if (job.rebuildId) await processor.complete?.(req, job.rebuildId);
           await update({ status: 'completed', total: job.processed, pending: undefined });
           return;
         }
         if (!source || (pending && brainHistorySourceHash(source.text) !== pending.sourceHash)) {
+          if (source && job.schemaVersion === 2) {
+            await update({ pending: undefined });
+            continue;
+          }
           // A deleted or edited original cannot support stored extraction results.
           await update({
             cursor: pending!.message,
@@ -156,9 +209,16 @@ export function createBrainHistoryService({
           continue;
         }
         const canContinue = async () => {
-          if (!(await leaseIsCurrent()) || !(await processor.availability(req)).available)
+          if (!(await leaseIsCurrent())) return false;
+          const currentAvailability = await processor.availability(req);
+          if (
+            !currentAvailability.available ||
+            (job.schemaVersion === 2 &&
+              currentAvailability.analysisFingerprint !== job.analysisFingerprint)
+          )
             return false;
-          const original = await store.source(ownerId, source.messageId, source.conversationId);
+          if (job.schemaVersion === 2 && (await store.read(ownerId))?.pauseRequested) return false;
+          const original = await loadSource(source.conversationId, source.messageId);
           return (
             original != null &&
             brainHistorySourceHash(original.text) === brainHistorySourceHash(source.text)
@@ -176,6 +236,7 @@ export function createBrainHistoryService({
           saved: 0,
         };
         if (!step.end || step.facts === undefined) {
+          stage = 'chunk';
           const end = await processor.chunk(req, source, step.offset);
           step = { ...step, end: step.end ? Math.min(step.end, end) : end };
         }
@@ -186,18 +247,32 @@ export function createBrainHistoryService({
             throw new BrainHistoryError(
               'Die Originalquelle oder die Berechtigung ist nicht mehr verfügbar.',
             );
+          stage = 'extract';
           await processor.extract({
             req,
             source,
             text,
             canContinue,
+            rebuildId: job.rebuildId,
+            review: step.review,
+            onReview: async (review) => {
+              const reviewedSection =
+                review.phase === 'extract' && review.position > (step.review?.position ?? 0);
+              step = { ...step, review };
+              await update({
+                pending: step,
+                processedSections: (job.processedSections ?? 0) + (reviewedSection ? 1 : 0),
+              });
+            },
             onFacts: async (facts) => {
               step = { ...step, facts };
               await update({ pending: step });
             },
             onBilling: async (billing) => {
+              stage = 'billing';
               step = { ...step, billing };
               await update({ pending: step });
+              if (billing === 'complete') stage = 'extract';
             },
           });
           if (step.facts === undefined) {
@@ -209,12 +284,14 @@ export function createBrainHistoryService({
           throw new BrainHistoryError(
             'Die Originalquelle oder die Berechtigung ist nicht mehr verfügbar.',
           );
+        stage = 'ingest';
         const saved = await processor.ingest({
           req,
           source,
           text,
           facts: step.facts ?? [],
           canContinue,
+          rebuildId: job.rebuildId,
         });
         const sourceDone = step.end >= source.text.length;
         await update({
@@ -239,11 +316,40 @@ export function createBrainHistoryService({
         });
       }
     } catch (error) {
+      if (
+        active &&
+        job.schemaVersion === 2 &&
+        (await store.read(ownerId).catch(() => null))?.pauseRequested
+      ) {
+        const paused = await store
+          .update(ownerId, token, {
+            status: 'paused',
+            error: undefined,
+            errorCode: undefined,
+            incidentId: undefined,
+          })
+          .catch(() => false);
+        if (paused) return;
+      }
       if (active) {
+        const failure = classifyBrainFailure(error, stage);
+        await reportFailure({
+          failure,
+          userId: ownerId,
+          operation: 'history',
+          stage,
+          conversationId: currentSource?.conversationId,
+          messageId: currentSource?.messageId,
+          modelLabel: job.modelLabel,
+          processed: job.processed,
+          durationMs: now().getTime() - stepStarted,
+        }).catch(() => undefined);
         await store
           .update(ownerId, token, {
             status: 'failed',
-            error: error instanceof BrainHistoryError ? error.message : defaultFailure,
+            error: `${failure.message} Referenz: ${failure.incidentId}`,
+            errorCode: failure.code,
+            incidentId: failure.incidentId,
           })
           .catch(() => undefined);
       }
@@ -259,12 +365,45 @@ export function createBrainHistoryService({
       const [job, availability] = await Promise.all([read(ownerId), processor.availability(req)]);
       return publicStatus(job, availability);
     },
-    async start(req: ServerRequest): Promise<BrainHistoryStatus> {
+    async start(req: ServerRequest, options?: { rebuildId: string }): Promise<BrainHistoryStatus> {
       const ownerId = String(req.user!.id);
       const availability = await processor.availability(req);
       if (!availability.available) return publicStatus(await read(ownerId), availability);
       let job = await read(ownerId);
+      if (options && (job?.schemaVersion !== 2 || job.rebuildId !== options.rebuildId)) {
+        if (
+          !store.resetConversationJob ||
+          !store.conversation ||
+          !store.nextConversation ||
+          !store.countConversations
+        )
+          throw new BrainHistoryError(
+            'Der Gesprächsimport ist in diesem Serverstand noch nicht verfügbar.',
+          );
+        await store.resetConversationJob({
+          _id: ownerId,
+          ownerId,
+          status: 'idle',
+          total: 0,
+          processed: 0,
+          saved: 0,
+          skipped: 0,
+          revision: (job?.revision ?? 0) + 1,
+          cutoff: now(),
+          schemaVersion: 2,
+          rebuildId: options.rebuildId,
+          analysisFingerprint: availability.analysisFingerprint,
+          processedSections: 0,
+        });
+        job = await read(ownerId);
+      } else if (!options && store.resetConversationJob && job?.schemaVersion !== 2) {
+        throw new BrainHistoryError(
+          'Bitte «Brain neu aufbauen» verwenden. Alte Einzelnachrichten-Importe werden nicht fortgesetzt.',
+        );
+      }
       if (job?.status === 'running') return publicStatus(job, availability);
+      if (job?.schemaVersion === 2 && job.status === 'completed')
+        return publicStatus(job, availability);
       if (!job) {
         await store.create({
           _id: ownerId,
@@ -290,14 +429,22 @@ export function createBrainHistoryService({
       if (!claimed) return publicStatus(await read(ownerId), availability);
       try {
         const cutoff = job.status === 'completed' || job.status === 'idle' ? now() : job.cutoff;
-        const total = job.processed + (await store.count(ownerId, job.cursor, cutoff));
-        const error =
-          job.pending && job.pending.facts === undefined
-            ? interruptedMessage
-            : job.pending?.billing === 'started'
-              ? billingUncertainMessage
-              : undefined;
-        const fields = { cutoff, total, error, modelLabel: availability.modelLabel };
+        const total =
+          job.processed +
+          (job.schemaVersion === 2
+            ? await store.countConversations!(ownerId, job.cursor, cutoff)
+            : await store.count(ownerId, job.cursor, cutoff));
+        let error: string | undefined;
+        if (job.pending && job.pending.facts === undefined) error = interruptedMessage;
+        else if (job.pending?.billing === 'started') error = billingUncertainMessage;
+        const fields = {
+          cutoff,
+          total,
+          error,
+          errorCode: undefined,
+          incidentId: undefined,
+          modelLabel: availability.modelLabel,
+        };
         if (!(await store.update(ownerId, token, fields)))
           throw new BrainHistoryError('Die Verarbeitung wurde beendet.');
         const running = { ...claimed, ...fields };
@@ -312,8 +459,8 @@ export function createBrainHistoryService({
         throw error;
       }
     },
-    async pause(req: ServerRequest): Promise<BrainHistoryStatus> {
-      await store.pause(String(req.user!.id));
+    async pause(req: ServerRequest, rebuildId?: string): Promise<BrainHistoryStatus> {
+      await store.pause(String(req.user!.id), rebuildId);
       return this.status(req);
     },
     /** Tests and controlled shutdowns may await the owned worker without exposing it over HTTP. */

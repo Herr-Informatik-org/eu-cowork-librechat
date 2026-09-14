@@ -11,3 +11,4 @@ export * from './model';
 export * from './history';
 export * from './historyStore';
 export * from './historyRuntime';
+export * from './diagnostics';

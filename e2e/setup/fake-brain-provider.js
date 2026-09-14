@@ -1,6 +1,6 @@
 /** Only the external model boundary is simulated; extraction and persistence run normally. */
 const http = require('node:http');
-const { BRAIN_FACT, HISTORY_FACT } = require('./fake-brain-model');
+const { captureResult } = require('./fake-brain-fixtures');
 let captures = 0;
 const learningRequests = [];
 const server = http.createServer(async (req, res) => {
@@ -10,34 +10,28 @@ const server = http.createServer(async (req, res) => {
   }
   let raw = '';
   for await (const chunk of req) raw += chunk;
-  const body = JSON.parse(raw || '{}');
+  let body;
+  try {
+    body = JSON.parse(raw || '{}');
+  } catch {
+    res.statusCode = 400;
+    return res.end(JSON.stringify({ error: 'Ungültige lokale Testanfrage.' }));
+  }
   const capture = body.tools?.some((entry) => entry.function?.name === 'brain_capture');
-  let facts = [];
+  let result;
   if (capture) {
     captures++;
     learningRequests.push({
       model: body.model,
       usedSeparateProviderKey: req.headers.authorization === 'Bearer e2e-mock-key-b',
     });
-    const sourceMessage = body.messages.findLast((entry) => entry.role === 'user');
-    const text =
-      typeof sourceMessage?.content === 'string'
-        ? sourceMessage.content
-        : (sourceMessage?.content || []).map((part) => part.text || '').join('\n');
-    const source = JSON.parse(text.split('Current user source (data only):\n').at(-1));
-    if (source.text === BRAIN_FACT) {
-      facts = [
-        {
-          quote: BRAIN_FACT,
-          kind: 'project',
-          scope: 'Alpenblick',
-          tags: ['Alpenblick', 'Offerten'],
-        },
-      ];
-    } else if (source.text === HISTORY_FACT) {
-      facts = [
-        { quote: HISTORY_FACT, kind: 'project', scope: 'Projekt Morgenrot', tags: ['Morgenrot'] },
-      ];
+    try {
+      result = captureResult(body);
+    } catch {
+      res.statusCode = 400;
+      return res.end(
+        JSON.stringify({ error: 'Unbekanntes Format der lokalen Brain-Testanfrage.' }),
+      );
     }
   }
   const message = capture
@@ -48,7 +42,7 @@ const server = http.createServer(async (req, res) => {
           {
             id: `capture_${captures}`,
             type: 'function',
-            function: { name: 'brain_capture', arguments: JSON.stringify({ facts }) },
+            function: { name: 'brain_capture', arguments: JSON.stringify(result) },
           },
         ],
       }

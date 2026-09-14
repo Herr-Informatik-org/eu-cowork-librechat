@@ -115,6 +115,32 @@ function fixture(messages = [source(1)]) {
 }
 
 describe('durable personal Brain history', () => {
+  it('reports a model timeout with a support reference instead of blaming connection or credit', async () => {
+    const { store, processor } = fixture();
+    const reportFailure = jest.fn(async () => undefined);
+    const service = createBrainHistoryService({ store, processor, reportFailure });
+    processor.extract.mockRejectedValueOnce(new DOMException('Synthetic timeout', 'TimeoutError'));
+    await service.start(req);
+    await service.settle('owner');
+    expect(reportFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'owner',
+        operation: 'history',
+        stage: 'extract',
+        conversationId: 'personal-chat',
+        messageId: 'message-0001',
+        failure: expect.objectContaining({ code: 'model_timeout', incidentId: expect.any(String) }),
+      }),
+    );
+    expect(await service.status(req)).toMatchObject({
+      status: 'failed',
+      processed: 0,
+      error: expect.stringContaining('Lernmodell'),
+      errorCode: 'model_timeout',
+      incidentId: expect.any(String),
+    });
+  });
+
   it('processes all 205 chronological user messages and then incrementally only new messages', async () => {
     const messages = Array.from({ length: 205 }, (_, index) => source(index));
     const { service, processor, store } = fixture(messages);
@@ -307,5 +333,96 @@ describe('durable personal Brain history', () => {
       'klmno',
     ]);
     expect(await service.status(req)).toMatchObject({ status: 'completed', processed: 1 });
+  });
+  it('still checkpoints a failed import when the diagnostic sink fails', async () => {
+    const { store, processor } = fixture();
+    const service = createBrainHistoryService({
+      store,
+      processor,
+      reportFailure: async () => {
+        throw new Error('Synthetic logging outage');
+      },
+    });
+    processor.extract.mockRejectedValueOnce({ status: 429 });
+    await service.start(req);
+    await service.settle('owner');
+    expect(await service.status(req)).toMatchObject({
+      status: 'failed',
+      processed: 0,
+      errorCode: 'model_rate_limit',
+    });
+  });
+});
+
+describe('conversation rebuild history', () => {
+  function contextualFixture() {
+    const f = fixture();
+    f.store.resetConversationJob = jest.fn(async (job) => {
+      if (f.getJob()?.rebuildId !== job.rebuildId) f.setJob(structuredClone(job));
+    });
+    f.store.countConversations = f.store.count;
+    f.store.nextConversation = f.store.next;
+    f.store.conversation = async (_owner, id) => (id === 'personal-chat' ? source(1) : null);
+    f.processor.complete = jest.fn(async () => {});
+    return f;
+  }
+
+  it('starts a single analysis and never repeats a completed draft on a retry', async () => {
+    const { service, processor, store } = contextualFixture();
+    const replica = createBrainHistoryService({ store, processor });
+    await Promise.all([
+      service.start(req, { rebuildId: 'draft' }),
+      replica.start(req, { rebuildId: 'draft' }),
+    ]);
+    await Promise.all([service.settle('owner'), replica.settle('owner')]);
+    expect(await service.status(req)).toMatchObject({
+      status: 'completed',
+      unit: 'chats',
+      processed: 1,
+      rebuildId: 'draft',
+    });
+    await service.start(req, { rebuildId: 'draft' });
+    await service.settle('owner');
+    expect(processor.extract).toHaveBeenCalledTimes(1);
+    expect(processor.complete).toHaveBeenCalledTimes(1);
+    expect(processor.ingest.mock.calls[0][0].rebuildId).toBe('draft');
+  });
+
+  it('checkpoints a paused review and resumes that same contextual review', async () => {
+    const { service, processor } = contextualFixture();
+    const checkpoint = { position: 1, candidates: [], phase: 'extract' as const };
+    processor.extract.mockImplementationOnce(async (input) => {
+      await input.onReview!(checkpoint);
+      await service.pause(req);
+      expect(await input.canContinue()).toBe(false);
+      throw new Error('Paused between model calls');
+    });
+    await service.start(req, { rebuildId: 'draft' });
+    await service.settle('owner');
+    expect(await service.status(req)).toMatchObject({
+      status: 'paused',
+      processedSections: 1,
+      processed: 0,
+    });
+    await service.start(req);
+    await service.settle('owner');
+    expect(processor.extract.mock.calls[1][0].review).toEqual(checkpoint);
+    expect(await service.status(req)).toMatchObject({ status: 'completed', processed: 1 });
+  });
+
+  it('contains a database outage while handling an interrupted review', async () => {
+    const { service, processor, store } = contextualFixture();
+    processor.extract.mockImplementationOnce(async () => {
+      jest.mocked(store.read).mockRejectedValueOnce(new Error('Database unavailable'));
+      throw new Error('Interrupted review');
+    });
+    await service.start(req, { rebuildId: 'draft' });
+    await expect(service.settle('owner')).resolves.toBeUndefined();
+    expect(await service.status(req)).toMatchObject({ status: 'failed' });
+  });
+
+  it('rejects legacy message-import resume until a deliberate rebuild is started', async () => {
+    const { service } = contextualFixture();
+    await expect(service.start(req)).rejects.toThrow(/Brain neu aufbauen/);
   });
 });

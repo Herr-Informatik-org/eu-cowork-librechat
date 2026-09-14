@@ -1,5 +1,6 @@
 require('events').EventEmitter.defaultMaxListeners = 100;
 const { logger } = require('@librechat/data-schemas');
+const { reportBrainFailure } = require('~/server/services/BrainDiagnostics');
 const { getBufferString, HumanMessage } = require('@librechat/agents/langchain/messages');
 const {
   createRun,
@@ -94,7 +95,7 @@ const {
   attachBrainTools,
   prepareBrainTurn,
   learnConfiguredBrainWithUsage,
-  BrainLearningConfigurationError,
+  classifyBrainFailure,
 } = require('@librechat/api');
 const {
   Run,
@@ -126,7 +127,7 @@ const { filterFilesByAgentAccess } = require('~/server/services/Files/permission
 const { encodeAndFormat } = require('~/server/services/Files/images/encode');
 const { createContextHandlers } = require('~/app/clients/prompts');
 const { resolveConfigServers, getAccessibleMcpServerNames } = require('~/server/services/MCP');
-const { getMCPServerTools } = require('~/server/services/Config');
+const { getMCPServerTools, getAppConfig } = require('~/server/services/Config');
 const BaseClient = require('~/app/clients/BaseClient');
 const { getMCPManager } = require('~/config');
 const db = require('~/models');
@@ -1341,7 +1342,14 @@ class AgentClient extends BaseClient {
       );
       try {
         this.brainContext = await this.brainSession.initialize();
-      } catch {
+      } catch (error) {
+        void reportBrainFailure({
+          failure: classifyBrainFailure(error, 'recall'),
+          userId: this.brainSession.options.userId,
+          operation: 'recall',
+          stage: 'recall',
+          conversationId: this.conversationId,
+        });
         this.brainContext =
           'Das persönliche Brain ist zurzeit nicht erreichbar. Verwende den aktuellen Chat; behaupte keinen erfolgten Erinnerungsabruf.';
         logger.warn('[Brain] Persönlicher Abruf vorübergehend nicht verfügbar.');
@@ -1535,6 +1543,8 @@ class AgentClient extends BaseClient {
     ) {
       this.processMemory = undefined;
       const prepared = await prepareBrainTurn({
+        reportFailure: reportBrainFailure,
+        config: appConfig,
         user,
         conversationId: this.conversationId,
         messageId: this.responseMessageId,
@@ -1545,6 +1555,9 @@ class AgentClient extends BaseClient {
           getMessages: db.getMessages,
           getRoleByName: db.getRoleByName,
           getUserMemories: db.getUserMemories,
+          getConvo: db.getConvo,
+          getAppConfig,
+          getAccessibleMcpServerNames,
         },
         getBudget: () => {
           const snapshot = this.contextUsageSink?.latest;
@@ -2824,17 +2837,27 @@ class AgentClient extends BaseClient {
               updateBalance: db.updateBalance,
             },
           },
+          balanceDependencies: {
+            getMultiplier: db.getMultiplier,
+            findBalanceByUser: db.findBalanceByUser,
+            createAutoRefillTransaction: db.createAutoRefillTransaction,
+            upsertBalanceFields: db.upsertBalanceFields,
+          },
           usageConfig: {
             balance: getBalanceConfig(req.config),
             transactions: getTransactionsConfig(req.config),
           },
-        }).catch((error) =>
-          logger.warn(
-            error instanceof BrainLearningConfigurationError
-              ? `[Brain] ${error.message}`
-              : '[Brain] Automatisches Lernen konnte nicht abgeschlossen werden.',
-          ),
-        );
+        }).catch((error) => {
+          if (session.options.signal?.aborted) return;
+          return reportBrainFailure({
+            failure: classifyBrainFailure(error, 'extract'),
+            userId: session.options.userId,
+            operation: 'learning',
+            stage: 'extract',
+            conversationId: session.options.conversationId,
+            messageId: session.options.source.id,
+          });
+        });
       }
 
       /** Flush subagent usage emits the sink fired without awaiting, so their

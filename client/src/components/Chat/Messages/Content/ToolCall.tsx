@@ -24,6 +24,8 @@ function getBrainActivityKey(name: string) {
   switch (name) {
     case 'brain_search':
       return 'com_ui_brain_activity_search';
+    case 'brain_context':
+      return 'com_ui_brain_activity_context';
     case 'brain_remember':
       return 'com_ui_brain_activity_remember';
     case 'brain_update':

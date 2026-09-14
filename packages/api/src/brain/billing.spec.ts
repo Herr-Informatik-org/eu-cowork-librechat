@@ -1,3 +1,5 @@
+import { assertUsageCredit } from '~/middleware/usageCredit';
+import { checkBalance } from '~/middleware/checkBalance';
 import { Providers } from '@librechat/agents';
 import type { BrainLearningModelOptions } from './model';
 import type { RecordUsageDeps } from '~/agents/usage';
@@ -7,6 +9,8 @@ import { learnBrainTurn } from './learning';
 import { recordCollectedUsage } from '~/agents/usage';
 import { learnConfiguredBrainWithUsage } from './billing';
 
+jest.mock('~/middleware/usageCredit', () => ({ assertUsageCredit: jest.fn() }));
+jest.mock('~/middleware/checkBalance', () => ({ checkBalance: jest.fn() }));
 jest.mock('./model', () => ({ resolveBrainLearningModel: jest.fn() }));
 jest.mock('./learning', () => ({ learnBrainTurn: jest.fn() }));
 jest.mock('~/agents/usage', () => ({ recordCollectedUsage: jest.fn() }));
@@ -94,5 +98,57 @@ describe('configured Brain learning billing', () => {
     expect(resolve).not.toHaveBeenCalled();
     expect(learn).not.toHaveBeenCalled();
     expect(recordCollectedUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe('contextual Brain budget checks', () => {
+  it('checks each review call against the selected model and routes its configured input capacity', async () => {
+    const current = session();
+    current.options.loadConversation = async () => [];
+    learn.mockImplementation(async ({ beforeModelCall }) => {
+      await beforeModelCall!(600, 1600);
+      await beforeModelCall!(900, 1600);
+    });
+    const configured = {
+      req: { config: { memory: { maxInputTokens: 7000 } } },
+    } as BrainLearningModelOptions;
+    await learnConfiguredBrainWithUsage({
+      session: current,
+      modelOptions: configured,
+      dependencies,
+      balanceDependencies: {
+        findBalanceByUser: jest.fn(),
+        getMultiplier: jest.fn(),
+        createAutoRefillTransaction: jest.fn(),
+      },
+      usageConfig: { balance: { enabled: true } },
+    });
+    expect(learn).toHaveBeenCalledWith(expect.objectContaining({ inputBudget: 7000 }));
+    expect(assertUsageCredit).toHaveBeenCalledTimes(2);
+    expect(checkBalance).toHaveBeenCalledTimes(2);
+    expect(checkBalance).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        txData: expect.objectContaining({
+          user: 'owner',
+          model: 'learning-model',
+          endpointTokenConfig: targetPricing,
+          amount: 4996,
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+  it('fails closed when a configured credit limit cannot be checked', async () => {
+    const current = session();
+    current.options.loadConversation = async () => [];
+    learn.mockImplementation(async ({ beforeModelCall }) => beforeModelCall!(500, 1600));
+    await expect(
+      learnConfiguredBrainWithUsage({
+        session: current,
+        modelOptions,
+        dependencies,
+        usageConfig: { balance: { enabled: true } },
+      }),
+    ).rejects.toThrow('Guthabenprüfung');
   });
 });

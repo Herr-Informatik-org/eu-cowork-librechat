@@ -15,6 +15,7 @@ export class BrainLearningConfigurationError extends Error {
 
 export interface BrainLearningModelOptions {
   req: ServerRequest;
+  purpose?: 'ongoing' | 'bootstrap';
   agent: {
     provider: string;
     model?: string;
@@ -33,15 +34,20 @@ export interface BrainLearningModel {
 /** Resolve the selected connection from trusted configuration, never from chat-model credentials. */
 export async function resolveBrainLearningModel({
   req,
+  purpose = 'ongoing',
   agent,
   ids,
   endpointTokenConfig,
   db,
 }: BrainLearningModelOptions): Promise<BrainLearningModel | null> {
-  const configured = req.config?.memory?.agent;
-  if (configured?.enabled === false) {
+  const ongoing = req.config?.memory?.agent;
+  if (purpose === 'ongoing' && ongoing?.enabled === false) {
     return null;
   }
+  const bootstrap = req.config?.memory?.bootstrapAgent;
+  const selected =
+    purpose === 'bootstrap' && bootstrap && !('inherit' in bootstrap) ? bootstrap : ongoing;
+  const configured = selected && !('inherit' in selected) ? selected : undefined;
   let llmConfig: LLMConfig & { configuration?: OpenAIClientOptions['configuration'] };
   let targetPricing = endpointTokenConfig;
   if (configured == null) {
@@ -54,7 +60,7 @@ export async function resolveBrainLearningModel({
     if (!('provider' in configured) || !('model' in configured)) {
       throw new BrainLearningConfigurationError(
         'id' in configured
-          ? 'Brain unterstützt memory.agent.id nicht. Bitte unter Modelle → Brain einen Anbieter und ein Modell auswählen.'
+          ? 'Brain unterstützt keine hinterlegte Memory-Agent-ID. Bitte unter Modelle → Brain einen Anbieter und ein Modell auswählen.'
           : 'Für das Brain-Lernmodell sind Anbieter und Modell erforderlich.',
       );
     }

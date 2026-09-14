@@ -4,6 +4,8 @@ export class BrainServiceError extends Error {
   constructor(
     public status: number,
     message = 'Das Brain ist zurzeit nicht erreichbar.',
+    public upstreamStatus?: number,
+    public cause?: unknown,
   ) {
     super(message);
     this.name = 'BrainServiceError';
@@ -66,6 +68,7 @@ export async function requestBrain<T>(
       redirect: 'error',
     });
     if (!response.ok) {
+      await response.body?.cancel();
       const messages: Record<number, string> = {
         400: 'Die Brain-Anfrage ist ungültig.',
         403: 'Dieser Brain-Zugriff ist nicht erlaubt.',
@@ -75,6 +78,7 @@ export async function requestBrain<T>(
       throw new BrainServiceError(
         messages[response.status] ? response.status : 503,
         messages[response.status],
+        response.status,
       );
     }
     return (await response.json()) as T;
@@ -82,7 +86,7 @@ export async function requestBrain<T>(
     if (error instanceof BrainServiceError) {
       throw error;
     }
-    throw new BrainServiceError(503);
+    throw new BrainServiceError(503, undefined, undefined, error);
   }
 }
 

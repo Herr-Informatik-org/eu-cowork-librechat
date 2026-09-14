@@ -20,15 +20,11 @@ if (process.env.E2E_BRAIN_SEPARATE_MODEL === 'true') {
     configPath,
     yaml.replace(
       /^memory:\n/m,
-      'memory:\n  agent:\n    provider: Mock Provider B\n    model: mock-brain-review-model\n',
+      'memory:\n  agent:\n    enabled: true\n    provider: Mock Provider B\n    model: mock-brain-review-model\n  bootstrapAgent:\n    enabled: true\n    provider: Mock Provider B\n    model: mock-brain-bootstrap-model\n',
     ),
   );
 }
-const servers = Array.isArray(base.webServer)
-  ? base.webServer
-  : base.webServer
-    ? [base.webServer]
-    : [];
+const servers = base.webServer ? [base.webServer].flat() : [];
 
 export default defineConfig({
   ...base,

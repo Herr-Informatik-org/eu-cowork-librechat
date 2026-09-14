@@ -51,6 +51,37 @@ beforeEach(() => {
 });
 
 describe('Brain learning model selection', () => {
+  it('uses a separate bootstrap model even while ongoing learning is paused', async () => {
+    const input = options({ enabled: false, provider: 'Cheap', model: 'ongoing' });
+    input.purpose = 'bootstrap';
+    input.req.config!.memory!.bootstrapAgent = { provider: 'Strong', model: 'bootstrap' };
+    expect(await resolveBrainLearningModel(input)).not.toBeNull();
+    expect(getOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: 'Strong',
+        model_parameters: { model: 'bootstrap' },
+      }),
+    );
+  });
+
+  it.each([undefined, { inherit: true as const }])(
+    'inherits the ongoing target for bootstrap without inheriting its pause: %j',
+    async (bootstrapAgent) => {
+      const input = options({ enabled: false, provider: 'Existing', model: 'existing' });
+      input.purpose = 'bootstrap';
+      input.req.config!.memory!.bootstrapAgent = bootstrapAgent;
+      expect(await resolveBrainLearningModel(input)).not.toBeNull();
+      expect(getOptions).toHaveBeenCalledWith(expect.objectContaining({ endpoint: 'Existing' }));
+    },
+  );
+
+  it('inherits the running connection with an explicit ongoing inheritance flag', async () => {
+    const result = await resolveBrainLearningModel(options({ inherit: true, enabled: true }));
+    expect(result?.llmConfig.model).toBe('chat-model');
+    expect(providerConfig).not.toHaveBeenCalled();
+    expect(await resolveBrainLearningModel(options({ inherit: true, enabled: false }))).toBeNull();
+  });
+
   it('uses the actually running model and connection only when no agent is configured', async () => {
     const result = await resolveBrainLearningModel(options());
     expect(result?.llmConfig).toMatchObject({

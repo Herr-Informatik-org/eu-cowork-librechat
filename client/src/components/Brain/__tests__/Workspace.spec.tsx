@@ -38,6 +38,9 @@ function renderWorkspace() {
 
 beforeEach(() => {
   mockCanWrite = true;
+  jest
+    .spyOn(dataService, 'getBrainRebuild')
+    .mockResolvedValue({ rebuild: null, rollbackAvailable: false });
   jest.spyOn(dataService, 'getBrainHistory').mockResolvedValue({
     status: 'idle',
     total: 0,
@@ -95,6 +98,48 @@ test('loads the selected memory with its source and prevents accidental immediat
   expect(screen.getByText('com_ui_brain_forget_confirm')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'com_ui_brain_forget' }));
   await waitFor(() => expect(remove).toHaveBeenCalledWith('node-one'));
+});
+
+test('shows the claim scope and distinguishes assistant context from a user evidence quote', async () => {
+  const node = memory({
+    claimState: 'planned',
+    basis: 'direct',
+    validFrom: '2026-09-14T00:00:00Z',
+    validUntil: '2026-10-01T00:00:00Z',
+    sources: [
+      { ...memory().sources[0], role: 'user' },
+      {
+        ...memory().sources[0],
+        id: 'context-source',
+        messageId: 'assistant-one',
+        role: 'assistant',
+        dependency: true,
+        excerpt: 'Ist dies nur für den Pilot vorgesehen?',
+      },
+      {
+        ...memory().sources[0],
+        id: 'context-only-source',
+        messageId: 'context-only-message',
+        dependency: true,
+        excerpt: undefined,
+      },
+    ],
+  });
+  jest.mocked(dataService.getBrainNode).mockResolvedValue({ node, edges: [] });
+  renderWorkspace();
+  const list = await screen.findByRole('list', { name: 'com_ui_brain_memories' });
+  fireEvent.click(within(list).getByRole('button', { name: /Projekt Abendrot/ }));
+  const details = await screen.findByRole('complementary', { name: 'com_ui_brain_details' });
+  expect(within(details).getByText('Abendrot')).toBeInTheDocument();
+  expect(within(details).getByText('com_ui_brain_claim_planned')).toBeInTheDocument();
+  expect(within(details).getByText('com_ui_brain_basis_direct')).toBeInTheDocument();
+  expect(within(details).getByText('com_ui_brain_valid_from')).toBeInTheDocument();
+  expect(within(details).getByText('com_ui_brain_valid_until')).toBeInTheDocument();
+  expect(within(details).getByText('com_ui_brain_source_user')).toBeInTheDocument();
+  expect(within(details).getByText('com_ui_brain_source_assistant')).toBeInTheDocument();
+  expect(within(details).getByText('com_ui_brain_source_context')).toBeInTheDocument();
+  expect(within(details).getByText('com_ui_brain_source_context_count')).toBeInTheDocument();
+  expect(within(details).getAllByRole('listitem')).toHaveLength(2);
 });
 
 test('a conflicting update preserves the draft and loads the current version', async () => {

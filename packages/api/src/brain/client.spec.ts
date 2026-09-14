@@ -124,4 +124,21 @@ describe('signed Brain transport', () => {
       process.env.BRAIN_SHARED_SECRET = 'synthetic-test-key';
     }
   });
+  it('retains the internal authentication status without exposing the service response', async () => {
+    status = 401;
+    await expect(requestBrain('owner', 'GET', '/v1/graph')).rejects.toMatchObject({
+      name: 'BrainServiceError',
+      status: 503,
+      upstreamStatus: 401,
+    });
+  });
+
+  it('preserves a transport timeout for diagnostics', async () => {
+    const error = new DOMException('Synthetic timeout', 'TimeoutError');
+    jest.spyOn(global, 'fetch').mockRejectedValueOnce(error);
+    await expect(requestBrain('owner', 'GET', '/v1/graph')).rejects.toMatchObject({
+      status: 503,
+      cause: error,
+    });
+  });
 });

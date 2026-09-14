@@ -10,6 +10,7 @@ import type {
   BrainEdge,
   BrainExport,
   BrainHistoryStatus,
+  BrainRebuildStatus,
 } from './types/brain';
 import type * as t from './types';
 import * as permissions from './accessPermissions';
@@ -33,6 +34,16 @@ export const startBrainHistory = (): Promise<BrainHistoryStatus> =>
   request.post(endpoints.brainHistory(), {});
 export const pauseBrainHistory = (): Promise<BrainHistoryStatus> =>
   request.post(endpoints.brainHistoryPause(), {});
+export const getBrainRebuild = (signal?: AbortSignal): Promise<BrainRebuildStatus> =>
+  request.get(endpoints.brainRebuild(), { signal });
+export const startBrainRebuild = (): Promise<BrainRebuildStatus> =>
+  request.post(endpoints.brainRebuild(), {});
+export const activateBrainRebuild = (id: string, revision: number): Promise<BrainRebuildStatus> =>
+  request.post(endpoints.brainRebuildAction(id, 'activate'), { revision });
+export const discardBrainRebuild = (id: string): Promise<BrainRebuildStatus> =>
+  request.post(endpoints.brainRebuildAction(id, 'discard'), {});
+export const rollbackBrainRebuild = (): Promise<BrainRebuildStatus> =>
+  request.post(endpoints.brainRebuildRollback(), {});
 
 export function getLangfuseConnection(): Promise<t.TLangfuseConnectionStatus> {
   return request.get(endpoints.adminLangfuseConnection());

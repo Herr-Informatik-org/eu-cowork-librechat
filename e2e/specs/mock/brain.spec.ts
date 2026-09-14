@@ -358,18 +358,28 @@ test('remembers, changes and forgets through actual chat tools', async ({ page }
   }
 });
 
-test('fills Brain from a saved historical chat through the workspace and resumes without duplicates', async ({
+test('prepares historical context separately and activates the reviewed Brain version', async ({
   page,
 }, testInfo) => {
   test.setTimeout(180000);
   const historyFact = 'Projekt Morgenrot verwendet einen festen Freigabeprozess mit zwei Personen.';
+  const suggestion =
+    'Für Projekt Morgenrot schlage ich einen festen Freigabeprozess mit zwei Personen vor.';
+  const reaction = 'Ja, genau so. Das ist wichtig für dieses Projekt.';
   await page.goto('/c/new');
   expect((await api(page, 'PATCH', '/api/memories/preferences', { memories: false })).status).toBe(
     200,
   );
   await page.reload();
   await selectMockEndpoint(page, MOCK_ENDPOINTS[0]);
-  await sendMessage(page, historyFact);
+  await sendMessage(
+    page,
+    'Für Projekt Morgenrot brauchen wir einen Vorschlag zur Freigabe. E2E_BRAIN_CONTEXT_REPLY',
+  );
+  await expect(messagesView(page).getByText(suggestion, { exact: true })).toBeVisible({
+    timeout: 30000,
+  });
+  await sendMessage(page, reaction);
   await expect(mockReply(page)).toBeVisible({ timeout: 30000 });
   await expect(page).toHaveURL(/\/c\/[a-f0-9-]{36}$/);
   const sourceId = page.url().split('/').at(-1);
@@ -389,9 +399,33 @@ test('fills Brain from a saved historical chat through the workspace and resumes
       timeout: 120000,
     })
     .toBe('completed');
+  expect((await api(page, 'GET', '/api/brain/graph?query=Morgenrot')).body.nodes).toHaveLength(0);
+  await expect(workspace.getByTestId('brain-rebuild-activate')).toBeVisible({ timeout: 10000 });
+  await workspace.getByTestId('brain-rebuild-activate').click();
+  await expect
+    .poll(async () => (await api(page, 'GET', '/api/brain/rebuild')).body.rebuild)
+    .toBeNull();
   const nodes = (await api(page, 'GET', '/api/brain/graph?query=Morgenrot')).body.nodes;
   expect(nodes).toHaveLength(1);
   expect(nodes[0].text).toBe(historyFact);
+  expect(nodes[0].scope).toBe('Projekt Morgenrot');
+  expect(nodes[0].claimState).toBe('agreed');
+  expect(nodes[0].basis).toBe('confirmed');
+  expect(nodes[0].sources).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ role: 'assistant', excerpt: suggestion }),
+      expect.objectContaining({ role: 'user', excerpt: reaction }),
+    ]),
+  );
+  if (process.env.E2E_BRAIN_SEPARATE_MODEL === 'true') {
+    const provider = await page.request.get(
+      `http://127.0.0.1:${process.env.E2E_LABEL_PORT || '8889'}/health`,
+    );
+    expect((await provider.json()).learningRequests).toContainEqual({
+      model: 'mock-brain-bootstrap-model',
+      usedSeparateProviderKey: true,
+    });
+  }
   expect(
     nodes[0].sources.some(
       (source: { conversationId: string }) => source.conversationId === sourceId,
@@ -407,12 +441,8 @@ test('fills Brain from a saved historical chat through the workspace and resumes
   });
   const completed = (await api(page, 'GET', '/api/brain/history')).body;
   expect(completed.processed).toBe(completed.total);
-  await api(page, 'POST', '/api/brain/history', {});
-  await expect
-    .poll(async () => (await api(page, 'GET', '/api/brain/history')).body.status, {
-      timeout: 30000,
-    })
-    .toBe('completed');
+  expect(completed.schemaVersion).toBe(2);
+  expect(completed.unit).toBe('chats');
   expect((await api(page, 'GET', '/api/brain/graph?query=Morgenrot')).body.nodes).toHaveLength(1);
   await api(page, 'DELETE', '/api/convos', { arg: { conversationId: sourceId } });
   expect((await api(page, 'GET', '/api/brain/graph?query=Morgenrot')).body.nodes).toHaveLength(0);

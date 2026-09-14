@@ -6,8 +6,11 @@ export type BrainSource = {
   conversationId?: string;
   messageId?: string;
   label: string;
-  excerpt: string;
+  excerpt?: string;
   createdAt: string;
+  role?: 'user' | 'assistant';
+  contentHash?: string;
+  dependency?: boolean;
 };
 
 export type BrainNode = {
@@ -21,9 +24,14 @@ export type BrainNode = {
   confidence: 'confirmed' | 'derived';
   pinned: boolean;
   sources: BrainSource[];
+  sourceDependencyCount?: number;
   createdAt: string;
   updatedAt: string;
   version: number;
+  claimState?: 'stated' | 'agreed' | 'planned' | 'completed' | 'revoked';
+  basis?: 'direct' | 'confirmed' | 'derived';
+  validFrom?: string;
+  validUntil?: string;
 };
 
 export type BrainEdge = { id: string; from: string; to: string; label: string };
@@ -58,20 +66,40 @@ export type BrainNodeUpdate = Partial<BrainNodeInput> & {
 };
 
 export type BrainExport = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   exportedAt: string;
   nodes: BrainNode[];
   edges: BrainEdge[];
 };
 
 export type BrainHistoryStatus = {
+  schemaVersion?: 2;
+  unit?: 'chats' | 'messages';
+  rebuildId?: string;
+  processedSections?: number;
   status: 'idle' | 'running' | 'paused' | 'completed' | 'failed';
   total: number;
   processed: number;
   saved: number;
   skipped: number;
   error?: string;
+  errorCode?: string;
+  incidentId?: string;
   modelLabel?: string;
   available: boolean;
   reason?: string;
+};
+
+export type BrainRebuildStatus = {
+  rebuild: {
+    id: string;
+    status: 'building' | 'ready';
+    createdAt: string;
+    revision: number;
+    counts: { current: number; staged: number; preserved: number; retired: number };
+    preview: { added: BrainNode[]; retired: BrainNode[] };
+    previewTruncated: boolean;
+  } | null;
+  rollbackAvailable: boolean;
+  rollbackUntil?: string;
 };

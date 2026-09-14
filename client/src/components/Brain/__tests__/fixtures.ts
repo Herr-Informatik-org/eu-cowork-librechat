@@ -1,4 +1,19 @@
-import type { BrainGraph, BrainNode } from 'librechat-data-provider';
+import type { BrainGraph, BrainNode, BrainRebuildStatus } from 'librechat-data-provider';
+
+export function rebuildFixture(status: 'building' | 'ready' = 'building'): BrainRebuildStatus {
+  return {
+    rebuild: {
+      id: 'rebuild-one',
+      status,
+      createdAt: '2026-09-14T10:00:00Z',
+      revision: 7,
+      counts: { current: 4, staged: 2, preserved: 1, retired: 3 },
+      preview: { added: [memory()], retired: [memory({ id: 'old-node', title: 'Old fragment' })] },
+      previewTruncated: false,
+    },
+    rollbackAvailable: false,
+  };
+}
 
 export function memory(overrides: Partial<BrainNode> = {}): BrainNode {
   return {

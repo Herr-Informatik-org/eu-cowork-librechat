@@ -9,6 +9,8 @@ import {
 } from './historyRuntime';
 import { resolveBrainLearningModel } from './model';
 import { learnBrainTurn } from './learning';
+import { reviewBrainConversation } from './review';
+import { conversationMessages, conversationTranscript } from './conversation';
 import { requestBrain, BrainServiceError } from './client';
 import { recordCollectedUsage } from '~/agents/usage';
 import { checkBalance } from '~/middleware/checkBalance';
@@ -35,6 +37,10 @@ jest.mock('./model', () => ({
   resolveBrainLearningModel: jest.fn(),
 }));
 jest.mock('./client', () => ({ ...jest.requireActual('./client'), requestBrain: jest.fn() }));
+jest.mock('./review', () => ({
+  ...jest.requireActual('./review'),
+  reviewBrainConversation: jest.fn(),
+}));
 jest.mock('./learning', () => ({ ...jest.requireActual('./learning'), learnBrainTurn: jest.fn() }));
 jest.mock('~/agents/activityLabels/host', () => ({
   mapCollectedMetadataToUsage: () => [
@@ -91,23 +97,19 @@ beforeEach(() => {
   jest.mocked(assertUsageCredit).mockResolvedValue(undefined);
   jest.mocked(checkBalance).mockResolvedValue(true);
   jest.mocked(getModelMaxTokens).mockReturnValue(32000);
-  jest
-    .mocked(resolveBrainLearningModel)
-    .mockResolvedValue({
-      llmConfig: { provider: 'openAI', model: 'learning-model', apiKey: 'synthetic-target-key' },
-      endpointTokenConfig: pricing,
-    });
-  jest
-    .mocked(requestBrain)
-    .mockResolvedValue({
-      context: '',
-      nodes: [],
-      edges: [],
-      recall: {},
-      hasMore: false,
-      suggestedIds: [],
-      stopReason: '',
-    });
+  jest.mocked(resolveBrainLearningModel).mockResolvedValue({
+    llmConfig: { provider: 'openAI', model: 'learning-model', apiKey: 'synthetic-target-key' },
+    endpointTokenConfig: pricing,
+  });
+  jest.mocked(requestBrain).mockResolvedValue({
+    context: '',
+    nodes: [],
+    edges: [],
+    recall: {},
+    hasMore: false,
+    suggestedIds: [],
+    stopReason: '',
+  });
   jest.mocked(learnBrainTurn).mockImplementation(async ({ session, onUsage }) => {
     await session.remember([{ quote: source.text, kind: 'project' }], true);
     await onUsage([]);
@@ -205,7 +207,7 @@ describe('historical learning through the configured runtime', () => {
     );
   });
 
-  it('rechecks opt-out and memory model enabled for every availability request', async () => {
+  it('rechecks opt-out but allows deliberate bootstrap while ongoing learning is paused', async () => {
     const { processor, user, config } = fixture();
     expect(await processor.availability(req)).toMatchObject({ available: true });
     user.personalization!.memories = false;
@@ -213,8 +215,7 @@ describe('historical learning through the configured runtime', () => {
     user.personalization!.memories = true;
     config.memory!.agent!.enabled = false;
     expect(await processor.availability(req)).toMatchObject({
-      available: false,
-      reason: expect.stringContaining('Administration'),
+      available: true,
     });
   });
 
@@ -323,15 +324,13 @@ describe('historical learning through the configured runtime', () => {
   it('honours OpenAI completion limits nested in modelKwargs when splitting text', async () => {
     const { processor } = fixture();
     jest.mocked(getModelMaxTokens).mockReturnValue(16000);
-    jest
-      .mocked(resolveBrainLearningModel)
-      .mockResolvedValueOnce({
-        llmConfig: {
-          provider: 'openAI',
-          model: 'gpt-test',
-          modelKwargs: { max_completion_tokens: 10000 },
-        },
-      });
+    jest.mocked(resolveBrainLearningModel).mockResolvedValueOnce({
+      llmConfig: {
+        provider: 'openAI',
+        model: 'gpt-test',
+        modelKwargs: { max_completion_tokens: 10000 },
+      },
+    });
     const end = await processor.chunk(req, { ...source, text: 'x'.repeat(50000) }, 0);
     expect(end).toBeGreaterThan(100);
     expect(end).toBeLessThan(10000);
@@ -344,5 +343,170 @@ describe('historical learning through the configured runtime', () => {
     expect(first).toBe(120000);
     expect(second).toBe(240000);
     expect(await brainHistoryChunkEnd(text, second, 100000)).toBe(text.length);
+  });
+});
+
+describe('canonical conversation bootstrap runtime', () => {
+  const messages = conversationMessages([
+    {
+      messageId: 'u1',
+      conversationId: 'chat',
+      isCreatedByUser: true,
+      createdAt: new Date(1000),
+      text: 'Für Atlas brauchen wir einen Freigabeprozess.',
+    },
+    {
+      messageId: 'a1',
+      parentMessageId: 'u1',
+      conversationId: 'chat',
+      isCreatedByUser: false,
+      createdAt: new Date(2000),
+      text: 'Für Atlas könnten zwei Personen freigeben.',
+    },
+    {
+      messageId: 'u2',
+      parentMessageId: 'a1',
+      conversationId: 'chat',
+      isCreatedByUser: true,
+      createdAt: new Date(3000),
+      text: 'Ja, genau so. Das ist für dieses Projekt wichtig.',
+    },
+  ]);
+  const contextual = { ...source, messages, text: conversationTranscript(messages) };
+  const fact = {
+    quote: 'Für Atlas ist eine Freigabe durch zwei Personen vereinbart.',
+    text: 'Für Atlas ist eine Freigabe durch zwei Personen vereinbart.',
+    title: 'Atlas-Freigabe',
+    kind: 'decision' as const,
+    scope: 'Atlas',
+    basis: 'confirmed' as const,
+    claimState: 'agreed' as const,
+    evidence: [
+      { messageId: 'a1', quote: messages[1].text },
+      { messageId: 'u2', quote: messages[2].text },
+    ],
+  };
+
+  it('passes the complete conversation with initial model and separately versioned context', async () => {
+    const { processor, config } = fixture();
+    config.memory!.bootstrapAgent = { provider: 'Initial Provider', model: 'initial-model' };
+    config.memory!.organizationContext = {
+      text: 'Unternehmen entwickelt Software.',
+      version: 'v1',
+    };
+    jest.mocked(requestBrain).mockResolvedValueOnce({
+      context: 'Known staged memory',
+      nodes: [
+        { id: 'stage', confidence: 'observed' },
+        { id: 'manual', confidence: 'confirmed' },
+      ],
+    });
+    jest.mocked(reviewBrainConversation).mockImplementationOnce(async (options) => {
+      await options.beforeModelCall!(500, 200);
+      await options.onCheckpoint({ phase: 'done', position: 3, candidates: [fact] });
+      return [fact];
+    });
+    const onFacts = jest.fn();
+    await processor.extract({
+      req,
+      source: contextual,
+      text: contextual.text,
+      rebuildId: 'draft',
+      canContinue: async () => true,
+      onFacts,
+      onBilling: jest.fn(),
+      onReview: jest.fn(),
+    });
+    expect(resolveBrainLearningModel).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'bootstrap', req: expect.objectContaining({ body: {} }) }),
+    );
+    expect(reviewBrainConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages,
+        organizationContext: config.memory!.organizationContext,
+        connectionHints: [],
+        knownIds: new Set(['stage']),
+      }),
+    );
+    expect(onFacts).toHaveBeenCalledWith([fact]);
+    expect(learnBrainTurn).not.toHaveBeenCalled();
+    expect(requestBrain).toHaveBeenCalledWith(
+      ownerId,
+      'POST',
+      '/v1/recall',
+      expect.objectContaining({ generationId: 'draft', recordTrace: false }),
+    );
+  });
+
+  it('preserves every source dependency and exact evidence while batching a large result', async () => {
+    const { processor } = fixture();
+    jest.mocked(requestBrain).mockImplementation(async (_owner, _method, _path, body) => ({
+      created: (body as { facts: unknown[] }).facts.length,
+      nodes: [],
+    }));
+    const input = {
+      req,
+      source: contextual,
+      text: contextual.text,
+      facts: Array.from({ length: 41 }, (_, i) => ({ ...fact, text: `${fact.text} Regel ${i}.` })),
+      canContinue: async () => true,
+      rebuildId: 'draft',
+    };
+    expect(await processor.ingest(input)).toBe(41);
+    expect(requestBrain).toHaveBeenCalledTimes(2);
+    const bodies = jest.mocked(requestBrain).mock.calls.map(
+      (call) =>
+        call[3] as {
+          facts: { sourceMessageIds: string[] }[];
+          sourceMessages: { id: string; text?: string; contentHash: string }[];
+          requestId: string;
+        },
+    );
+    expect(bodies.map((body) => body.facts.length)).toEqual([40, 1]);
+    expect(bodies[0].facts[0].sourceMessageIds).toEqual(['u1', 'a1', 'u2']);
+    expect(bodies[0].sourceMessages[0]).toMatchObject({
+      id: 'u1',
+      contentHash: messages[0].contentHash,
+    });
+    expect(bodies[0].sourceMessages[0].text).toBeUndefined();
+    expect(bodies[0].sourceMessages[1].text).toBe(messages[1].text);
+    const ids = bodies.map((body) => body.requestId);
+    jest.mocked(requestBrain).mockClear();
+    await processor.ingest(input);
+    expect(
+      jest
+        .mocked(requestBrain)
+        .mock.calls.map((call) => (call[3] as { requestId: string }).requestId),
+    ).toEqual(ids);
+  });
+
+  it('stops an oversized source before invoking a model', async () => {
+    const { processor } = fixture();
+    const oversized = { ...contextual, messages: [{ ...messages[0], text: 'x'.repeat(120001) }] };
+    await expect(
+      processor.extract({
+        req,
+        source: oversized,
+        text: oversized.text,
+        canContinue: async () => true,
+        onFacts: jest.fn(),
+        onBilling: jest.fn(),
+      }),
+    ).rejects.toThrow(/Importgrösse/);
+    expect(resolveBrainLearningModel).not.toHaveBeenCalled();
+    expect(reviewBrainConversation).not.toHaveBeenCalled();
+  });
+
+  it('marks a draft ready through the internal service without activating it', async () => {
+    const { processor } = fixture();
+    await processor.complete!(req, 'draft');
+    expect(requestBrain).toHaveBeenCalledWith(
+      ownerId,
+      'POST',
+      '/v1/rebuild/draft/complete',
+      {},
+      120000,
+    );
+    expect(requestBrain).toHaveBeenCalledTimes(1);
   });
 });

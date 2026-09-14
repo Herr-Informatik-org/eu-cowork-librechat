@@ -154,26 +154,113 @@ describe('Brain history Mongo ownership and lifecycle boundaries', () => {
     expect(await store.source('owner', 'foreign-parent', 'foreign')).toBeNull();
   });
 
+  it('groups complete owned conversations including assistant context and structured text', async () => {
+    await seed();
+    await database.collection('messages').updateOne(
+      { messageId: 'assistant' },
+      {
+        $set: {
+          content: [
+            { type: 'text', text: { value: 'Bezieht sich das auf Projekt Atlas?' } },
+            { type: 'image_url', image_url: { url: 'excluded-attachment' } },
+          ],
+        },
+      },
+    );
+    expect(await store.countConversations!('owner', undefined, new Date())).toBe(1);
+    const chat = await store.nextConversation!('owner', undefined, new Date());
+    expect(chat?.conversationId).toBe('own');
+    expect(chat?.messages).toHaveLength(3);
+    expect(chat?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'assistant',
+          role: 'assistant',
+          text: 'Bezieht sich das auf Projekt Atlas?',
+        }),
+      ]),
+    );
+    expect(chat?.text).not.toContain('excluded-attachment');
+    expect(await store.nextConversation!('owner', chat!, new Date())).toBeNull();
+    expect(await store.conversation!('owner', 'foreign', new Date())).toBeNull();
+  });
+
+  it('rechecks deleted context and edited source text for a whole conversation', async () => {
+    await seed();
+    const before = await store.conversation!('owner', 'own', new Date());
+    await database
+      .collection('messages')
+      .updateOne({ messageId: 'a' }, { $set: { text: 'Corrected source.' } });
+    const after = await store.conversation!('owner', 'own', new Date());
+    expect(before?.text).not.toBe(after?.text);
+    await database.collection('eucowork_brain_tombstones').insertOne({
+      ownerId: 'owner',
+      key: `source:${createHash('sha256').update('chat:own:assistant').digest('hex')}`,
+      deletedAt: new Date().toISOString(),
+    });
+    expect(
+      (await store.conversation!('owner', 'own', new Date()))?.messages?.map(
+        (message) => message.id,
+      ),
+    ).toEqual(['a', 'b']);
+  });
+
+  it('replaces a legacy job while fencing its old worker and extraction checkpoint', async () => {
+    await store.create(initial());
+    await store.claim('owner', 0, 'old-worker', new Date(Date.now() + 10000));
+    await store.resetConversationJob!({
+      ...initial(),
+      schemaVersion: 2,
+      rebuildId: 'new-generation',
+      revision: 2,
+    });
+    expect(await store.update('owner', 'old-worker', { saved: 100 })).toBe(false);
+    expect(await store.read('owner')).toMatchObject({
+      schemaVersion: 2,
+      saved: 0,
+      rebuildId: 'new-generation',
+    });
+  });
+
+  it('keeps a running conversation checkpoint intact across concurrent draft start retries', async () => {
+    const draft = { ...initial(), schemaVersion: 2 as const, rebuildId: 'draft' };
+    await Promise.all([store.resetConversationJob!(draft), store.resetConversationJob!(draft)]);
+    await store.claim('owner', 0, 'worker', new Date(Date.now() + 10000));
+    await store.update('owner', 'worker', { processed: 7, saved: 3 });
+    await Promise.all([store.resetConversationJob!(draft), store.resetConversationJob!(draft)]);
+    expect(await store.read('owner')).toMatchObject({
+      status: 'running',
+      leaseToken: 'worker',
+      processed: 7,
+      saved: 3,
+    });
+  });
+
+  it('does not pause a newer generation when discarding an old draft', async () => {
+    await store.resetConversationJob!({ ...initial(), schemaVersion: 2, rebuildId: 'current' });
+    await store.claim('owner', 0, 'worker', new Date(Date.now() + 10000));
+    await store.pause('owner', 'old');
+    expect((await store.read('owner'))?.pauseRequested).not.toBe(true);
+    await store.pause('owner', 'current');
+    expect((await store.read('owner'))?.pauseRequested).toBe(true);
+  });
+
   it('honours source and conversation deletion fences before original documents disappear', async () => {
     await seed();
     const key = (kind: string, value: string) =>
       `${kind}:${createHash('sha256').update(value).digest('hex')}`;
-    await database
-      .collection('eucowork_brain_tombstones')
-      .insertOne({
-        ownerId: 'owner',
-        key: key('source', 'chat:own:a'),
-        deletedAt: new Date().toISOString(),
-      });
+    await database.collection('eucowork_brain_tombstones').insertOne({
+      ownerId: 'owner',
+      key: key('source', 'chat:own:a'),
+      deletedAt: new Date().toISOString(),
+    });
     expect(await store.source('owner', 'a', 'own')).toBeNull();
     expect((await store.next('owner', undefined, new Date()))?.messageId).toBe('b');
-    await database
-      .collection('eucowork_brain_tombstones')
-      .insertOne({
-        ownerId: 'owner',
-        key: key('conversation', 'own'),
-        deletedAt: new Date().toISOString(),
-      });
+    await database.collection('eucowork_brain_tombstones').insertOne({
+      ownerId: 'owner',
+      key: key('conversation', 'own'),
+      deletedAt: new Date().toISOString(),
+    });
     expect(await store.next('owner', undefined, new Date())).toBeNull();
   });
 

@@ -479,6 +479,79 @@
   gap: 10px;
   color: var(--text-destructive);
 }
+
+.brain-rebuild-note,
+.brain-rebuild-review,
+.brain-rebuild-rollback {
+  display: grid;
+  gap: 0.75rem;
+}
+.brain-rebuild-note .brain-button {
+  justify-self: start;
+}
+.brain-rebuild-review {
+  border-top: 1px solid var(--border-light);
+  padding-top: 1rem;
+}
+.brain-rebuild-review h3,
+.brain-rebuild-review h4 {
+  font-weight: 600;
+}
+.brain-rebuild-counts,
+.brain-validity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+}
+.brain-rebuild-counts dt,
+.brain-validity dt {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.brain-rebuild-counts dd {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+.brain-rebuild-changes summary,
+.brain-rebuild-preview summary {
+  cursor: pointer;
+  padding: 0.4rem 0;
+}
+.brain-rebuild-changes[open] > h4 {
+  margin-top: 0.75rem;
+}
+.brain-rebuild-preview {
+  max-height: 24rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.brain-rebuild-preview li {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border-light);
+  overflow-wrap: anywhere;
+}
+.brain-rebuild-preview blockquote {
+  border-left: 2px solid var(--border-medium);
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+}
+.brain-validity {
+  margin-bottom: 1rem;
+  font-size: 0.8125rem;
+}
+.brain-source-role {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.brain-source-context {
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+}
+.brain-source-context summary {
+  cursor: pointer;
+}
 .brain-main {
   display: flex;
   flex-direction: column;
