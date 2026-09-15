@@ -5,7 +5,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { dataService, QueryKeys } from 'librechat-data-provider';
 import type { AxiosResponse } from 'axios';
 import Workspace from '../Workspace';
-import { graphFixture, memory } from './fixtures';
+import { graphFixture, memory, rebuildFixture } from './fixtures';
 
 let mockCanWrite = true;
 jest.mock('librechat-data-provider', () => {
@@ -228,4 +228,159 @@ test('partial knowledge is labelled and later pages are loaded without duplicate
     expect.any(AbortSignal),
   );
   expect(screen.queryByRole('button', { name: 'com_ui_brain_load_more' })).not.toBeInTheDocument();
+});
+
+test('shows a live draft with generation-isolated details and no memory mutations', async () => {
+  const draft = rebuildFixture();
+  if (draft.rebuild) draft.rebuild.autoActivate = true;
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue(draft);
+  jest.mocked(dataService.getBrainHistory).mockResolvedValue({
+    status: 'running',
+    schemaVersion: 2,
+    unit: 'chats',
+    rebuildId: 'rebuild-one',
+    autoActivate: true,
+    total: 8,
+    processed: 2,
+    saved: 1,
+    skipped: 0,
+    available: true,
+  });
+  const update = jest.spyOn(dataService, 'updateBrainNode');
+  const remove = jest.spyOn(dataService, 'deleteBrainNode');
+  renderWorkspace();
+  const list = await screen.findByRole('list', { name: 'com_ui_brain_memories' });
+  expect(screen.getByText('com_ui_brain_rebuild_live_preview')).toBeInTheDocument();
+  expect(dataService.getBrainGraph).toHaveBeenCalledTimes(1);
+  expect(dataService.getBrainGraph).toHaveBeenCalledWith(
+    expect.objectContaining({ generationId: 'rebuild-one' }),
+    expect.any(AbortSignal),
+  );
+  fireEvent.click(within(list).getByRole('button', { name: /Projekt Abendrot/ }));
+  await screen.findByRole('link', { name: /Pilot planen/ });
+  expect(dataService.getBrainNode).toHaveBeenCalledWith(
+    'node-one',
+    expect.any(AbortSignal),
+    'rebuild-one',
+  );
+  expect(screen.queryByRole('button', { name: /com_ui_brain_create/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /com_ui_brain_edit/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /com_ui_brain_forget/ })).not.toBeInTheDocument();
+  expect(update).not.toHaveBeenCalled();
+  expect(remove).not.toHaveBeenCalled();
+  await waitFor(() => expect(dataService.getBrainHistory).toHaveBeenCalledTimes(2), {
+    timeout: 3500,
+  });
+  expect(dataService.getBrainRebuild).toHaveBeenCalledTimes(1);
+});
+
+test('switches from the live draft to fresh active knowledge after automatic completion', async () => {
+  const draft = rebuildFixture();
+  if (draft.rebuild) draft.rebuild.autoActivate = true;
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue(draft);
+  const running = {
+    status: 'running' as const,
+    schemaVersion: 2 as const,
+    unit: 'chats' as const,
+    rebuildId: 'rebuild-one',
+    autoActivate: true,
+    total: 8,
+    processed: 2,
+    saved: 1,
+    skipped: 0,
+    available: true,
+  };
+  jest.mocked(dataService.getBrainHistory).mockResolvedValue(running);
+  const draftNode = memory({ id: 'draft-node', title: 'Wissen im Entwurf' });
+  const activeNode = memory({ id: 'activated-node', title: 'Automatisch aktiviertes Wissen' });
+  jest.mocked(dataService.getBrainGraph).mockImplementation(async (params) => ({
+    nodes: [params?.generationId ? draftNode : activeNode],
+    edges: [],
+    total: 1,
+    nextCursor: null,
+  }));
+  const { client } = renderWorkspace();
+  await within(await screen.findByRole('list', { name: 'com_ui_brain_memories' })).findByText(
+    'Wissen im Entwurf',
+  );
+  client.setQueryData([QueryKeys.brain, 'user-one', 'graph', { query: '', limit: 500 }], {
+    pages: [
+      { nodes: [memory({ title: 'Veralteter Cache' })], edges: [], total: 1, nextCursor: null },
+    ],
+    pageParams: [undefined],
+  });
+  jest
+    .mocked(dataService.getBrainRebuild)
+    .mockResolvedValue({ rebuild: null, rollbackAvailable: true });
+  jest
+    .mocked(dataService.getBrainHistory)
+    .mockResolvedValue({ ...running, status: 'completed', processed: 8, saved: 4 });
+  await act(async () => {
+    await client.invalidateQueries([QueryKeys.brain, 'user-one', 'history']);
+  });
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole('list', { name: 'com_ui_brain_memories' })).getByText(
+        'Automatisch aktiviertes Wissen',
+      ),
+    ).toBeInTheDocument(),
+  );
+  expect(screen.queryByText('Veralteter Cache')).not.toBeInTheDocument();
+  expect(screen.queryByText('com_ui_brain_rebuild_live_preview')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /com_ui_brain_create/ })).toBeEnabled();
+  expect(dataService.getBrainGraph).toHaveBeenLastCalledWith(
+    expect.not.objectContaining({ generationId: 'rebuild-one' }),
+    expect.any(AbortSignal),
+  );
+});
+
+test('restarts live pagination after inserts instead of refetching stale follow-up cursors', async () => {
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuildFixture());
+  const running = {
+    status: 'running' as const,
+    schemaVersion: 2 as const,
+    unit: 'chats' as const,
+    rebuildId: 'rebuild-one',
+    total: 8,
+    processed: 1,
+    saved: 0,
+    skipped: 0,
+    available: true,
+  };
+  jest.mocked(dataService.getBrainHistory).mockResolvedValue(running);
+  jest
+    .mocked(dataService.getBrainGraph)
+    .mockResolvedValueOnce({ ...graphFixture, nextCursor: 'stale-cursor', total: 3 })
+    .mockResolvedValueOnce({
+      nodes: [memory({ id: 'page-two', title: 'Bisherige Folgeseite' })],
+      edges: [],
+      total: 3,
+      nextCursor: null,
+    });
+  const { client } = renderWorkspace();
+  fireEvent.click(await screen.findByRole('button', { name: 'com_ui_brain_load_more' }));
+  await within(screen.getByRole('list', { name: 'com_ui_brain_memories' })).findByText(
+    'Bisherige Folgeseite',
+  );
+  jest.mocked(dataService.getBrainGraph).mockResolvedValue({
+    nodes: [memory({ id: 'latest', title: 'Frisch gelerntes Wissen' })],
+    edges: [],
+    total: 4,
+    nextCursor: 'fresh-cursor',
+  });
+  jest
+    .mocked(dataService.getBrainHistory)
+    .mockResolvedValue({ ...running, processed: 2, saved: 1 });
+  await act(async () => {
+    await client.invalidateQueries([QueryKeys.brain, 'user-one', 'history']);
+  });
+  await within(screen.getByRole('list', { name: 'com_ui_brain_memories' })).findByText(
+    'Frisch gelerntes Wissen',
+  );
+  expect(dataService.getBrainGraph).toHaveBeenCalledTimes(3);
+  expect(dataService.getBrainGraph).toHaveBeenLastCalledWith(
+    expect.objectContaining({ generationId: 'rebuild-one', cursor: undefined }),
+    expect.any(AbortSignal),
+  );
+  expect(screen.queryByText('Bisherige Folgeseite')).not.toBeInTheDocument();
 });

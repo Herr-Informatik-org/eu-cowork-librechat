@@ -21,6 +21,7 @@ const validationFields = [
   'requestId',
   'conversationId',
   'generationId',
+  'autoActivate',
   'sourceManifestId',
   'sourceCount',
   'pageCount',

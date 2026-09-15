@@ -93,9 +93,62 @@ describe('Brain rebuild HTTP orchestration', () => {
     ).toBe(201);
     expect(history.start).toHaveBeenCalledWith(
       expect.objectContaining({ user: expect.objectContaining({ id: 'owner' }) }),
-      { rebuildId: 'generation-new' },
+      { rebuildId: 'generation-new', autoActivate: false },
     );
   });
+  it('passes explicit consent and stores the service decision for this generation', async () => {
+    const { app, history } = setup();
+    proxy.mockResolvedValue({
+      ...ready,
+      rebuild: { ...ready.rebuild!, status: 'building', autoActivate: true },
+    });
+    expect(
+      (await request(app).post('/api/brain/rebuild').send({ autoActivate: true, ownerId: 'other' }))
+        .status,
+    ).toBe(201);
+    expect(proxy).toHaveBeenCalledWith('owner', 'POST', '/v1/rebuild', { autoActivate: true });
+    expect(history.start).toHaveBeenCalledWith(expect.anything(), {
+      rebuildId: 'generation-new',
+      autoActivate: true,
+    });
+  });
+  it('does not opt an existing manual draft into automatic activation', async () => {
+    const { app, history } = setup();
+    proxy.mockResolvedValue({ ...ready, rebuild: { ...ready.rebuild!, status: 'building' } });
+    await request(app).post('/api/brain/rebuild').send({ autoActivate: true });
+    expect(history.start).toHaveBeenCalledWith(expect.anything(), {
+      rebuildId: 'generation-new',
+      autoActivate: false,
+    });
+  });
+  it.each(['true', 1, {}, null])(
+    'rejects malformed automatic activation consent %p',
+    async (autoActivate) => {
+      const { app, history } = setup();
+      expect((await request(app).post('/api/brain/rebuild').send({ autoActivate })).status).toBe(
+        400,
+      );
+      expect(proxy).not.toHaveBeenCalled();
+      expect(history.start).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['/graph', '/nodes/node-1'])(
+    'forwards only the draft selection for an authenticated read at %s',
+    async (path) => {
+      const { app } = setup();
+      proxy.mockResolvedValue({});
+      expect(
+        (await request(app).get(`/api/brain${path}?generationId=draft-1&ownerId=other`)).status,
+      ).toBe(200);
+      expect(proxy).toHaveBeenCalledWith(
+        'owner',
+        'GET',
+        `/v1${path}?generationId=draft-1`,
+        undefined,
+        5000,
+      );
+    },
+  );
   it.each([
     ['/rebuild', Permissions.CREATE],
     ['/rebuild', Permissions.UPDATE],
@@ -181,5 +234,19 @@ describe('Brain rebuild HTTP orchestration', () => {
       (await request(app).post('/api/brain/rebuild/generation-old/discard').send({})).status,
     ).toBe(201);
     expect(history.pause).toHaveBeenCalledWith(expect.anything(), 'generation-old');
+  });
+
+  it('rejects discard while the matching generation is already committing', async () => {
+    const { app, history } = setup();
+    history.pause.mockResolvedValue({
+      ...idle,
+      status: 'running',
+      finalizing: true,
+      rebuildId: 'generation-new',
+    });
+    const result = await request(app).post('/api/brain/rebuild/generation-new/discard').send({});
+    expect(result.status).toBe(409);
+    expect(result.body.error).toContain('abgeschlossen');
+    expect(proxy).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { Permissions } from 'librechat-data-provider';
 import type { AppConfig, IUser } from '@librechat/data-schemas';
 import type { ServerRequest } from '~/types';
 import type { BrainHistoryStore, BrainHistoryMessage } from './historyStore';
@@ -576,7 +577,7 @@ describe('canonical conversation bootstrap runtime', () => {
     },
   );
 
-  it('marks a draft ready through the internal service without activating it', async () => {
+  it('completes through the internal service which holds the saved activation decision', async () => {
     const { processor } = fixture();
     await processor.complete!(req, 'draft');
     expect(requestBrain).toHaveBeenCalledWith(
@@ -587,5 +588,20 @@ describe('canonical conversation bootstrap runtime', () => {
       120000,
     );
     expect(requestBrain).toHaveBeenCalledTimes(1);
+    expect(checkAccess).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        permissions: expect.arrayContaining([Permissions.UPDATE]),
+      }),
+    );
+  });
+  it('does not complete or activate after update permission or memory consent is revoked', async () => {
+    const { processor, user } = fixture();
+    jest.mocked(checkAccess).mockResolvedValue(false);
+    await expect(processor.complete!(req, 'draft')).rejects.toThrow('Berechtigung');
+    expect(requestBrain).not.toHaveBeenCalled();
+    jest.mocked(checkAccess).mockResolvedValue(true);
+    user.personalization = { memories: false };
+    await expect(processor.complete!(req, 'draft')).rejects.toThrow('deaktiviert');
+    expect(requestBrain).not.toHaveBeenCalled();
   });
 });

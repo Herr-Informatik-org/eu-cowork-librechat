@@ -50,6 +50,8 @@ export interface BrainHistoryJob {
   modelLabel?: string;
   schemaVersion?: 2;
   rebuildId?: string;
+  autoActivate?: boolean;
+  finalizing?: boolean;
   analysisFingerprint?: string;
   processedSections?: number;
 }
@@ -64,6 +66,7 @@ export interface BrainHistoryStore {
     until: Date,
   ): Promise<BrainHistoryJob | null>;
   update(ownerId: string, token: string, fields: Partial<BrainHistoryJob>): Promise<boolean>;
+  beginCompletion(ownerId: string, token: string, now: Date): Promise<boolean>;
   pause(ownerId: string, rebuildId?: string): Promise<void>;
   expire(ownerId: string, now: Date, error: string): Promise<void>;
   count(ownerId: string, cursor: BrainHistoryCursor | undefined, cutoff: Date): Promise<number>;
@@ -399,7 +402,13 @@ export function createMongoBrainHistoryStore({
       return jobs().findOneAndUpdate(
         { _id: ownerId, ownerId, revision, status: { $ne: 'running' } },
         {
-          $set: { status: 'running', leaseToken: token, leaseUntil: until, pauseRequested: false },
+          $set: {
+            status: 'running',
+            leaseToken: token,
+            leaseUntil: until,
+            pauseRequested: false,
+            finalizing: false,
+          },
           $inc: { revision: 1 },
         },
         { returnDocument: 'after', includeResultMetadata: false },
@@ -423,9 +432,30 @@ export function createMongoBrainHistoryStore({
       );
       return result.matchedCount === 1;
     },
+    async beginCompletion(ownerId, token, now) {
+      const result = await jobs().updateOne(
+        {
+          _id: ownerId,
+          ownerId,
+          leaseToken: token,
+          status: 'running',
+          leaseUntil: { $gt: now },
+          pauseRequested: { $ne: true },
+          finalizing: { $ne: true },
+        },
+        { $set: { finalizing: true }, $inc: { revision: 1 } },
+      );
+      return result.matchedCount === 1;
+    },
     async pause(ownerId, rebuildId) {
       await jobs().updateOne(
-        { _id: ownerId, ownerId, status: 'running', ...(rebuildId ? { rebuildId } : {}) },
+        {
+          _id: ownerId,
+          ownerId,
+          status: 'running',
+          finalizing: { $ne: true },
+          ...(rebuildId ? { rebuildId } : {}),
+        },
         { $set: { pauseRequested: true }, $inc: { revision: 1 } },
       );
     },
@@ -433,7 +463,7 @@ export function createMongoBrainHistoryStore({
       await jobs().updateOne(
         { _id: ownerId, ownerId, status: 'running', leaseUntil: { $lte: now } },
         {
-          $set: { status: 'paused', error },
+          $set: { status: 'paused', error, finalizing: false },
           $inc: { revision: 1 },
           $unset: { leaseToken: '', leaseUntil: '' },
         },

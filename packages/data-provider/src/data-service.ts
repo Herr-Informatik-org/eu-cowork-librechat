@@ -36,8 +36,9 @@ export const pauseBrainHistory = (): Promise<BrainHistoryStatus> =>
   request.post(endpoints.brainHistoryPause(), {});
 export const getBrainRebuild = (signal?: AbortSignal): Promise<BrainRebuildStatus> =>
   request.get(endpoints.brainRebuild(), { signal });
-export const startBrainRebuild = (): Promise<BrainRebuildStatus> =>
-  request.post(endpoints.brainRebuild(), {});
+export const startBrainRebuild = (
+  options: { autoActivate?: boolean } = {},
+): Promise<BrainRebuildStatus> => request.post(endpoints.brainRebuild(), options);
 export const activateBrainRebuild = (id: string, revision: number): Promise<BrainRebuildStatus> =>
   request.post(endpoints.brainRebuildAction(id, 'activate'), { revision });
 export const discardBrainRebuild = (id: string): Promise<BrainRebuildStatus> =>
@@ -57,8 +58,9 @@ export const getBrainGraph = (
 export const getBrainNode = (
   id: string,
   signal?: AbortSignal,
+  generationId?: string,
 ): Promise<{ node: BrainNode; edges: BrainEdge[] }> =>
-  request.get(endpoints.brainNode(id), { signal });
+  request.get(endpoints.brainNode(id, generationId), { signal });
 
 export const createBrainNode = (data: BrainNodeInput): Promise<{ node: BrainNode }> =>
   request.post(endpoints.brainNodes(), data);

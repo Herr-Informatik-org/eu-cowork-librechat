@@ -43,7 +43,13 @@ export type BrainGraph = {
   nextCursor: string | null;
 };
 
-export type BrainGraphParams = { query?: string; scope?: string; cursor?: string; limit?: number };
+export type BrainGraphParams = {
+  query?: string;
+  scope?: string;
+  cursor?: string;
+  limit?: number;
+  generationId?: string;
+};
 
 export type BrainRecall = {
   id: string;
@@ -91,6 +97,8 @@ export type BrainHistoryStatus = {
   schemaVersion?: 2;
   unit?: 'chats' | 'messages';
   rebuildId?: string;
+  autoActivate?: boolean;
+  finalizing?: boolean;
   processedSections?: number;
   status: 'idle' | 'running' | 'paused' | 'completed' | 'failed';
   total: number;
@@ -106,11 +114,13 @@ export type BrainHistoryStatus = {
 };
 
 export type BrainRebuildStatus = {
+  activeGenerationId?: string;
   rebuild: {
     id: string;
     status: 'building' | 'ready';
     createdAt: string;
     revision: number;
+    autoActivate?: boolean;
     counts: { current: number; staged: number; preserved: number; retired: number };
     preview: { added: BrainNode[]; retired: BrainNode[] };
     previewTruncated: boolean;

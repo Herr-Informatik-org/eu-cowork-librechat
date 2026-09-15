@@ -53,7 +53,10 @@ export interface BrainHistoryProcessor {
 
 export interface BrainHistoryService {
   status(req: ServerRequest): Promise<BrainHistoryStatus>;
-  start(req: ServerRequest, options?: { rebuildId: string }): Promise<BrainHistoryStatus>;
+  start(
+    req: ServerRequest,
+    options?: { rebuildId: string; autoActivate?: boolean },
+  ): Promise<BrainHistoryStatus>;
   pause(req: ServerRequest, rebuildId?: string): Promise<BrainHistoryStatus>;
   settle(ownerId: string): Promise<void>;
 }
@@ -84,6 +87,8 @@ function publicStatus(
     schemaVersion: job?.schemaVersion,
     unit: job?.schemaVersion === 2 ? 'chats' : 'messages',
     rebuildId: job?.rebuildId,
+    autoActivate: job?.autoActivate,
+    finalizing: job?.finalizing,
     processedSections: job?.processedSections,
     ...(job?.error
       ? { error: job.error, errorCode: job.errorCode, incidentId: job.incidentId }
@@ -190,8 +195,17 @@ export function createBrainHistoryService({
         else source = await store.next(ownerId, job.cursor, job.cutoff);
         currentSource = source;
         if (!source && !pending) {
+          // Atomically choose between an accepted pause and the final commit phase.
+          if (!(await store.beginCompletion(ownerId, token, now()))) continue;
+          job = { ...job, finalizing: true };
+          stage = 'ingest';
           if (job.rebuildId) await processor.complete?.(req, job.rebuildId);
-          await update({ status: 'completed', total: job.processed, pending: undefined });
+          await update({
+            status: 'completed',
+            finalizing: false,
+            total: job.processed,
+            pending: undefined,
+          });
           return;
         }
         if (!source || (pending && brainHistorySourceHash(source.text) !== pending.sourceHash)) {
@@ -347,6 +361,7 @@ export function createBrainHistoryService({
         await store
           .update(ownerId, token, {
             status: 'failed',
+            finalizing: false,
             error: `${failure.message} Referenz: ${failure.incidentId}`,
             errorCode: failure.code,
             incidentId: failure.incidentId,
@@ -365,7 +380,10 @@ export function createBrainHistoryService({
       const [job, availability] = await Promise.all([read(ownerId), processor.availability(req)]);
       return publicStatus(job, availability);
     },
-    async start(req: ServerRequest, options?: { rebuildId: string }): Promise<BrainHistoryStatus> {
+    async start(
+      req: ServerRequest,
+      options?: { rebuildId: string; autoActivate?: boolean },
+    ): Promise<BrainHistoryStatus> {
       const ownerId = String(req.user!.id);
       const availability = await processor.availability(req);
       if (!availability.available) return publicStatus(await read(ownerId), availability);
@@ -392,6 +410,7 @@ export function createBrainHistoryService({
           cutoff: now(),
           schemaVersion: 2,
           rebuildId: options.rebuildId,
+          autoActivate: options.autoActivate === true,
           analysisFingerprint: availability.analysisFingerprint,
           processedSections: 0,
         });

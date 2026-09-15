@@ -124,7 +124,7 @@ export async function brainHistoryChunkEnd(
 export function createBrainHistoryProcessor(
   deps: BrainHistoryRuntimeDependencies,
 ): BrainHistoryProcessor {
-  const refresh = async (req: ServerRequest): Promise<ServerRequest> => {
+  const refresh = async (req: ServerRequest, completing = false): Promise<ServerRequest> => {
     if (!req.user?.id) throw new BrainHistoryError('Bitte melde dich erneut an.');
     const ownerId = String(req.user.id);
     const record = await deps.getUserById(ownerId);
@@ -145,7 +145,12 @@ export function createBrainHistoryProcessor(
     const allowed = await checkAccess({
       user,
       permissionType: PermissionTypes.MEMORIES,
-      permissions: [Permissions.USE, Permissions.READ, Permissions.CREATE],
+      permissions: [
+        Permissions.USE,
+        Permissions.READ,
+        Permissions.CREATE,
+        ...(completing ? [Permissions.UPDATE] : []),
+      ],
       getRoleByName: deps.getRoleByName,
     });
     if (!allowed)
@@ -677,7 +682,7 @@ export function createBrainHistoryProcessor(
       return result.created ?? result.nodes.length;
     },
     async complete(req, rebuildId) {
-      await refresh(req);
+      await refresh(req, true);
       await requestBrain(
         String(req.user!.id),
         'POST',

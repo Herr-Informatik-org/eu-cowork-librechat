@@ -511,7 +511,8 @@ export const brainRebuild = () => `${BASE_URL}/api/brain/rebuild`;
 export const brainRebuildAction = (id: string, action: 'activate' | 'discard') =>
   `${brainRebuild()}/${encodeURIComponent(id)}/${action}`;
 export const brainRebuildRollback = () => `${brainRebuild()}/rollback`;
-export const brainNode = (id: string) => `${brainNodes()}/${encodeURIComponent(id)}`;
+export const brainNode = (id: string, generationId?: string) =>
+  `${brainNodes()}/${encodeURIComponent(id)}${generationId ? `?generationId=${encodeURIComponent(generationId)}` : ''}`;
 export const brainExport = () => `${BASE_URL}/api/brain/export`;
 export const brainRecalls = (conversationId: string) =>
   `${BASE_URL}/api/brain/recalls?conversationId=${encodeURIComponent(conversationId)}`;

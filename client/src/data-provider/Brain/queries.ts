@@ -18,20 +18,24 @@ export function useBrainStatusQuery(enabled = true) {
   );
 }
 
-export function useBrainGraphQuery(params: Omit<BrainGraphParams, 'cursor'> = {}) {
+export function useBrainGraphQuery(params: Omit<BrainGraphParams, 'cursor'> = {}, enabled = true) {
   const { data: user } = useGetUserQuery();
   return useInfiniteQuery(
     [QueryKeys.brain, user?.id, 'graph', params],
     ({ pageParam, signal }) => dataService.getBrainGraph({ ...params, cursor: pageParam }, signal),
-    { ...freshness, enabled: !!user?.id, getNextPageParam: (page) => page.nextCursor ?? undefined },
+    {
+      ...freshness,
+      enabled: enabled && !!user?.id,
+      getNextPageParam: (page) => page.nextCursor ?? undefined,
+    },
   );
 }
 
-export function useBrainNodeQuery(id: string | null) {
+export function useBrainNodeQuery(id: string | null, generationId?: string) {
   const { data: user } = useGetUserQuery();
   return useQuery(
-    [QueryKeys.brain, user?.id, 'node', id],
-    ({ signal }) => dataService.getBrainNode(id!, signal),
+    [QueryKeys.brain, user?.id, 'node', id, ...(generationId ? [generationId] : [])],
+    ({ signal }) => dataService.getBrainNode(id!, signal, generationId),
     { ...freshness, enabled: !!user?.id && !!id },
   );
 }

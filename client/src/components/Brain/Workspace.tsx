@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@librechat/client';
 import {
   Download,
@@ -15,7 +15,12 @@ import { useParams } from 'react-router-dom';
 import { PermissionTypes, Permissions } from 'librechat-data-provider';
 import type { BrainKind, BrainNode } from 'librechat-data-provider';
 import { useHasAccess, useLocalize } from '~/hooks';
-import { useBrainGraphQuery, useBrainMutations, useBrainRecallsQuery } from '~/data-provider/Brain';
+import {
+  useBrainGraphQuery,
+  useBrainMutations,
+  useBrainRecallsQuery,
+  useBrainProgress,
+} from '~/data-provider/Brain';
 import { brainKinds, kindColors, kindKeys, mergeBrainPages } from './layout';
 import Details, { CreateNode } from './Details';
 import Graph from './Graph';
@@ -85,8 +90,21 @@ export default function Workspace({
     permissionType: PermissionTypes.MEMORIES,
     permission: Permissions.UPDATE,
   });
-  const graph = useBrainGraphQuery({ query, limit: 500 });
+  const progress = useBrainProgress(canCreate && canRead);
+  const generationId = progress.rebuild.rebuild.data?.rebuild?.id;
+  const isDraft = !!generationId;
+  const graph = useBrainGraphQuery(
+    { query, limit: 500, ...(generationId ? { generationId } : {}) },
+    !(canCreate && canRead) || progress.rebuild.rebuild.data !== undefined,
+  );
   const { download } = useBrainMutations();
+  const previousGeneration = useRef(generationId);
+  useEffect(() => {
+    if (previousGeneration.current === generationId) return;
+    previousGeneration.current = generationId;
+    setSelectedId(null);
+    setCreating(false);
+  }, [generationId]);
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 220);
     return () => clearTimeout(timer);
@@ -96,7 +114,7 @@ export default function Workspace({
     () => (kind ? nodes.filter((node) => node.kind === kind) : nodes),
     [nodes, kind],
   );
-  const mapNodes = visibleNodes.slice(0, 1000);
+  const mapNodes = useMemo(() => visibleNodes.slice(0, 1000), [visibleNodes]);
   const total = graph.data?.pages[0]?.total ?? 0;
   const select = (id: string) => {
     setSelectedId(id);
@@ -194,13 +212,13 @@ export default function Workspace({
           type="button"
           className="brain-icon-button"
           onClick={exportData}
-          disabled={download.isLoading || graph.isLoading || graph.isError}
+          disabled={isDraft || download.isLoading || graph.isLoading || graph.isError}
           aria-label={localize('com_ui_brain_export')}
           title={localize('com_ui_brain_export')}
         >
           <Download size={17} />
         </button>
-        {canCreate && (
+        {canCreate && !isDraft && (
           <Button
             variant="default"
             size="sm"
@@ -216,7 +234,13 @@ export default function Workspace({
           </Button>
         )}
       </div>
-      <History enabled={canCreate && canRead} />
+      <History enabled={canCreate && canRead} progress={progress} />
+      {isDraft && (
+        <div className="brain-draft-banner" role="status">
+          <span className="brain-draft-badge">{localize('com_ui_brain_rebuild_draft')}</span>
+          <p>{localize('com_ui_brain_rebuild_live_preview')}</p>
+        </div>
+      )}
       {download.isError && (
         <p role="alert" className="brain-inline-error">
           {localize('com_ui_brain_export_failed')}
@@ -236,17 +260,18 @@ export default function Workspace({
             <span>{localize('com_ui_brain_map_hint')}</span>
             <span>{localize('com_ui_brain_connection_count', { count: edges.length })}</span>
           </div>
-          <RecallTrace nodes={nodes} onSelect={select} />
+          {!isDraft && <RecallTrace nodes={nodes} onSelect={select} />}
         </main>
         <div className="brain-rail">
-          {creating && <CreateNode onClose={clear} onCreated={(id) => select(id)} />}
+          {creating && !isDraft && <CreateNode onClose={clear} onCreated={(id) => select(id)} />}
           {!creating && selectedId && (
             <Details
-              key={selectedId}
+              key={`${generationId ?? 'active'}:${selectedId}`}
               id={selectedId}
               nodes={nodes}
               edges={edges}
-              canEdit={canEdit}
+              canEdit={canEdit && !isDraft}
+              generationId={generationId}
               onClose={clear}
               onSelect={select}
               onNavigate={onClose}
@@ -287,14 +312,20 @@ export default function Workspace({
                   <h3>
                     {query || kind
                       ? localize('com_ui_brain_no_results')
-                      : localize('com_ui_brain_empty_title')}
+                      : localize(
+                          isDraft ? 'com_ui_brain_rebuild_draft_empty' : 'com_ui_brain_empty_title',
+                        )}
                   </h3>
                   <p>
                     {query || kind
                       ? localize('com_ui_brain_no_results_hint')
-                      : localize('com_ui_brain_empty_description')}
+                      : localize(
+                          isDraft
+                            ? 'com_ui_brain_rebuild_draft_empty_hint'
+                            : 'com_ui_brain_empty_description',
+                        )}
                   </p>
-                  {!query && !kind && canCreate && (
+                  {!query && !kind && canCreate && !isDraft && (
                     <Button
                       variant="outline"
                       size="sm"

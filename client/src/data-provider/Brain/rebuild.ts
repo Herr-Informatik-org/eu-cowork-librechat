@@ -2,19 +2,40 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataService, MutationKeys, QueryKeys } from 'librechat-data-provider';
 import type { BrainRebuildStatus } from 'librechat-data-provider';
 import { useGetUserQuery } from '../Auth';
+import { refreshBrainPointer } from './cache';
 
-export function useBrainRebuild(enabled: boolean) {
+export function useBrainRebuild(enabled: boolean, poll = true) {
   const { data: user } = useGetUserQuery();
   const userId = user?.id;
   const queryClient = useQueryClient();
   const queryKey = [QueryKeys.brain, userId, 'rebuild'];
-  const rebuild = useQuery(queryKey, ({ signal }) => dataService.getBrainRebuild(signal), {
-    enabled: enabled && !!userId,
-    staleTime: 0,
-    retry: 1,
-    refetchOnWindowFocus: true,
-    refetchInterval: (state) => (state?.rebuild?.status === 'building' ? 2000 : false),
-  });
+  const rebuild = useQuery(
+    queryKey,
+    async ({ signal }) => {
+      const status = await dataService.getBrainRebuild(signal);
+      const before = queryClient.getQueryData<BrainRebuildStatus>(queryKey);
+      if (
+        !signal?.aborted &&
+        userId &&
+        ((before?.rebuild && !status.rebuild) ||
+          (before?.activeGenerationId &&
+            status.activeGenerationId &&
+            before.activeGenerationId !== status.activeGenerationId))
+      )
+        await refreshBrainPointer(queryClient, userId);
+      return status;
+    },
+    {
+      enabled: enabled && !!userId,
+      staleTime: 0,
+      retry: 1,
+      refetchOnWindowFocus: true,
+      refetchInterval: (state) =>
+        poll && (state?.rebuild?.status === 'building' || state?.rebuild?.autoActivate)
+          ? 2000
+          : false,
+    },
+  );
   const requireOwner = () => {
     if (!enabled || !userId) throw new Error('Brain ist für diesen Benutzer nicht verfügbar.');
     return userId;
@@ -33,6 +54,9 @@ export function useBrainRebuild(enabled: boolean) {
       if (!context) return;
       const ownerKey = [QueryKeys.brain, context.ownerId];
       await queryClient.cancelQueries(ownerKey);
+      const before = queryClient.getQueryData<BrainRebuildStatus>([...ownerKey, 'rebuild']);
+      if (before?.rebuild && !status.rebuild)
+        await refreshBrainPointer(queryClient, context.ownerId);
       queryClient.setQueryData([...ownerKey, 'rebuild'], status);
       await queryClient.invalidateQueries({
         queryKey: ownerKey,
@@ -47,7 +71,7 @@ export function useBrainRebuild(enabled: boolean) {
     [MutationKeys.startBrainRebuild, userId],
     () => {
       requireOwner();
-      return dataService.startBrainRebuild();
+      return dataService.startBrainRebuild({ autoActivate: true });
     },
     options,
   );

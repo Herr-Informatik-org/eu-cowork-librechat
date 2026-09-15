@@ -156,6 +156,7 @@ export default function Details({
   nodes,
   edges,
   canEdit,
+  generationId,
   onClose,
   onSelect,
   onNavigate,
@@ -164,12 +165,13 @@ export default function Details({
   nodes: BrainNode[];
   edges: BrainEdge[];
   canEdit: boolean;
+  generationId?: string;
   onClose: () => void;
   onSelect: (id: string) => void;
   onNavigate?: () => void;
 }) {
   const localize = useLocalize();
-  const query = useBrainNodeQuery(id);
+  const query = useBrainNodeQuery(id, generationId);
   const { update, forget } = useBrainMutations();
   const [editing, setEditing] = useState(false);
   const [editVersion, setEditVersion] = useState<number | null>(null);

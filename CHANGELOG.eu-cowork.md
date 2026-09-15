@@ -1,5 +1,14 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-15 — Brain-Neuaufbau live anzeigen und automatisch übernehmen
+
+- Vor einem neuen Neuaufbau die automatische Übernahme und Modellkosten
+  bestätigen. Die Zustimmung beim Auftrag erhalten; ältere Entwürfe bleiben manuell.
+- Fertige, geprüfte Ergebnisse serverseitig übernehmen, auch bei geschlossenem
+  Browser. Pausen, entzogene Berechtigungen und verlorene Abschlussantworten absichern.
+- Den wachsenden Entwurf in Wissenskarte, Liste und Detailansicht anzeigen.
+  Entwurfsansichten schreibgeschützt halten und nach Abschluss zum aktiven Brain wechseln.
+
 ## 2026-09-15 — Grosse Brain-Verläufe automatisch verarbeiten
 
 - Gespräche über 2’000 Beiträge und Einzeltexte über 120’000 Zeichen automatisch

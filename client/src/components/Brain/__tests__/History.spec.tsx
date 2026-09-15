@@ -68,7 +68,10 @@ beforeEach(() => {
     .mockResolvedValue({ rebuild: null, rollbackAvailable: false });
   jest.spyOn(dataService, 'startBrainRebuild').mockImplementation(async () => {
     jest.mocked(dataService.getBrainHistory).mockResolvedValue(status({ status: 'running' }));
-    return rebuildFixture();
+    const draft = rebuildFixture();
+    if (draft.rebuild) draft.rebuild.autoActivate = true;
+    jest.mocked(dataService.getBrainRebuild).mockResolvedValue(draft);
+    return draft;
   });
   jest
     .spyOn(dataService, 'activateBrainRebuild')
@@ -90,13 +93,26 @@ test('explains personal scope, model and cost before an explicit start; opening 
   await waitFor(() => expect(dataService.getBrainHistory).toHaveBeenCalledTimes(1));
   expect(screen.queryByTestId('brain-history-start')).not.toBeInTheDocument();
   fireEvent.click(screen.getByTestId('brain-history-open'));
-  expect(await screen.findByText(/your own saved conversations/)).toBeInTheDocument();
+  expect(await screen.findByText(/deine gespeicherten Gespräche/)).toBeInTheDocument();
   expect(screen.getByText(/Configured test model.*costs/)).toBeInTheDocument();
   expect(dataService.startBrainHistory).not.toHaveBeenCalled();
   expect(dataService.startBrainRebuild).not.toHaveBeenCalled();
   await waitFor(() => expect(screen.getByRole('button', { name: 'Start now' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Start now' }));
+  const confirmation = await screen.findByRole('dialog');
+  expect(confirmation).toHaveTextContent('übernimmt das fertige Ergebnis automatisch');
+  expect(confirmation).toHaveTextContent('bisheriges Brain bleibt bis zum Abschluss');
+  expect(confirmation).toHaveTextContent('geschützte Änderungen und bewusste Löschungen');
+  expect(confirmation).toHaveTextContent('Configured test model');
+  expect(confirmation).toHaveTextContent('Modellkosten');
+  expect(dataService.startBrainRebuild).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(dataService.startBrainRebuild).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Start now' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Neuaufbau starten' }));
   await waitFor(() => expect(dataService.startBrainRebuild).toHaveBeenCalledTimes(1));
+  expect(dataService.startBrainRebuild).toHaveBeenCalledWith({ autoActivate: true });
   expect(await screen.findByRole('button', { name: 'Pause' })).toBeInTheDocument();
 });
 
@@ -114,6 +130,8 @@ test('pauses and resumes the current run without discarding its progress', async
   expect(screen.getByText('4 of 12 chats reviewed')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
   await waitFor(() => expect(dataService.startBrainHistory).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(dataService.startBrainRebuild).not.toHaveBeenCalled();
 });
 
 test('restores a paused server run after reopening without automatically resuming it', async () => {
@@ -187,6 +205,7 @@ test('refetches uncertain mutation results and keeps protocol errors out of the 
   fireEvent.click(screen.getByTestId('brain-history-open'));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Start now' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Start now' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Neuaufbau starten' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('The change could not be confirmed');
   expect(screen.queryByText('internal stack trace')).not.toBeInTheDocument();
   await waitFor(() => expect(dataService.getBrainHistory).toHaveBeenCalledTimes(2));
@@ -315,12 +334,13 @@ test('legacy message jobs offer a separate rebuild and cannot be resumed as cont
     expect(screen.getByRole('button', { name: 'Rebuild from chats' })).toBeEnabled(),
   );
   fireEvent.click(screen.getByRole('button', { name: 'Rebuild from chats' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Neuaufbau starten' }));
   await waitFor(() => expect(dataService.startBrainRebuild).toHaveBeenCalledTimes(1));
   expect(dataService.startBrainHistory).not.toHaveBeenCalled();
 });
 
 test.each(['paused', 'running'] as const)(
-  'does not operate a %s history job belonging to another rebuild',
+  'recovers a draft with an unrelated %s history job through the idempotent rebuild endpoint',
   async (jobStatus) => {
     jest
       .mocked(dataService.getBrainHistory)
@@ -328,8 +348,10 @@ test.each(['paused', 'running'] as const)(
     jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuildFixture());
     render(<History enabled />, setup());
     await screen.findByRole('button', { name: 'Discard new version' });
-    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(dataService.startBrainRebuild).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(dataService.startBrainHistory).not.toHaveBeenCalled();
     expect(dataService.pauseBrainHistory).not.toHaveBeenCalled();
   },
@@ -355,6 +377,83 @@ test('a ready preview keeps old knowledge active until the user activates the ex
   expect(
     await screen.findByRole('button', { name: 'Return to previous version' }),
   ).toBeInTheDocument();
+});
+
+test.each(['paused', 'failed'] as const)(
+  'an automatic ready %s run resumes activation without another confirmation',
+  async (runStatus) => {
+    const rebuild = rebuildFixture('ready');
+    if (rebuild.rebuild) rebuild.rebuild.autoActivate = true;
+    jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuild);
+    jest
+      .mocked(dataService.getBrainHistory)
+      .mockResolvedValue(status({ status: runStatus, autoActivate: true }));
+    render(<History enabled />, setup());
+    expect(await screen.findByText(/Setze den Lauf fort/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use new version' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(dataService.startBrainHistory).toHaveBeenCalledTimes(1));
+    expect(dataService.startBrainRebuild).not.toHaveBeenCalled();
+    expect(dataService.activateBrainRebuild).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  },
+);
+
+test('an automatic finalization cannot be paused or discarded and needs no manual activation', async () => {
+  const rebuild = rebuildFixture();
+  if (rebuild.rebuild) rebuild.rebuild.autoActivate = true;
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue(rebuild);
+  jest
+    .mocked(dataService.getBrainHistory)
+    .mockResolvedValue(status({ status: 'running', autoActivate: true, finalizing: true }));
+  render(<History enabled />, setup());
+  expect(await screen.findByText('Wird automatisch übernommen …')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Discard new version' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Use new version' })).not.toBeInTheDocument();
+  expect(dataService.activateBrainRebuild).not.toHaveBeenCalled();
+});
+
+test('automatic completion reports the new active Brain without an apply action', async () => {
+  jest
+    .mocked(dataService.getBrainHistory)
+    .mockResolvedValue(status({ status: 'completed', autoActivate: true }));
+  render(<History enabled />, setup());
+  fireEvent.click(screen.getByTestId('brain-history-open'));
+  expect(await screen.findByText('Your new Brain version is now active.')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Use new version' })).not.toBeInTheDocument();
+  expect(dataService.activateBrainRebuild).not.toHaveBeenCalled();
+});
+
+test('recovers a lost completion acknowledgement without creating another Brain version', async () => {
+  jest
+    .mocked(dataService.getBrainHistory)
+    .mockResolvedValue(status({ status: 'failed', autoActivate: true }));
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue({
+    rebuild: null,
+    activeGenerationId: 'rebuild-one',
+    rollbackAvailable: true,
+  });
+  render(<History enabled />, setup());
+  fireEvent.click(await screen.findByRole('button', { name: 'Resume' }));
+  await waitFor(() => expect(dataService.startBrainHistory).toHaveBeenCalledTimes(1));
+  expect(dataService.startBrainRebuild).not.toHaveBeenCalled();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+test('does not report the rebuilt Brain as active after returning to another version', async () => {
+  jest
+    .mocked(dataService.getBrainHistory)
+    .mockResolvedValue(status({ status: 'completed', autoActivate: true }));
+  jest.mocked(dataService.getBrainRebuild).mockResolvedValue({
+    rebuild: null,
+    activeGenerationId: 'previous-version',
+    rollbackAvailable: false,
+  });
+  render(<History enabled />, setup());
+  fireEvent.click(screen.getByTestId('brain-history-open'));
+  await screen.findByRole('button', { name: 'Rebuild from chats' });
+  expect(screen.queryByText('Your new Brain version is now active.')).not.toBeInTheDocument();
 });
 
 test('a conflicting activation reloads the preview and requires a fresh explicit activation', async () => {

@@ -27,6 +27,7 @@ function fixture(messages = [source(1)]) {
         leaseToken: token,
         leaseUntil: until,
         pauseRequested: false,
+        finalizing: false,
         revision: revision + 1,
       };
       return structuredClone(job);
@@ -37,14 +38,30 @@ function fixture(messages = [source(1)]) {
       job = { ...job, ...structuredClone(fields), revision: job.revision + 1 };
       return true;
     }),
+    beginCompletion: jest.fn(async (owner, token, now) => {
+      if (
+        !job ||
+        job.ownerId !== owner ||
+        job.leaseToken !== token ||
+        job.status !== 'running' ||
+        job.pauseRequested ||
+        job.finalizing ||
+        !job.leaseUntil ||
+        job.leaseUntil <= now
+      )
+        return false;
+      job.finalizing = true;
+      return true;
+    }),
     pause: jest.fn(async () => {
-      if (job) job.pauseRequested = true;
+      if (job && !job.finalizing) job.pauseRequested = true;
     }),
     expire: jest.fn(async (_owner, now, error) => {
       if (job?.status === 'running' && job.leaseUntil && job.leaseUntil <= now) {
         job = {
           ...job,
           status: 'paused',
+          finalizing: false,
           leaseToken: undefined,
           error,
           revision: job.revision + 1,
@@ -386,6 +403,81 @@ describe('conversation rebuild history', () => {
     expect(processor.extract).toHaveBeenCalledTimes(1);
     expect(processor.complete).toHaveBeenCalledTimes(1);
     expect(processor.ingest.mock.calls[0][0].rebuildId).toBe('draft');
+  });
+
+  it('persists automatic activation consent across pause, worker replacement and resume', async () => {
+    const { service, processor, store } = contextualFixture();
+    processor.extract.mockImplementationOnce(async () => {
+      await service.pause(req);
+      throw new Error('Paused review');
+    });
+    await service.start(req, { rebuildId: 'draft', autoActivate: true });
+    await service.settle('owner');
+    expect(await service.status(req)).toMatchObject({ status: 'paused', autoActivate: true });
+    expect(processor.complete).not.toHaveBeenCalled();
+    const replacement = createBrainHistoryService({ store, processor });
+    await replacement.start(req);
+    await replacement.settle('owner');
+    expect(await replacement.status(req)).toMatchObject({
+      status: 'completed',
+      autoActivate: true,
+    });
+    expect(processor.complete).toHaveBeenCalledWith(req, 'draft');
+  });
+
+  it('retries completion after a lost acknowledgement without repeating paid analysis', async () => {
+    const { service, processor } = contextualFixture();
+    jest.mocked(processor.complete!).mockRejectedValueOnce(new Error('Completion response lost'));
+    await service.start(req, { rebuildId: 'draft', autoActivate: true });
+    await service.settle('owner');
+    expect(await service.status(req)).toMatchObject({
+      status: 'failed',
+      processed: 1,
+      autoActivate: true,
+    });
+    await service.start(req);
+    await service.settle('owner');
+    expect(await service.status(req)).toMatchObject({ status: 'completed', processed: 1 });
+    expect(processor.complete).toHaveBeenCalledTimes(2);
+    expect(processor.extract).toHaveBeenCalledTimes(1);
+    expect(processor.ingest).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the original manual activation policy when an existing job is resumed', async () => {
+    const { service, processor } = contextualFixture();
+    processor.extract.mockImplementationOnce(async () => {
+      await service.pause(req);
+      throw new Error('Paused review');
+    });
+    await service.start(req, { rebuildId: 'draft' });
+    await service.settle('owner');
+    await service.start(req, { rebuildId: 'draft', autoActivate: true });
+    await service.settle('owner');
+    expect(await service.status(req)).toMatchObject({ status: 'completed', autoActivate: false });
+  });
+
+  it('honours a pause requested during the final source lookup before activating', async () => {
+    const { service, processor, store } = contextualFixture();
+    const next = store.nextConversation!;
+    store.nextConversation = async (...args) => {
+      const result = await next(...args);
+      if (!result) await service.pause(req);
+      return result;
+    };
+    await service.start(req, { rebuildId: 'draft', autoActivate: true });
+    await service.settle('owner');
+    expect(await service.status(req)).toMatchObject({ status: 'paused', processed: 1 });
+    expect(processor.complete).not.toHaveBeenCalled();
+  });
+
+  it('reports the final commit phase instead of accepting a late pause', async () => {
+    const { service, processor } = contextualFixture();
+    jest.mocked(processor.complete!).mockImplementationOnce(async () => {
+      expect(await service.pause(req)).toMatchObject({ status: 'running', finalizing: true });
+    });
+    await service.start(req, { rebuildId: 'draft', autoActivate: true });
+    await service.settle('owner');
+    expect(await service.status(req)).toMatchObject({ status: 'completed', finalizing: false });
   });
 
   it('checkpoints a paused review and resumes that same contextual review', async () => {

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataService, MutationKeys, QueryKeys } from 'librechat-data-provider';
 import type { BrainHistoryStatus } from 'librechat-data-provider';
 import { useGetUserQuery } from '../Auth';
+import { refreshBrainGraph } from './cache';
 
 export function useBrainHistory(enabled: boolean) {
   const { data: user } = useGetUserQuery();
@@ -19,9 +20,16 @@ export function useBrainHistory(enabled: boolean) {
       status.saved > (before?.saved ?? 0) ||
       (before?.status === 'running' && status.status !== 'running')
     ) {
-      void queryClient.invalidateQueries([QueryKeys.brain, userId, 'graph']);
-      void queryClient.invalidateQueries([QueryKeys.brain, userId, 'node']);
+      if (!(status.status === 'completed' && status.autoActivate))
+        void refreshBrainGraph(
+          queryClient,
+          userId,
+          status.schemaVersion === 2 ? status.rebuildId : undefined,
+        );
+      if (status.status === 'completed') void refreshBrainGraph(queryClient, userId);
     }
+    if (before && (before.status !== status.status || before.rebuildId !== status.rebuildId))
+      void queryClient.invalidateQueries([QueryKeys.brain, userId, 'rebuild']);
   };
 
   const history = useQuery(queryKey, ({ signal }) => dataService.getBrainHistory(signal), {

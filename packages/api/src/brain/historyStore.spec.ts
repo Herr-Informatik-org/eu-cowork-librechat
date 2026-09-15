@@ -463,6 +463,35 @@ describe('Brain history Mongo ownership and lifecycle boundaries', () => {
     expect((await store.read('owner'))?.pauseRequested).toBe(true);
   });
 
+  it('atomically orders a pause against final activation and clears the fence on retry', async () => {
+    await store.resetConversationJob!({
+      ...initial(),
+      schemaVersion: 2,
+      rebuildId: 'draft',
+      autoActivate: true,
+    });
+    await store.claim('owner', 0, 'worker', new Date(Date.now() + 10000));
+    await store.pause('owner', 'draft');
+    expect(await store.beginCompletion('owner', 'worker', new Date())).toBe(false);
+    await store.update('owner', 'worker', { status: 'paused' });
+    const paused = (await store.read('owner'))!;
+    await store.claim('owner', paused.revision, 'second', new Date(Date.now() + 10000));
+    expect(await store.beginCompletion('other', 'second', new Date())).toBe(false);
+    expect(await store.beginCompletion('owner', 'worker', new Date())).toBe(false);
+    expect(await store.beginCompletion('owner', 'second', new Date())).toBe(true);
+    await store.pause('owner', 'draft');
+    expect(await store.read('owner')).toMatchObject({
+      finalizing: true,
+      pauseRequested: false,
+      autoActivate: true,
+    });
+    await store.expire('owner', new Date(Date.now() + 20000), 'Unterbrochen');
+    expect(await store.read('owner')).toMatchObject({ status: 'paused', finalizing: false });
+    const expired = (await store.read('owner'))!;
+    await store.claim('owner', expired.revision, 'third', new Date(Date.now() + 10000));
+    expect(await store.beginCompletion('owner', 'third', new Date())).toBe(true);
+  });
+
   it('honours source and conversation deletion fences before original documents disappear', async () => {
     await seed();
     const key = (kind: string, value: string) =>

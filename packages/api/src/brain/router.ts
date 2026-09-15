@@ -11,7 +11,7 @@ import { BrainHistoryError } from './history';
 import type { BrainFailureReporter } from './diagnostics';
 import { classifyBrainFailure, createBrainFailureReporter } from './diagnostics';
 
-const queryKeys = new Set(['query', 'scope', 'cursor', 'limit', 'conversationId']);
+const queryKeys = new Set(['query', 'scope', 'cursor', 'limit', 'conversationId', 'generationId']);
 
 export function getBrainProxyPath(req: Pick<Request, 'path' | 'query'>): string {
   const query = new URLSearchParams();
@@ -123,11 +123,22 @@ export function createBrainRouter({
               .json({ error: available.reason ?? 'Der Neuaufbau ist zurzeit nicht verfügbar.' });
             return;
           }
-          const result = await requestBrain<BrainRebuildStatus>(userId, 'POST', '/v1/rebuild', {});
+          if (req.body?.autoActivate !== undefined && typeof req.body.autoActivate !== 'boolean') {
+            res
+              .status(400)
+              .json({ error: 'Bitte die automatische Übernahme ausdrücklich bestätigen.' });
+            return;
+          }
+          const result = await requestBrain<BrainRebuildStatus>(userId, 'POST', '/v1/rebuild', {
+            ...(req.body?.autoActivate === true ? { autoActivate: true } : {}),
+          });
           if (!result.rebuild)
             throw new BrainHistoryError('Der Neuaufbau konnte nicht vorbereitet werden.');
           if (result.rebuild.status === 'building')
-            await history.start(request, { rebuildId: result.rebuild.id });
+            await history.start(request, {
+              rebuildId: result.rebuild.id,
+              autoActivate: result.rebuild.autoActivate === true,
+            });
           res.status(201).json(result);
         } catch (error) {
           const failure = classifyBrainFailure(error, 'start');
@@ -187,7 +198,17 @@ export function createBrainRouter({
       access(Permissions.UPDATE),
       async (req, res, next) => {
         try {
-          await history.pause(req as ServerRequest, String(req.params.id));
+          const status = await history.pause(req as ServerRequest, String(req.params.id));
+          if (
+            status.status === 'running' &&
+            status.finalizing &&
+            status.rebuildId === req.params.id
+          ) {
+            res.status(409).json({
+              error: 'Der Neuaufbau wird bereits abgeschlossen. Bitte diesen Abschluss abwarten.',
+            });
+            return;
+          }
           next();
         } catch (error) {
           await reportRebuildFailure(req, res, error);

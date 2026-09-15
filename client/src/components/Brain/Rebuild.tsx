@@ -43,9 +43,11 @@ function PreviewNodes({ nodes }: { nodes: BrainNode[] }) {
 export default function Rebuild({
   state,
   disabled,
+  running,
 }: {
   state: ReturnType<typeof useBrainRebuild>;
   disabled: boolean;
+  running: boolean;
 }) {
   const localize = useLocalize();
   const [confirmRollback, setConfirmRollback] = useState(false);
@@ -59,6 +61,12 @@ export default function Rebuild({
     activate.reset();
     discard.reset();
     rollback.reset();
+  };
+  const readyMessage = () => {
+    if (!draft?.autoActivate) return localize('com_ui_brain_rebuild_ready');
+    return localize(
+      running ? 'com_ui_brain_rebuild_auto_activating' : 'com_ui_brain_rebuild_auto_retry',
+    );
   };
   return (
     <>
@@ -86,7 +94,13 @@ export default function Rebuild({
       )}
       {draft?.status === 'building' && (
         <div className="brain-rebuild-note">
-          <p>{localize('com_ui_brain_rebuild_building')}</p>
+          <p>
+            {localize(
+              draft.autoActivate
+                ? 'com_ui_brain_rebuild_auto_building'
+                : 'com_ui_brain_rebuild_building',
+            )}
+          </p>
           <Button
             className="brain-button"
             variant="outline"
@@ -106,8 +120,12 @@ export default function Rebuild({
           className="brain-rebuild-review"
           aria-label={localize('com_ui_brain_rebuild_review')}
         >
-          <h3>{localize('com_ui_brain_rebuild_review')}</h3>
-          <p>{localize('com_ui_brain_rebuild_ready')}</p>
+          <h3>
+            {localize(
+              draft.autoActivate ? 'com_ui_brain_rebuild_draft' : 'com_ui_brain_rebuild_review',
+            )}
+          </h3>
+          <p>{readyMessage()}</p>
           <dl className="brain-rebuild-counts">
             <div>
               <dt>{localize('com_ui_brain_rebuild_prepared')}</dt>
@@ -144,18 +162,20 @@ export default function Rebuild({
             )}
           </details>
           <div className="brain-history-actions">
-            <Button
-              className="brain-button"
-              size="sm"
-              disabled={pending || disabled || rebuild.isError || rebuild.isFetching}
-              data-testid="brain-rebuild-activate"
-              onClick={() => {
-                reset();
-                activate.mutate({ id: draft.id, revision: draft.revision });
-              }}
-            >
-              {localize('com_ui_brain_rebuild_activate')}
-            </Button>
+            {!draft.autoActivate && (
+              <Button
+                className="brain-button"
+                size="sm"
+                disabled={pending || disabled || rebuild.isError || rebuild.isFetching}
+                data-testid="brain-rebuild-activate"
+                onClick={() => {
+                  reset();
+                  activate.mutate({ id: draft.id, revision: draft.revision });
+                }}
+              >
+                {localize('com_ui_brain_rebuild_activate')}
+              </Button>
+            )}
             <Button
               className="brain-button"
               variant="outline"
