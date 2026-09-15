@@ -1,5 +1,18 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-15 — Grosse Brain-Verläufe automatisch verarbeiten
+
+- Gespräche über 2’000 Beiträge und Einzeltexte über 120’000 Zeichen automatisch
+  in begrenzten Modellabschnitten analysieren. Die Schlussprüfung berücksichtigt
+  den gesamten Verlauf samt späteren Korrekturen und speichert ihren Fortschritt.
+- Umfangreiche Quellenmetadaten einmalig in geprüften Seiten übertragen; pro
+  Erinnerung nur Belege und Verweis auf die vollständige Herkunft senden.
+  Bestehende Importzwischenstände und Kennungen gültiger Teilpakete erhalten.
+- Anhänge und Werkzeugausgaben schon beim Datenbanklesen ausschliessen, ohne
+  sichtbare Textteile, Quellenhashes oder Reihenfolge zu verändern.
+- Synthetische Regressionen für beide bisherigen Grössenlimits, späte Korrekturen,
+  wiederholte Kurzbelege, Wiederaufnahme und den gemeinsamen Brain-Dienstvertrag.
+
 ## 2026-09-15 — Brain-Speicherung und Fehlerdiagnose korrigieren
 
 - Leere optionale Modellfelder beim Speichern und Fortsetzen bereinigen;

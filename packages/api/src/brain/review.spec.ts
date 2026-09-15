@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import type { BrainCandidate } from './session';
 import type { BrainReviewCheckpoint } from './review';
-import { conversationMessages } from './conversation';
+import { conversationHash, conversationMessages } from './conversation';
 import {
   brainCandidateId,
   brainReviewParts,
@@ -95,6 +95,7 @@ describe('context review through the real model SDK with a local provider fixtur
   let server: Server;
   let baseURL: string;
   let mode: 'normal' | 'reject' | 'fail-verification' = 'normal';
+  let respond: ((request: { messages: { content: string }[] }) => object) | undefined;
   const requests: { messages: { content: string }[] }[] = [];
   beforeAll(async () => {
     server = createServer(async (req, res) => {
@@ -109,9 +110,11 @@ describe('context review through the real model SDK with a local provider fixtur
         return;
       }
       const { quote: _quote, ...candidate } = fact;
-      const result = verification
-        ? { acceptedIds: mode === 'reject' ? [] : [brainCandidateId(fact)] }
-        : { facts: [candidate], removeIds: [] };
+      const result =
+        respond?.(request) ??
+        (verification
+          ? { acceptedIds: mode === 'reject' ? [] : [brainCandidateId(fact)] }
+          : { facts: [candidate], removeIds: [] });
       res.setHeader('content-type', 'application/json');
       res.end(
         JSON.stringify({
@@ -147,6 +150,7 @@ describe('context review through the real model SDK with a local provider fixtur
   beforeEach(() => {
     requests.length = 0;
     mode = 'normal';
+    respond = undefined;
   });
   afterAll(async () => {
     server.close();
@@ -184,6 +188,156 @@ describe('context review through the real model SDK with a local provider fixtur
   it('does not promote candidates rejected by the final review', async () => {
     mode = 'reject';
     expect(await reviewBrainConversation(options())).toEqual([]);
+  });
+
+  it('extracts and verifies a giant original message with its late scoped acceptance within every model budget', async () => {
+    const text = `${'Historische technische Notiz ohne dauerhafte Aussage. '.repeat(2500)}\n${messages[0].text}`;
+    const source = [
+      { ...messages[0], text, contentHash: conversationHash(text) },
+      ...messages.slice(1),
+    ];
+    const { quote: _quote, ...candidate } = fact;
+    respond = (request) => {
+      const payload = request.messages.map((message) => message.content).join('\n');
+      if (payload.includes('FINAL VERIFICATION')) return { acceptedIds: [brainCandidateId(fact)] };
+      return { facts: payload.includes(messages[2].text) ? [candidate] : [], removeIds: [] };
+    };
+    const input = { ...options(), messages: source };
+    expect(text.length).toBeGreaterThan(120000);
+    expect(await reviewBrainConversation(input)).toEqual([fact]);
+    const verification = requests.filter((request) =>
+      JSON.stringify(request.messages).includes('FINAL VERIFICATION'),
+    );
+    expect(verification.length).toBeGreaterThan(1);
+    for (const request of requests) {
+      expect(
+        await input.countTokens(request.messages.map((message) => message.content).join('\n')),
+      ).toBeLessThanOrEqual(input.inputBudget);
+    }
+    for (const request of verification) {
+      const payload = request.messages.map((message) => message.content).join('\n');
+      expect(payload).toContain(messages[0].text);
+      expect(payload).toContain(messages[1].text);
+      expect(payload).toContain(messages[2].text);
+      expect(payload).toContain(source[0].contentHash);
+      expect(payload).toContain('"parentId":"a1"');
+    }
+  });
+
+  it('checks a far later correction beyond the evidence neighborhood before accepting an old fact', async () => {
+    const neutral = Array.from({ length: 2100 }, (_, index) => ({
+      ...messages[0],
+      id: `neutral-${index}`,
+      parentId: index ? `neutral-${index - 1}` : 'u2',
+      text: `Neutrale Kontextnotiz ${index} ohne neue Entscheidung.`,
+    }));
+    const correction = {
+      ...messages[0],
+      id: 'correction',
+      parentId: neutral[neutral.length - 1].id,
+      text: 'Spätere Korrektur für Atlas: Der Wiederherstellungstest ist für diese Umstellung nicht erforderlich.',
+    };
+    respond = (request) => {
+      const payload = request.messages.map((message) => message.content).join('\n');
+      if (!payload.includes('FINAL VERIFICATION')) {
+        const { quote: _quote, ...candidate } = fact;
+        return { facts: payload.includes(messages[2].text) ? [candidate] : [], removeIds: [] };
+      }
+      return { acceptedIds: payload.includes(correction.text) ? [] : [brainCandidateId(fact)] };
+    };
+    const input = { ...options(), messages: [...messages, ...neutral, correction] };
+    expect(await reviewBrainConversation(input)).toEqual([]);
+    expect(
+      requests.some((request) => JSON.stringify(request.messages).includes(correction.text)),
+    ).toBe(true);
+    for (const request of requests) {
+      expect(
+        await input.countTokens(request.messages.map((message) => message.content).join('\n')),
+      ).toBeLessThanOrEqual(input.inputBudget);
+    }
+  }, 15000);
+
+  it('resumes inside giant-message verification without repeating a successful model call or losing a neutral section', async () => {
+    const text = `${'Ein neutraler historischer Gesprächsabschnitt. '.repeat(3500)}${messages[0].text}`;
+    const source = [
+      { ...messages[0], text, contentHash: conversationHash(text) },
+      ...messages.slice(1),
+    ];
+    let saved: BrainReviewCheckpoint | undefined;
+    const abort = new AbortController();
+    const input = {
+      ...options(),
+      messages: source,
+      checkpoint: {
+        position: 0,
+        phase: 'verify' as const,
+        candidates: [fact],
+        verifyIndex: 0,
+        verified: [],
+      },
+      onCheckpoint: async (checkpoint: BrainReviewCheckpoint) => {
+        saved = structuredClone(checkpoint);
+        if (checkpoint.verification) abort.abort(new Error('Synthetic interruption'));
+      },
+    };
+    await expect(reviewBrainConversation({ ...input, signal: abort.signal })).rejects.toThrow(
+      'Synthetic interruption',
+    );
+    expect(saved?.verification?.cursor.messageId).toBe(source[0].id);
+    expect(saved?.verification?.cursor.offset).toBeGreaterThan(0);
+    expect(requests).toHaveLength(1);
+    const completedRequest = JSON.stringify(requests[0]);
+    const previousOffset = saved!.verification!.cursor.offset;
+    requests.length = 0;
+    expect(
+      await reviewBrainConversation({ ...input, checkpoint: saved, onCheckpoint: async () => {} }),
+    ).toEqual([fact]);
+    expect(requests.length).toBeGreaterThan(1);
+    expect(requests.every((request) => JSON.stringify(request) !== completedRequest)).toBe(true);
+    const additionalContext = requests[0].messages
+      .map((message) => message.content)
+      .join('\n')
+      .split('Additional original conversation section:\n')[1];
+    const resumedParts = additionalContext
+      .split('\n')
+      .map((line) => JSON.parse(line) as { sourceEnd: number });
+    expect(Math.max(...resumedParts.map((part) => part.sourceEnd))).toBeGreaterThan(previousOffset);
+    for (const request of requests) {
+      const payload = request.messages.map((message) => message.content).join('\n');
+      expect(payload).toContain(
+        'absence of its evidence in the additional section is NOT a rejection',
+      );
+      expect(await input.countTokens(payload)).toBeLessThanOrEqual(input.inputBudget);
+    }
+  });
+
+  it('keeps repeated short evidence bounded and lets verification reject ambiguity without stopping the import', async () => {
+    const text = 'Ja. '.repeat(35000);
+    const source = [
+      ...messages.slice(0, 2),
+      { ...messages[2], text, contentHash: conversationHash(text) },
+    ];
+    const ambiguous = { ...fact, evidence: [fact.evidence![0], { messageId: 'u2', quote: 'Ja.' }] };
+    respond = () => ({ acceptedIds: [] });
+    const input = {
+      ...options(),
+      messages: source,
+      checkpoint: {
+        position: 0,
+        phase: 'verify' as const,
+        candidates: [ambiguous],
+        verifyIndex: 0,
+        verified: [],
+      },
+    };
+    expect(await reviewBrainConversation(input)).toEqual([]);
+    expect(requests.length).toBeGreaterThan(0);
+    expect(JSON.stringify(requests)).toContain('repeatedQuote');
+    for (const request of requests) {
+      expect(
+        await input.countTokens(request.messages.map((message) => message.content).join('\n')),
+      ).toBeLessThanOrEqual(input.inputBudget);
+    }
   });
 
   it('resumes a failed verification without paying for successful extraction again', async () => {

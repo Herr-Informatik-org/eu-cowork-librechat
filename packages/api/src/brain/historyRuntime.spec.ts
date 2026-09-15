@@ -480,22 +480,101 @@ describe('canonical conversation bootstrap runtime', () => {
     ).toEqual(ids);
   });
 
-  it('stops an oversized source before invoking a model', async () => {
-    const { processor } = fixture();
-    const oversized = { ...contextual, messages: [{ ...messages[0], text: 'x'.repeat(120001) }] };
-    await expect(
-      processor.extract({
+  it.each(['long-message', 'many-messages'])(
+    'reviews %s without an import-size stop',
+    async (shape) => {
+      const { processor } = fixture();
+      const largeMessages =
+        shape === 'long-message'
+          ? [{ ...messages[0], text: 'Ein langer Verlauf. '.repeat(7000) }]
+          : Array.from({ length: 2001 }, (_, index) => ({ ...messages[0], id: `source-${index}` }));
+      const largeSource = {
+        ...contextual,
+        messages: largeMessages,
+        text: conversationTranscript(largeMessages),
+      };
+      jest.mocked(reviewBrainConversation).mockResolvedValueOnce([]);
+      await processor.extract({
         req,
-        source: oversized,
-        text: oversized.text,
+        source: largeSource,
+        text: largeSource.text,
         canContinue: async () => true,
         onFacts: jest.fn(),
         onBilling: jest.fn(),
-      }),
-    ).rejects.toThrow(/Importgrösse/);
-    expect(resolveBrainLearningModel).not.toHaveBeenCalled();
-    expect(reviewBrainConversation).not.toHaveBeenCalled();
-  });
+      });
+      expect(reviewBrainConversation).toHaveBeenCalledWith(
+        expect.objectContaining({ messages: largeMessages }),
+      );
+      expect(learnBrainTurn).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['long-message', 'many-messages'])(
+    'stores %s with bounded provenance and replayable pages',
+    async (shape) => {
+      const { processor } = fixture();
+      const largeMessages =
+        shape === 'long-message'
+          ? [{ ...messages[0], text: 'Ein langer Verlauf. '.repeat(7000) + messages[0].text }]
+          : Array.from({ length: 2001 }, (_, index) => ({ ...messages[0], id: `source-${index}` }));
+      const largeSource = {
+        ...contextual,
+        messages: largeMessages,
+        text: conversationTranscript(largeMessages),
+      };
+      const largeFact = {
+        ...fact,
+        basis: 'direct' as const,
+        evidence: [{ messageId: largeMessages[0].id, quote: messages[0].text }],
+      };
+      jest
+        .mocked(requestBrain)
+        .mockImplementation(async (_owner, _method, path) =>
+          path === '/v1/ingest' ? { created: 1, nodes: [] } : {},
+        );
+      const input = {
+        req,
+        source: largeSource,
+        text: largeSource.text,
+        facts: [largeFact],
+        canContinue: async () => true,
+        rebuildId: 'draft',
+      };
+      expect(await processor.ingest(input)).toBe(1);
+      const calls = jest.mocked(requestBrain).mock.calls;
+      const pages = calls.filter((call) => call[2].includes('/pages/'));
+      expect(pages).toHaveLength(Math.ceil(largeMessages.length / 500));
+      const metadata = pages.flatMap(
+        (call) => (call[3] as { sourceMessages: object[] }).sourceMessages,
+      );
+      expect(metadata).toHaveLength(largeMessages.length);
+      expect(metadata[0]).toEqual({
+        id: largeMessages[0].id,
+        role: 'user',
+        createdAt: largeMessages[0].createdAt,
+        contentHash: largeMessages[0].contentHash,
+      });
+      expect(calls[calls.length - 2][2]).toMatch(/\/source-manifests\/[a-f0-9]{64}\/complete$/);
+      const body = calls[calls.length - 1][3] as {
+        sourceManifestId: string;
+        sourceMessages: object[];
+        facts: { sourceMessageIds: string[]; evidence: typeof largeFact.evidence }[];
+      };
+      expect(body.sourceManifestId).toMatch(/^[a-f0-9]{64}$/);
+      expect(body.sourceMessages).toEqual([metadata[0]]);
+      expect(body.facts[0].sourceMessageIds).toEqual([largeMessages[0].id]);
+      expect(body.facts[0].evidence).toEqual(largeFact.evidence);
+      expect(
+        calls.every((call) => Buffer.byteLength(JSON.stringify(call[3]), 'utf8') < 1_900_000),
+      ).toBe(true);
+      const attempts = calls.map((call) => [call[2], call[3]]);
+      jest.mocked(requestBrain).mockClear();
+      expect(await processor.ingest(input)).toBe(1);
+      expect(jest.mocked(requestBrain).mock.calls.map((call) => [call[2], call[3]])).toEqual(
+        attempts,
+      );
+    },
+  );
 
   it('marks a draft ready through the internal service without activating it', async () => {
     const { processor } = fixture();

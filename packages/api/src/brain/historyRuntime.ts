@@ -35,6 +35,7 @@ import { requestBrain, BrainServiceError } from './client';
 import type { BrainFailureReporter } from './diagnostics';
 import type { BrainNode } from 'librechat-data-provider';
 import { conversationHash } from './conversation';
+import { createBrainSourceManifest, registerBrainSourceManifest } from './provenance';
 import { brainReviewVersion, reviewBrainConversation, validateContextualFacts } from './review';
 
 interface BrainHistoryRuntimeDependencies {
@@ -289,13 +290,6 @@ export function createBrainHistoryProcessor(
       rebuildId,
     }) {
       if (source.messages) {
-        if (
-          source.messages.length > 2000 ||
-          source.messages.some((message) => message.text.length > 120000)
-        )
-          throw new BrainHistoryError(
-            'Dieser Chat überschreitet die sichere Importgrösse (2’000 Beiträge beziehungsweise 120’000 Zeichen pro Beitrag). Es wurden keine Modellanfragen gestartet; bitte diesen Verlauf zuerst aufteilen.',
-          );
         const { req: fresh, model } = await resolve(req, source);
         const selected = brainHistoryModelSelection(fresh.config!);
         const configuredContext =
@@ -582,10 +576,19 @@ export function createBrainHistoryProcessor(
           ]),
         );
         const valid = validateContextualFacts(facts, source.messages, knownIds);
+        const manifest = createBrainSourceManifest(
+          source.conversationId,
+          rebuildId,
+          source.messages,
+        );
+        let needsManifest =
+          source.messages.length > 2000 ||
+          source.messages.some((message) => message.text.length > 120000);
         const batches: object[] = [];
         let position = 0;
         while (position < valid.length) {
           let size = Math.min(40, valid.length - position);
+          let useManifest = needsManifest;
           while (size > 0) {
             const batch = valid.slice(position, position + size);
             const evidenceIds = new Set(
@@ -595,17 +598,20 @@ export function createBrainHistoryProcessor(
               conversationId: source.conversationId,
               historical: true,
               generationId: rebuildId,
-              sourceMessages: source.messages.map(
-                ({ parentId: _parent, text: content, ...message }) => ({
-                  ...message,
-                  ...(evidenceIds.has(message.id) ? { text: content } : {}),
-                }),
-              ),
+              ...(useManifest ? { sourceManifestId: manifest.id } : {}),
+              sourceMessages: useManifest
+                ? manifest.sourceMessages.filter((message) => evidenceIds.has(message.id))
+                : source.messages.map(({ parentId: _parent, text: content, ...message }) => ({
+                    ...message,
+                    ...(evidenceIds.has(message.id) ? { text: content } : {}),
+                  })),
               facts: batch.map(({ quote: _quote, ...fact }) => ({
                 ...fact,
                 text: fact.text!,
                 title: fact.title ?? fact.text!.slice(0, 90),
-                sourceMessageIds: source.messages!.map((message) => message.id),
+                sourceMessageIds: useManifest
+                  ? [...new Set(fact.evidence!.map((entry) => entry.messageId))]
+                  : source.messages!.map((message) => message.id),
               })),
             };
             const body = {
@@ -614,15 +620,24 @@ export function createBrainHistoryProcessor(
             };
             if (Buffer.byteLength(JSON.stringify(body), 'utf8') < 1_900_000) {
               batches.push(body);
+              needsManifest ||= useManifest;
               break;
             }
-            size = Math.floor(size / 2);
+            if (size === 1 && !useManifest) {
+              useManifest = true;
+              size = Math.min(40, valid.length - position);
+            } else {
+              size = Math.floor(size / 2);
+            }
           }
           if (!size)
             throw new BrainHistoryError(
               'Die Belege einer Erinnerung sind zu umfangreich für die sichere Übernahme. Der geprüfte Zwischenstand bleibt erhalten.',
             );
           position += size;
+        }
+        if (needsManifest && batches.length) {
+          await registerBrainSourceManifest(String(req.user!.id), manifest, canContinue);
         }
         let created = 0;
         for (const body of batches) {

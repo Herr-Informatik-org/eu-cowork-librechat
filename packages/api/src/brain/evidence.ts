@@ -83,7 +83,7 @@ export function validateContextualFacts(
         if (
           !message ||
           !storageText(evidence.quote, 8000) ||
-          !storageText(message.text, 120000) ||
+          !storageText(message.text, Infinity) ||
           !message.text.includes(evidence.quote) ||
           containsBrainCredential(evidence.quote)
         )

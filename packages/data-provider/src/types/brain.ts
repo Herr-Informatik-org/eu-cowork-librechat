@@ -68,8 +68,23 @@ export type BrainNodeUpdate = Partial<BrainNodeInput> & {
 export type BrainExport = {
   schemaVersion: 1 | 2;
   exportedAt: string;
-  nodes: BrainNode[];
+  nodes: Array<BrainNode & { sourceManifestIds?: string[] }>;
   edges: BrainEdge[];
+  sourceManifests?: Array<{
+    id: string;
+    conversationId: string;
+    sourceCount: number;
+    pageCount: number;
+    pages: Array<{
+      pageIndex: number;
+      sourceMessages: Array<{
+        id: string;
+        role: 'user' | 'assistant';
+        createdAt: string;
+        contentHash: string;
+      }>;
+    }>;
+  }>;
 };
 
 export type BrainHistoryStatus = {

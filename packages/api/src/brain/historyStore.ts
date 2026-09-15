@@ -207,7 +207,43 @@ export function createMongoBrainHistoryStore({
             messageId: 1,
             conversationId: 1,
             text: 1,
-            content: 1,
+            content: {
+              $map: {
+                input: {
+                  $filter: {
+                    input: { $cond: [{ $isArray: '$content' }, '$content', []] },
+                    as: 'part',
+                    cond: {
+                      $and: [
+                        { $eq: ['$$part.type', 'text'] },
+                        {
+                          $or: [
+                            { $eq: [{ $type: '$$part.text' }, 'string'] },
+                            {
+                              $and: [
+                                { $eq: [{ $type: '$$part.text' }, 'object'] },
+                                { $eq: [{ $type: '$$part.text.value' }, 'string'] },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  },
+                },
+                as: 'part',
+                in: {
+                  type: 'text',
+                  text: {
+                    $cond: [
+                      { $eq: [{ $type: '$$part.text' }, 'string'] },
+                      '$$part.text',
+                      '$$part.text.value',
+                    ],
+                  },
+                },
+              },
+            },
             parentMessageId: 1,
             isCreatedByUser: 1,
             createdAt: 1,

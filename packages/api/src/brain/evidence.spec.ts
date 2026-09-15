@@ -23,6 +23,24 @@ const fact: BrainCandidate = {
 };
 
 describe('contextual candidate storage contract', () => {
+  it('validates a bounded exact quote against an oversized original source', () => {
+    const source = { ...messages[0], text: 'Kontext. '.repeat(15000) + messages[0].text };
+    expect(validateContextualFacts([fact], [source])).toHaveLength(1);
+    expect(
+      validateContextualFacts(
+        [
+          {
+            ...fact,
+            evidence: [
+              { messageId: source.id, quote: 'Dieser Beleg kommt im Original nicht vor.' },
+            ],
+          },
+        ],
+        [source],
+      ),
+    ).toEqual([]);
+  });
+
   it('normalizes empty optional metadata before replaying a saved review', () => {
     const [valid] = validateContextualFacts(
       [{ ...fact, tags: ['', '  ', ' Atlas ', 'Atlas'], supersedesId: '' }],

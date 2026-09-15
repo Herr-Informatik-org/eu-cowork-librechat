@@ -139,6 +139,30 @@ describe('signed Brain transport', () => {
     expect(JSON.stringify(error)).not.toContain('PRIVATE_');
     expect((error as Error).message).not.toContain('PRIVATE_');
   });
+  it.each(['sourceManifestId', 'sourceCount', 'pageCount', 'pageIndex'])(
+    'retains the safe manifest diagnostic %s without original source content',
+    async (field) => {
+      status = 409;
+      responseBody = {
+        code: 'source_manifest_state',
+        field,
+        reason: 'invalid_value',
+        error: 'PRIVATE_SOURCE_TEXT',
+      };
+      const error = await requestBrain(
+        'owner',
+        'POST',
+        '/v1/source-manifests/test/complete',
+        {},
+      ).catch((failure: unknown) => failure);
+      expect(error).toMatchObject({
+        serviceCode: 'source_manifest_state',
+        validationField: field,
+        validationReason: 'invalid_value',
+      });
+      expect(JSON.stringify(error)).not.toContain('PRIVATE_');
+    },
+  );
   it.each([
     {
       code: 'PRIVATE_CODE',

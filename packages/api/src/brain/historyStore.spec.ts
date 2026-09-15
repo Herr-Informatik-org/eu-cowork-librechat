@@ -1,8 +1,13 @@
 import { createHash } from 'node:crypto';
 import { MongoClient } from 'mongodb';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import type { Db, Collection } from 'mongodb';
-import type { BrainHistoryJob, BrainHistoryStore } from './historyStore';
+import type { Db, Collection, CommandSucceededEvent } from 'mongodb';
+import type { BrainHistoryJob, BrainHistoryMessage, BrainHistoryStore } from './historyStore';
+import type { BrainStoredMessage } from './conversation';
+import type { BrainHistoryProcessor } from './history';
+import type { ServerRequest } from '~/types';
+import { conversationMessages, conversationTranscript } from './conversation';
+import { brainHistorySourceHash, createBrainHistoryService } from './history';
 import { createMongoBrainHistoryStore } from './historyStore';
 
 describe('Brain history Mongo ownership and lifecycle boundaries', () => {
@@ -26,7 +31,7 @@ describe('Brain history Mongo ownership and lifecycle boundaries', () => {
 
   beforeAll(async () => {
     server = await MongoMemoryServer.create();
-    client = await MongoClient.connect(server.getUri());
+    client = await MongoClient.connect(server.getUri(), { monitorCommands: true });
     database = client.db('brain_history_synthetic_tests');
     jobs = database.collection<BrainHistoryJob>('eucowork_brain_history');
   });
@@ -184,6 +189,219 @@ describe('Brain history Mongo ownership and lifecycle boundaries', () => {
     expect(await store.nextConversation!('owner', chat!, new Date())).toBeNull();
     expect(await store.conversation!('owner', 'foreign', new Date())).toBeNull();
   });
+
+  it('removes attachment and tool payloads in Mongo while preserving the exact visible transcript', async () => {
+    const excluded = `synthetic-excluded-payload:${'x'.repeat(50000)}`;
+    const originals: BrainStoredMessage[] = [
+      {
+        messageId: 'structured',
+        conversationId: 'own',
+        isCreatedByUser: true,
+        createdAt: new Date(1000),
+        parentMessageId: null,
+        text: 'Unused fallback.',
+        content: [
+          { type: 'text', text: { value: 'Erste Zeile.', ignored: excluded }, ignored: excluded },
+          { type: 'tool_call', tool_call: { output: excluded } },
+          { type: 'image_url', image_url: { url: excluded } },
+          { type: 'text', text: 'Zweite Zeile.' },
+        ],
+      },
+      {
+        messageId: 'fallback',
+        conversationId: 'own',
+        isCreatedByUser: false,
+        createdAt: new Date(2000),
+        parentMessageId: 'structured',
+        text: 'Unveränderter Fallback.',
+        content: [null, { type: 'text', text: 42 }, { type: 'file', file: excluded }],
+      },
+      {
+        messageId: 'empty',
+        conversationId: 'own',
+        isCreatedByUser: false,
+        createdAt: new Date(2000),
+        text: 'Dieser Fallback darf nicht erscheinen.',
+        content: [
+          { type: 'text', text: '' },
+          { type: 'tool_call', output: excluded },
+        ],
+      },
+      {
+        messageId: 'plain',
+        conversationId: 'own',
+        isCreatedByUser: true,
+        createdAt: new Date(2000),
+        parentMessageId: 'fallback',
+        text: 'Ja, nur für Atlas.',
+      },
+    ];
+    await database.collection('conversations').insertOne({ user: 'owner', conversationId: 'own' });
+    await database
+      .collection('messages')
+      .insertMany(originals.map((message) => ({ ...message, user: 'owner' })));
+    const returned: string[] = [];
+    const capture = (event: CommandSucceededEvent) => {
+      const reply = event.reply;
+      if (!reply || typeof reply !== 'object' || !('cursor' in reply)) return;
+      const cursor = reply.cursor;
+      if (!cursor || typeof cursor !== 'object' || !('ns' in cursor) || !('firstBatch' in cursor))
+        return;
+      if (
+        event.commandName === 'aggregate' &&
+        cursor.ns === `${database.databaseName}.messages` &&
+        Array.isArray(cursor.firstBatch)
+      )
+        returned.push(JSON.stringify(cursor.firstBatch));
+    };
+    client.on('commandSucceeded', capture);
+    try {
+      const chat = await store.conversation!('owner', 'own', new Date());
+      const expected = conversationMessages(originals);
+      expect(chat?.messages).toEqual(expected);
+      expect(chat?.text).toBe(conversationTranscript(expected));
+      expect(chat?.createdAt).toEqual(new Date(1000));
+      expect(returned.length).toBeGreaterThan(0);
+      expect(returned.some((batch) => batch.includes('synthetic-excluded-payload'))).toBe(false);
+      expect(returned.some((batch) => batch.includes('tool_call'))).toBe(false);
+      expect(returned.some((batch) => batch.includes('image_url'))).toBe(false);
+    } finally {
+      client.off('commandSucceeded', capture);
+    }
+  });
+
+  it.each(['message-count', 'message-length'] as const)(
+    'resumes a persisted v2 %s failure after 136 finished chats without resetting its generation',
+    async (limit) => {
+      const chatId = (index: number) => `chat-${String(index).padStart(4, '0')}`;
+      const cutoff = new Date(1_000_000);
+      const earlier = Array.from({ length: 136 }, (_, index) => ({
+        user: 'owner',
+        conversationId: chatId(index + 1),
+        messageId: `finished-${index + 1}`,
+        createdAt: new Date(index + 1),
+        isCreatedByUser: true,
+        text: 'Bereits ausgewerteter Chat.',
+      }));
+      const large = Array.from({ length: limit === 'message-count' ? 2001 : 1 }, (_, index) => ({
+        user: 'owner',
+        conversationId: chatId(137),
+        messageId: `large-${index}`,
+        createdAt: new Date(10_000 + index),
+        isCreatedByUser: index % 2 === 0,
+        text: limit === 'message-length' ? 'x'.repeat(120001) : `Gesprächsbeitrag ${index}.`,
+      }));
+      await database.collection('conversations').insertMany(
+        Array.from({ length: 138 }, (_, index) => ({
+          user: 'owner',
+          conversationId: chatId(index + 1),
+        })),
+      );
+      await database.collection('messages').insertMany([
+        ...earlier,
+        ...large,
+        {
+          user: 'owner',
+          conversationId: chatId(138),
+          messageId: 'next',
+          createdAt: new Date(20_000),
+          isCreatedByUser: true,
+          text: 'Der nächste Chat.',
+        },
+      ]);
+      const pending = (await store.conversation!('owner', chatId(137), cutoff))!;
+      const cursor = { createdAt: new Date(136), messageId: chatId(136) };
+      await jobs.insertOne({
+        ...initial(),
+        schemaVersion: 2,
+        rebuildId: 'existing-draft',
+        status: 'failed',
+        analysisFingerprint: 'unchanged-model-and-context',
+        revision: 19,
+        cutoff,
+        cursor,
+        processed: 136,
+        total: 138,
+        saved: 217,
+        skipped: 19,
+        processedSections: 164,
+        error: 'Dieser Chat überschreitet die sichere Importgrösse.',
+        pending: {
+          message: {
+            conversationId: pending.conversationId,
+            messageId: pending.messageId,
+            createdAt: pending.createdAt,
+          },
+          sourceHash: brainHistorySourceHash(pending.text),
+          offset: 0,
+          end: pending.text.length,
+          saved: 0,
+        },
+      });
+      const extracted: BrainHistoryMessage[] = [];
+      const generations: (string | undefined)[] = [];
+      const completed: string[] = [];
+      const processor: BrainHistoryProcessor = {
+        availability: async () => ({
+          available: true,
+          analysisFingerprint: 'unchanged-model-and-context',
+        }),
+        chunk: async (_req, source) => source.text.length,
+        extract: async (input) => {
+          expect(await input.canContinue()).toBe(true);
+          expect(input.review).toBeUndefined();
+          extracted.push(input.source);
+          await input.onReview!({ position: 1, candidates: [], phase: 'extract' });
+          await input.onFacts([
+            {
+              text: 'Geprüfte synthetische Erinnerung.',
+              quote: input.source.messages![0].text,
+              kind: 'fact',
+            },
+          ]);
+          await input.onBilling('started');
+          await input.onBilling('complete');
+        },
+        ingest: async (input) => {
+          expect(await input.canContinue()).toBe(true);
+          generations.push(input.rebuildId);
+          return 1;
+        },
+        complete: async (_req, rebuildId) => {
+          completed.push(rebuildId);
+        },
+      };
+      const service = createBrainHistoryService({ store, processor });
+      const request = { user: { id: 'owner' } } as ServerRequest;
+      expect(await service.start(request)).toMatchObject({
+        status: 'running',
+        processed: 136,
+        total: 138,
+        saved: 217,
+        rebuildId: 'existing-draft',
+      });
+      await service.settle('owner');
+      expect(extracted.map((source) => source.conversationId)).toEqual([chatId(137), chatId(138)]);
+      expect(extracted[0].messages).toEqual(pending.messages);
+      expect(extracted[0].text).toBe(pending.text);
+      expect(generations).toEqual(['existing-draft', 'existing-draft']);
+      expect(completed).toEqual(['existing-draft']);
+      expect(await store.read('owner')).toMatchObject({
+        schemaVersion: 2,
+        rebuildId: 'existing-draft',
+        status: 'completed',
+        cutoff,
+        analysisFingerprint: 'unchanged-model-and-context',
+        processed: 138,
+        total: 138,
+        saved: 219,
+        skipped: 19,
+        processedSections: 166,
+        cursor: { messageId: chatId(138), createdAt: new Date(20_000) },
+      });
+      expect((await store.read('owner'))?.pending).toBeUndefined();
+    },
+  );
 
   it('rechecks deleted context and edited source text for a whole conversation', async () => {
     await seed();
