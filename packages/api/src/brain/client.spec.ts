@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { createHash, createHmac } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
-import { requestBrain, signBrainRequest, deleteBrainSources } from './client';
+import { requestBrain, signBrainRequest, deleteBrainSources, BrainServiceError } from './client';
 
 describe('signed Brain transport', () => {
   let server: Server;
@@ -16,6 +16,7 @@ describe('signed Brain transport', () => {
     expected?: string;
   };
   let status = 200;
+  let responseBody: unknown = { ok: true };
   const previous = { url: process.env.BRAIN_API_URL, secret: process.env.BRAIN_SHARED_SECRET };
 
   beforeAll(async () => {
@@ -47,7 +48,7 @@ describe('signed Brain transport', () => {
         expected,
       };
       res.writeHead(status, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
+      res.end(JSON.stringify(responseBody));
     });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
@@ -69,6 +70,7 @@ describe('signed Brain transport', () => {
   });
   beforeEach(() => {
     status = 200;
+    responseBody = { ok: true };
   });
 
   it('signs the exact UTF-8 body, path and authenticated owner', async () => {
@@ -113,6 +115,105 @@ describe('signed Brain transport', () => {
     await expect(
       requestBrain('owner-1', 'PATCH', '/v1/nodes/n', { version: 1 }),
     ).rejects.toMatchObject({ status: 409 });
+  });
+  it('retains only allowlisted validation details from the signed service response', async () => {
+    status = 400;
+    responseBody = {
+      code: 'invalid_request',
+      field: 'tags',
+      reason: 'empty',
+      error: 'PRIVATE_SOURCE_TEXT',
+      input: { authorization: 'PRIVATE_ACCESS' },
+    };
+    const error = await requestBrain('owner', 'POST', '/v1/ingest', {}).catch(
+      (failure: unknown) => failure,
+    );
+    expect(error).toBeInstanceOf(BrainServiceError);
+    expect(error).toMatchObject({
+      status: 400,
+      upstreamStatus: 400,
+      serviceCode: 'invalid_request',
+      validationField: 'tags',
+      validationReason: 'empty',
+    });
+    expect(JSON.stringify(error)).not.toContain('PRIVATE_');
+    expect((error as Error).message).not.toContain('PRIVATE_');
+  });
+  it.each([
+    {
+      code: 'PRIVATE_CODE',
+      field: 'tags',
+      reason: 'empty',
+      keep: { validationField: 'tags', validationReason: 'empty' },
+      drop: 'serviceCode',
+    },
+    {
+      code: 'invalid_request',
+      field: 'facts.0.PRIVATE_PATH',
+      reason: 'too_long',
+      keep: { serviceCode: 'invalid_request', validationReason: 'too_long' },
+      drop: 'validationField',
+    },
+    {
+      code: 'invalid_request',
+      field: 'tags',
+      reason: 'PRIVATE_REASON',
+      keep: { serviceCode: 'invalid_request', validationField: 'tags' },
+      drop: 'validationReason',
+    },
+  ])(
+    'drops an untrusted diagnostic $drop while retaining independent safe fields',
+    async ({ code, field, reason, keep, drop }) => {
+      status = 400;
+      responseBody = { code, field, reason, error: 'PRIVATE_SOURCE_TEXT' };
+      const error = await requestBrain('owner', 'POST', '/v1/ingest', {}).catch(
+        (failure: unknown) => failure,
+      );
+      expect(error).toMatchObject(keep);
+      expect((error as unknown as Record<string, unknown>)[drop]).toBeUndefined();
+      expect(JSON.stringify(error)).not.toContain('PRIVATE_');
+    },
+  );
+  it('cancels an oversized error stream without retaining partial diagnostics', async () => {
+    const cancel = jest.fn();
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              JSON.stringify({ code: 'invalid_request', field: 'tags', error: 'x'.repeat(5000) }),
+            ),
+          );
+        },
+        cancel,
+      }),
+      { status: 400 },
+    );
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValueOnce(response);
+    try {
+      const error = await requestBrain('owner', 'POST', '/v1/ingest', {}).catch(
+        (failure: unknown) => failure,
+      );
+      expect(error).toMatchObject({ status: 400, upstreamStatus: 400 });
+      expect((error as BrainServiceError).serviceCode).toBeUndefined();
+      expect(cancel).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+  it('keeps the HTTP rejection when the response contains malformed JSON', async () => {
+    const fetchMock = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response('PRIVATE_INVALID_JSON', { status: 400 }));
+    try {
+      const error = await requestBrain('owner', 'POST', '/v1/ingest', {}).catch(
+        (failure: unknown) => failure,
+      );
+      expect(error).toMatchObject({ status: 400, upstreamStatus: 400 });
+      expect(JSON.stringify(error)).not.toContain('PRIVATE_');
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
   it('fails deletion closed when the service is configured but its key is missing', async () => {
     delete process.env.BRAIN_SHARED_SECRET;

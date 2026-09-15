@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-15 — Brain-Speicherung und Fehlerdiagnose korrigieren
+
+- Leere optionale Modellfelder beim Speichern und Fortsetzen bereinigen;
+  ungültige Aussagen und Belege weiterhin ausschliessen. Datumsgrenzen anhand
+  tatsächlicher Zeitpunkte prüfen. Gültige Anfragen behalten ihre Wiederholungskennung.
+- HTTP 400 des Brain-Dienstes als Datenablehnung statt Verbindungsverlust melden.
+  Feste Dienstcodes, Feldnamen und Prüfgründe erreichen die Admin-Ansicht;
+  Antworttexte bleiben ausgeschlossen, Fehlerantworten auf 4 KiB begrenzt.
+- 192 Brain-Prüfungen und API-Bau erfolgreich. Der konkrete interne Zwischenstand
+  muss auf der Zielinstanz geprüft werden; keine echten Modellanfragen ausgeführt.
+
 ## 2026-09-15 — Zentrale Modellkarten trotz Gruppen- und Rollenauswahl
 
 - Gespeicherte Kartenkopien in Gruppen, Rollen und Benutzerregeln werden nur noch

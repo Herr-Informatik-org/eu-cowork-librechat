@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { logger } from '@librechat/data-schemas';
+import { safeBrainServiceDiagnostic } from './client';
+import type { BrainServiceDiagnostic } from './client';
 
 const messages = {
   model_timeout:
@@ -18,6 +20,16 @@ const messages = {
     'Der interne Brain-Dienst hat das Zeitlimit erreicht. Bereits ausgewertete Beiträge bleiben für das Fortsetzen gespeichert.',
   brain_auth:
     'Der interne Brain-Zugang ist fehlerhaft eingerichtet. Die Administration muss die Dienstverbindung prüfen.',
+  brain_validation:
+    'Der interne Brain-Dienst hat die übermittelten Wissensdaten abgelehnt. Die Administration muss die Datenprüfung kontrollieren. Bereits ausgewertete Beiträge bleiben für das Fortsetzen gespeichert.',
+  brain_conflict:
+    'Der Brain-Stand wurde inzwischen geändert. Bitte lade den aktuellen Stand erneut. Bereits ausgewertete Beiträge bleiben erhalten.',
+  brain_source_changed:
+    'Die ursprünglichen Chatquellen wurden geändert oder gelöscht. Der bisherige Zwischenstand kann so nicht übernommen werden. Bitte prüfe den Neuaufbau.',
+  brain_not_found:
+    'Der angefragte Brain-Eintrag wurde nicht gefunden. Bitte lade den aktuellen Stand erneut.',
+  brain_rate_limit:
+    'Der interne Brain-Dienst begrenzt gerade die Anfragen. Bitte warte kurz und setze die Verarbeitung danach fort.',
   brain_unavailable:
     'Der interne Brain-Dienst ist zurzeit nicht erreichbar. Bereits ausgewertete Beiträge bleiben für das Fortsetzen gespeichert.',
   database:
@@ -45,7 +57,7 @@ export type BrainFailureStage =
   | 'request'
   | 'recall'
   | 'billing';
-export interface BrainFailure {
+export interface BrainFailure extends BrainServiceDiagnostic {
   code: BrainFailureCode;
   message: string;
   incidentId: string;
@@ -90,6 +102,7 @@ export function classifyBrainFailure(error: unknown, stage: BrainFailureStage): 
   let code: BrainFailureCode | undefined;
   let isBrain = false;
   let database = false;
+  let serviceDiagnostic: BrainServiceDiagnostic = {};
   for (let depth = 0; current && depth < 5; depth++) {
     const name = field(current, 'name');
     const rawCode = field(current, 'code');
@@ -99,6 +112,16 @@ export function classifyBrainFailure(error: unknown, stage: BrainFailureStage): 
       field(field(current, 'response'), 'status');
     if (typeof rawStatus === 'number' && rawStatus >= 400 && rawStatus <= 599) status ??= rawStatus;
     isBrain ||= name === 'BrainServiceError';
+    if (name === 'BrainServiceError') {
+      serviceDiagnostic = {
+        ...safeBrainServiceDiagnostic({
+          code: field(current, 'serviceCode'),
+          field: field(current, 'validationField'),
+          reason: field(current, 'validationReason'),
+        }),
+        ...serviceDiagnostic,
+      };
+    }
     database ||= typeof name === 'string' && /^(Mongo|Mongoose)/.test(name);
     timeout ||=
       name === 'TimeoutError' || name === 'AbortError' || name === 'APIConnectionTimeoutError';
@@ -125,6 +148,13 @@ export function classifyBrainFailure(error: unknown, stage: BrainFailureStage): 
     code = 'brain_unavailable';
     if (timeout) code = 'brain_timeout';
     else if (status === 401 || status === 403) code = 'brain_auth';
+    else if (status === 400 || status === 413 || status === 422) code = 'brain_validation';
+    else if (status === 409)
+      code = ['stale_sources', 'deleted_source'].includes(serviceDiagnostic.serviceCode ?? '')
+        ? 'brain_source_changed'
+        : 'brain_conflict';
+    else if (status === 404) code = 'brain_not_found';
+    else if (status === 429) code = 'brain_rate_limit';
   } else if (database || stage === 'heartbeat') code = 'database';
   else if (stage === 'billing') code = 'billing';
   else if (stage === 'extract') {
@@ -140,6 +170,7 @@ export function classifyBrainFailure(error: unknown, stage: BrainFailureStage): 
     code,
     message: error instanceof BrainOperationError ? error.message : messages[code],
     incidentId: randomUUID(),
+    ...serviceDiagnostic,
     ...(status ? { upstreamStatus: status } : {}),
     ...(transportCode ? { transportCode } : {}),
   };
@@ -165,6 +196,9 @@ export interface BrainDiagnosticEntry {
     durationMs?: number;
     upstreamStatus?: number;
     transportCode?: string;
+    serviceCode?: BrainServiceDiagnostic['serviceCode'];
+    validationField?: BrainServiceDiagnostic['validationField'];
+    validationReason?: BrainServiceDiagnostic['validationReason'];
   };
 }
 
@@ -173,11 +207,17 @@ export function createBrainFailureReporter(
 ): BrainFailureReporter {
   return async (event) => {
     const { failure } = event;
+    const safeService = safeBrainServiceDiagnostic({
+      code: failure.serviceCode,
+      field: failure.validationField,
+      reason: failure.validationReason,
+    });
     const context: BrainDiagnosticEntry['context'] = {
       incidentId: failure.incidentId,
       code: failure.code,
       operation: event.operation,
       stage: event.stage,
+      ...safeService,
       ...(event.conversationId ? { conversationId: event.conversationId.slice(0, 100) } : {}),
       ...(event.messageId ? { messageId: event.messageId.slice(0, 100) } : {}),
       ...(event.modelLabel ? { model: event.modelLabel.slice(0, 200) } : {}),
