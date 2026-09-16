@@ -1,5 +1,15 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-16 — Nur freigegebene MCP-Verbindungen anzeigen
+
+- Gateway-Verbindungen anhand der bestehenden Admin-Regeln pro Benutzer filtern;
+  Listen, Werkzeuge, Status und einzelne Serverabfragen verwenden dieselbe Sicht.
+- Aktuelle Gateway-Freigabe nach dem Konfigurationscache prüfen. Fehler blenden
+  die betroffene Verbindung aus; direkte OAuth-Verbindungen bleiben erhalten.
+- Entzogene Verbindungen aus der aktiven Auswahl entfernen, auch beim Entzug aller
+  Freigaben. Während der ersten Ladephase gespeicherte Einstellungen erhalten.
+- Benötigt das passende MCP-Gateway mit internem Berechtigungsendpunkt.
+
 ## 2026-09-15 — Brain-Neuaufbau live anzeigen und automatisch übernehmen
 
 - Vor einem neuen Neuaufbau die automatische Übernahme und Modellkosten

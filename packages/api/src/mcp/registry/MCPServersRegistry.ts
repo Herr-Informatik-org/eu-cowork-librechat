@@ -9,6 +9,7 @@ import {
   CONFIG_CACHE_NAMESPACE,
 } from './cache/ServerConfigsCacheFactory';
 import { MCPInspectionFailedError, isMCPDomainNotAllowedError } from '~/mcp/errors';
+import { canAccessMCPServer, filterAccessibleMCPServers } from './access';
 import { MCPServerInspector } from './MCPServerInspector';
 import { ServerConfigsDB } from './db/ServerConfigsDB';
 import { cacheConfig } from '~/cache/cacheConfig';
@@ -292,10 +293,15 @@ export class MCPServersRegistry {
       await this.readThroughCache.set(cacheKey, base);
     }
 
-    if (!candidate) return base;
-    if (base?.source === 'user') return base;
-    if (candidate.inspectionFailed) return base ?? candidate;
-    return base ? { ...candidate, source: base.source } : candidate;
+    let resolved = base;
+    if (candidate && base?.source !== 'user') {
+      if (candidate.inspectionFailed) {
+        resolved = base ?? candidate;
+      } else {
+        resolved = base ? { ...candidate, source: base.source } : candidate;
+      }
+    }
+    return resolved && (await canAccessMCPServer(resolved, userId)) ? resolved : undefined;
   }
 
   /**
@@ -316,7 +322,7 @@ export class MCPServersRegistry {
     role?: string,
   ): Promise<Record<string, t.ParsedServerConfig>> {
     if (configServers == null || !Object.keys(configServers).length) {
-      return this.getBaseServerConfigs(userId, role);
+      return filterAccessibleMCPServers(await this.getBaseServerConfigs(userId, role), userId);
     }
     const base = await this.getBaseServerConfigs(userId, role);
     const result: Record<string, t.ParsedServerConfig> = { ...base };
@@ -329,7 +335,7 @@ export class MCPServersRegistry {
       const baseSource = result[name]?.source;
       result[name] = baseSource ? { ...override, source: baseSource } : override;
     }
-    return result;
+    return filterAccessibleMCPServers(result, userId);
   }
 
   /**

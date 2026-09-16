@@ -92,6 +92,44 @@ describe('MCPServersRegistry', () => {
   // Private server functionality is now handled by the DB repository (not yet implemented)
 
   describe('getAllServerConfigs', () => {
+    it('filters cached YAML configs and single-server lookups after gateway access is revoked', async () => {
+      const gatewayConfig: t.ParsedServerConfig = {
+        type: 'streamable-http',
+        url: 'http://mcp-gateway:3020/odoo-admin',
+        source: 'yaml',
+      };
+      await registry['cacheConfigsRepo'].add('payroll', gatewayConfig);
+      const fetchSpy = jest.spyOn(globalThis, 'fetch');
+      fetchSpy.mockImplementation(async () => Response.json({ allowed: true }));
+      expect(await registry.getAllServerConfigs('user-a')).toHaveProperty('payroll');
+      expect(await registry.getServerConfig('payroll', 'user-a')).toMatchObject(gatewayConfig);
+
+      fetchSpy.mockImplementation(async () => Response.json({ allowed: false }));
+      expect(await registry.getAllServerConfigs('user-a')).toEqual({});
+      expect(await registry.getServerConfig('payroll', 'user-a')).toBeUndefined();
+      expect(await registry.getAllServerConfigs()).toHaveProperty('payroll');
+      expect(await registry.getServerConfig('payroll')).toMatchObject(gatewayConfig);
+    });
+
+    it('filters admin config overlays after merging while preserving direct servers and native ACL', async () => {
+      const gatewayConfig: t.ParsedServerConfig = {
+        type: 'streamable-http',
+        url: 'http://mcp-gateway:3020/odoo-admin',
+        source: 'config',
+      };
+      await registry['cacheConfigsRepo'].add('public', testParsedConfig);
+      jest
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async () => Response.json({ allowed: false }));
+      expect(await registry.getAllServerConfigs('user-a', { payroll: gatewayConfig })).toEqual({
+        public: testParsedConfig,
+      });
+      expect(
+        await registry.getServerConfig('payroll', 'user-a', { payroll: gatewayConfig }),
+      ).toBeUndefined();
+      expect(await registry.getServerConfig('private-user-server', 'user-a')).toBeUndefined();
+    });
+
     it('should return servers from cache repository', async () => {
       // Add servers to cache using the new API
       await registry['cacheConfigsRepo'].add('app_server', testParsedConfig);

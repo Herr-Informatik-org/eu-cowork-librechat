@@ -148,7 +148,7 @@ describe('useMCPSelect', () => {
   describe('Timestamp Management', () => {
     it('should set timestamp when mcpValues is updated with values', async () => {
       const conversationId = 'test-convo';
-      const { Wrapper, servers } = createWrapper();
+      const { Wrapper, servers } = createWrapper(['value1', 'value2']);
       const { result } = renderHook(() => useMCPSelect({ conversationId, servers }), {
         wrapper: Wrapper,
       });
@@ -538,6 +538,119 @@ describe('useMCPSelect', () => {
       await waitFor(() => {
         expect(result.current.mcpHook.mcpValues).toEqual(updatedValues);
       });
+    });
+  });
+
+  describe('Access changes', () => {
+    it.each([{ allowedServers: ['server1'] }, { allowedServers: [] }])(
+      'removes revoked selections from the menu, request state and current defaults: $allowedServers',
+      async ({ allowedServers }) => {
+        const { Wrapper } = createWrapper();
+        const storageContextKey = 'access-defaults';
+        const { result, rerender } = renderHook(
+          ({ servers }) => {
+            const mcpHook = useMCPSelect({ servers, storageContextKey });
+            const [ephemeralAgent, setEphemeralAgent] = useRecoilState(
+              ephemeralAgentByConvoId(Constants.NEW_CONVO),
+            );
+            return { mcpHook, ephemeralAgent, setEphemeralAgent };
+          },
+          {
+            wrapper: Wrapper,
+            initialProps: { servers: createMCPServers(['server1', 'server2']) },
+          },
+        );
+
+        act(() => {
+          result.current.setEphemeralAgent({ mcp: ['server1', 'server2'], execute_code: true });
+        });
+
+        rerender({ servers: createMCPServers(allowedServers) });
+
+        await waitFor(() => {
+          expect(result.current.mcpHook.mcpValues).toEqual(allowedServers);
+          expect(result.current.ephemeralAgent).toEqual({
+            mcp: allowedServers,
+            execute_code: true,
+          });
+          expect(localStorage.getItem(`${LocalStorageKeys.LAST_MCP_}${storageContextKey}`)).toBe(
+            JSON.stringify(allowedServers),
+          );
+        });
+      },
+    );
+
+    it('preserves stored selections while loading and then removes only inaccessible defaults', async () => {
+      const storageContextKey = 'initial-access-defaults';
+      const storageKey = `${LocalStorageKeys.LAST_MCP_}${storageContextKey}`;
+      localStorage.setItem(storageKey, JSON.stringify(['server1', 'server2']));
+      const { Wrapper } = createWrapper();
+      const { result, rerender } = renderHook(
+        ({ servers, serversLoaded }) => useMCPSelect({ servers, serversLoaded, storageContextKey }),
+        {
+          wrapper: Wrapper,
+          initialProps: { servers: createMCPServers([]), serversLoaded: false },
+        },
+      );
+
+      expect(result.current.mcpValues).toEqual(['server1', 'server2']);
+      expect(localStorage.getItem(storageKey)).toBe(JSON.stringify(['server1', 'server2']));
+
+      rerender({ servers: createMCPServers(['server1']), serversLoaded: true });
+
+      await waitFor(() => {
+        expect(result.current.mcpValues).toEqual(['server1']);
+        expect(localStorage.getItem(storageKey)).toBe(JSON.stringify(['server1']));
+      });
+    });
+
+    it('preserves pending model defaults and removes them when the loaded list is empty', async () => {
+      const { Wrapper } = createWrapper();
+      const { result, rerender } = renderHook(
+        ({ serversLoaded }) => {
+          const mcpHook = useMCPSelect({ servers: [], serversLoaded });
+          const [ephemeralAgent, setEphemeralAgent] = useRecoilState(
+            ephemeralAgentByConvoId(Constants.NEW_CONVO),
+          );
+          return { mcpHook, ephemeralAgent, setEphemeralAgent };
+        },
+        { wrapper: Wrapper, initialProps: { serversLoaded: false } },
+      );
+
+      act(() => {
+        result.current.setEphemeralAgent({ mcp: ['server1'], execute_code: true });
+      });
+      expect(result.current.ephemeralAgent?.mcp).toEqual(['server1']);
+
+      rerender({ serversLoaded: true });
+
+      await waitFor(() => {
+        expect(result.current.mcpHook.mcpValues).toEqual([]);
+        expect(result.current.ephemeralAgent).toEqual({ mcp: [], execute_code: true });
+      });
+    });
+
+    it('rejects inaccessible servers when a selection change writes defaults', () => {
+      const storageContextKey = 'rejected-access-defaults';
+      const { Wrapper, servers } = createWrapper(['server1']);
+      const { result } = renderHook(
+        () => {
+          const mcpHook = useMCPSelect({ servers, storageContextKey });
+          const ephemeralAgent = useRecoilValue(ephemeralAgentByConvoId(Constants.NEW_CONVO));
+          return { mcpHook, ephemeralAgent };
+        },
+        { wrapper: Wrapper },
+      );
+
+      act(() => {
+        result.current.mcpHook.setMCPValues(['server1', 'revoked']);
+      });
+
+      expect(result.current.mcpHook.mcpValues).toEqual(['server1']);
+      expect(result.current.ephemeralAgent?.mcp).toEqual(['server1']);
+      expect(localStorage.getItem(`${LocalStorageKeys.LAST_MCP_}${storageContextKey}`)).toBe(
+        JSON.stringify(['server1']),
+      );
     });
   });
 

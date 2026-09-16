@@ -3,8 +3,8 @@ import { useAtom } from 'jotai';
 import isEqual from 'lodash/isEqual';
 import { useRecoilState } from 'recoil';
 import { Constants, LocalStorageKeys } from 'librechat-data-provider';
+import type { MCPServerDefinition } from './useMCPServerManager';
 import { ephemeralAgentByConvoId, mcpValuesAtomFamily, mcpPinnedAtom } from '~/store';
-import { MCPServerDefinition } from './useMCPServerManager';
 import { useGetStartupConfig } from '~/data-provider';
 import { setTimestamp } from '~/utils/timestamps';
 
@@ -15,10 +15,12 @@ export function useMCPSelect({
   conversationId,
   storageContextKey,
   servers,
+  serversLoaded = true,
 }: {
   conversationId?: string | null;
   storageContextKey?: string;
   servers: MCPServerDefinition[];
+  serversLoaded?: boolean;
 }) {
   const key = conversationId ?? Constants.NEW_CONVO;
   const configuredServers = useMemo(() => {
@@ -60,7 +62,7 @@ export function useMCPSelect({
     }
     const pinnedByKeyword = defaultPinnedTools.includes(MCP_PIN_KEYWORD);
     /** Wait for servers before deciding so a configured server name isn't missed. */
-    if (!pinnedByKeyword && servers.length === 0) {
+    if (!pinnedByKeyword && !serversLoaded) {
       return;
     }
     hasAppliedDefaultPin.current = true;
@@ -69,21 +71,41 @@ export function useMCPSelect({
     if (shouldPin !== isPinned) {
       setIsPinned(shouldPin);
     }
-  }, [startupConfig, servers, isPinned, setIsPinned]);
+  }, [startupConfig, servers, serversLoaded, isPinned, setIsPinned]);
 
-  // Sync ephemeral agent MCP → Jotai atom (strip unconfigured servers)
+  /** A loaded empty list revokes every server; an initial pending list must preserve selections. */
   useEffect(() => {
-    const mcps = ephemeralAgent?.mcp;
-    if (Array.isArray(mcps) && mcps.length > 0 && configuredServers.size > 0) {
-      const activeMcps = mcps.filter((mcp) => configuredServers.has(mcp));
-      if (!isEqual(activeMcps, mcpValues)) {
-        setMCPValuesRaw(activeMcps);
-      }
-    } else if (Array.isArray(mcps) && mcps.length === 0 && mcpValues.length > 0) {
-      // Ephemeral agent explicitly has empty MCP (e.g., spec with no MCP servers) — clear atom
-      setMCPValuesRaw([]);
+    if (!serversLoaded) {
+      return;
     }
-  }, [ephemeralAgent?.mcp, setMCPValuesRaw, configuredServers, mcpValues]);
+    const mcps = ephemeralAgent?.mcp;
+    const sourceMcps = Array.isArray(mcps) ? mcps : mcpValues;
+    const activeMcps = sourceMcps.filter((mcp) => configuredServers.has(mcp));
+    if (!isEqual(activeMcps, mcpValues)) {
+      setMCPValuesRaw(activeMcps);
+    }
+    if (Array.isArray(mcps) && !isEqual(activeMcps, mcps)) {
+      setEphemeralAgent((prev) => {
+        if (!Array.isArray(prev?.mcp)) {
+          return prev;
+        }
+        const allowedMcps = prev.mcp.filter((mcp) => configuredServers.has(mcp));
+        return isEqual(allowedMcps, prev.mcp) ? prev : { ...prev, mcp: allowedMcps };
+      });
+    }
+  }, [
+    ephemeralAgent?.mcp,
+    setMCPValuesRaw,
+    setEphemeralAgent,
+    configuredServers,
+    serversLoaded,
+    mcpValues,
+  ]);
+
+  const availableValues = useMemo(
+    () => (serversLoaded ? mcpValues.filter((mcp) => configuredServers.has(mcp)) : mcpValues),
+    [mcpValues, configuredServers, serversLoaded],
+  );
 
   // Write timestamp when MCP values change
   useEffect(() => {
@@ -99,26 +121,29 @@ export function useMCPSelect({
       if (!Array.isArray(value)) {
         return;
       }
-      setMCPValuesRaw(value);
+      const activeValues = serversLoaded
+        ? value.filter((mcp) => configuredServers.has(mcp))
+        : value;
+      setMCPValuesRaw(activeValues);
       setEphemeralAgent((prev) => {
-        if (!isEqual(prev?.mcp, value)) {
-          return { ...(prev ?? {}), mcp: value };
+        if (!isEqual(prev?.mcp, activeValues)) {
+          return { ...(prev ?? {}), mcp: activeValues };
         }
         return prev;
       });
       // Dual-write to environment key for new conversation defaults
       if (storageContextKey) {
         const envKey = `${LocalStorageKeys.LAST_MCP_}${storageContextKey}`;
-        localStorage.setItem(envKey, JSON.stringify(value));
+        localStorage.setItem(envKey, JSON.stringify(activeValues));
         setTimestamp(envKey);
       }
     },
-    [setMCPValuesRaw, setEphemeralAgent, storageContextKey],
+    [setMCPValuesRaw, setEphemeralAgent, storageContextKey, configuredServers, serversLoaded],
   );
 
   return {
     isPinned,
-    mcpValues,
+    mcpValues: availableValues,
     setIsPinned,
     setMCPValues,
   };

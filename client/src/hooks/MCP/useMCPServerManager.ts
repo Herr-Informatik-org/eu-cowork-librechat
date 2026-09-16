@@ -24,7 +24,13 @@ import type {
 } from 'librechat-data-provider';
 import type { MCPServerInitState } from '~/store/mcp';
 import type { ConfigFieldDetail } from '~/common';
-import { useLocalize, useHasAccess, useMCPSelect, useMCPConnectionStatus } from '~/hooks';
+import {
+  useLocalize,
+  useHasAccess,
+  useMCPSelect,
+  useAuthContext,
+  useMCPConnectionStatus,
+} from '~/hooks';
 import { useGetStartupConfig, useMCPServersQuery } from '~/data-provider';
 import { mcpServerInitStatesAtom, getServerInitState } from '~/store/mcp';
 import { getMCPReinitializeErrorMessage } from './errors';
@@ -48,6 +54,8 @@ export function useMCPServerManager({
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const { showToast } = useToastContext();
+  const { user, roles, isAuthenticated } = useAuthContext();
+  const hasRolePermissions = isAuthenticated && user?.role != null && roles?.[user.role] != null;
   /** Retained for `interface.mcpServers.placeholder` used by `placeholderText` below */
   const { data: startupConfig } = useGetStartupConfig();
   const canUseMcp = useHasAccess({
@@ -68,7 +76,7 @@ export function useMCPServerManager({
 
   const availableMCPServers: MCPServerDefinition[] = useMemo<MCPServerDefinition[]>(() => {
     const definitions: MCPServerDefinition[] = [];
-    if (loadedServers) {
+    if (canUseMcp && loadedServers) {
       for (const [serverName, metadata] of Object.entries(loadedServers)) {
         const { dbId, consumeOnly, ...config } = metadata;
 
@@ -86,7 +94,7 @@ export function useMCPServerManager({
       }
     }
     return definitions;
-  }, [loadedServers, permissionsMap]);
+  }, [canUseMcp, loadedServers, permissionsMap]);
 
   // Memoize filtered servers for useMCPSelect to prevent infinite loops
   const selectableServers = useMemo(
@@ -98,6 +106,7 @@ export function useMCPServerManager({
     conversationId,
     storageContextKey,
     servers: selectableServers,
+    serversLoaded: hasRolePermissions && (!canUseMcp || loadedServers != null),
   });
   const mcpValuesRef = useRef(mcpValues);
 

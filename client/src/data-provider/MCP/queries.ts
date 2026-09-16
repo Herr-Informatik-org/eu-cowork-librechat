@@ -14,8 +14,10 @@ export const useMCPServersQuery = <TData = t.MCPServersListResponse>(
     {
       staleTime: 30 * 1000, // 30 seconds — short enough to pick up servers that finish initializing after first load
       refetchOnWindowFocus: true,
-      refetchOnReconnect: false,
+      refetchOnReconnect: true,
       refetchOnMount: true,
+      refetchInterval: 30 * 1000,
+      refetchIntervalInBackground: false,
       retry: false,
       ...config,
     },
