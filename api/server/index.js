@@ -202,6 +202,7 @@ const startServer = async () => {
 
   /* Middleware */
   app.use('/api/agents/chat', agentStartupIngressMiddleware);
+  app.use('/api/agents/office/chat', agentStartupIngressMiddleware);
   app.use(metricsMiddleware);
   app.use(noIndex);
   app.use(express.json({ limit: '3mb' }));
@@ -242,6 +243,7 @@ const startServer = async () => {
     app.use(telemetry.telemetryMiddleware);
   }
   app.use('/api/agents/chat', agentStartupTelemetryMiddleware);
+  app.use('/api/agents/office/chat', agentStartupTelemetryMiddleware);
 
   if (!ALLOW_SOCIAL_LOGIN) {
     console.warn('Social logins are disabled. Set ALLOW_SOCIAL_LOGIN=true to enable them.');
@@ -300,6 +302,8 @@ const startServer = async () => {
   app.use('/api/share', preAuthTenantMiddleware, routes.share);
   app.use('/api/roles', routes.roles);
   app.use('/api/agents/chat', rejectChatStartsUntilReady);
+  app.use('/api/agents/office/chat', rejectChatStartsUntilReady);
+  app.use('/api/agents/office', await routes.office.initialize());
   app.use('/api/agents', routes.agents);
   app.use('/api/banner', routes.banner);
   app.use('/api/memories', routes.memories);

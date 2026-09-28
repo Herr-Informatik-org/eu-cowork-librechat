@@ -43,6 +43,7 @@ export * from './memory';
 export * from './brain';
 /* Model Specs */
 export * from './modelSpecs';
+export * from './office';
 /* Agents */
 export * from './agents';
 /* Actions */

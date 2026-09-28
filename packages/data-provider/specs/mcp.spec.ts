@@ -737,3 +737,24 @@ describe('MCP_USER_INPUT_FIELDS', () => {
     expect(MCP_USER_INPUT_FIELDS.has('env')).toBe(false);
   });
 });
+
+describe('administrator-required MCP approval', () => {
+  const server = { type: 'streamable-http', url: 'https://office.example/mcp' };
+  test('accepts bounded tool globs in administrator config', () => {
+    expect(
+      MCPOptionsSchema.parse({ ...server, requireToolApproval: ['create-*'] }).requireToolApproval,
+    ).toEqual(['create-*']);
+  });
+  test('rejects invalid or oversized policies', () => {
+    for (const policy of ['', [null], [' '], ['x'.repeat(257)], Array(101).fill('*')]) {
+      expect(MCPOptionsSchema.safeParse({ ...server, requireToolApproval: policy }).success).toBe(
+        false,
+      );
+    }
+  });
+  test('user-managed MCP input cannot provide an approval policy', () => {
+    const parsed = MCPServerUserInputSchema.parse({ ...server, requireToolApproval: [] });
+    expect(parsed).not.toHaveProperty('requireToolApproval');
+    expect(MCP_USER_INPUT_FIELDS.has('requireToolApproval')).toBe(false);
+  });
+});

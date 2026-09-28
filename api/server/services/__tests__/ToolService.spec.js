@@ -1868,3 +1868,47 @@ describe('ToolService - Action Capability Gating', () => {
     });
   });
 });
+
+describe('mandatory MCP approval on Legacy Assistants', () => {
+  test.each(['office', 'Office Team'])(
+    'protected calls never execute without native approval (server %s)',
+    async (serverName) => {
+      const invoke = jest.fn().mockResolvedValue('should never execute');
+      const protectedTool = `create-calendar-event_mcp_${serverName.replace(/ /g, '_')}`;
+      mockGetCachedTools.mockResolvedValue({});
+      mockLoadToolsUtil.mockResolvedValue({
+        loadedTools: [{ name: protectedTool, _call: invoke, call: invoke, invoke }],
+      });
+      const client = {
+        req: {
+          user: { id: 'user_123' },
+          body: { model: 'test', endpoint: 'assistants' },
+          config: {
+            mcpConfig: {
+              [serverName]: {
+                type: 'streamable-http',
+                url: 'http://office/mcp',
+                requireToolApproval: ['create-*'],
+              },
+            },
+          },
+        },
+        mappedOrder: new Map(),
+        seenToolCalls: new Map(),
+        addContentData: jest.fn(),
+      };
+      const actions = [
+        {
+          tool: protectedTool,
+          toolInput: {},
+          toolCallId: 'call_protected',
+          thread_id: 'thread_1',
+          run_id: 'run_1',
+        },
+      ];
+      await processRequiredActions(client, actions);
+      expect(invoke).not.toHaveBeenCalled();
+      expect(actions[0].output).toMatch(/Freigabe.*gesperrt/);
+    },
+  );
+});

@@ -1,5 +1,19 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-09-28 — Outlook-Transport mit nativer Chat-Persistenz
+
+- Persönliche Outlook-API-Schlüssel erhalten einen eng begrenzten Transport für
+  die bestehenden Chat-, Stream- und Verlaufsfunktionen. Web-JWT-Routen bleiben
+  bestehen; Outlook erhält keine Agentenverwaltung.
+- Modellkarten kommen aus der effektiven Benutzerkonfiguration. Endpunkt, Modell
+  und private Anweisungen bestimmt der Server; Clientüberschreibungen werden abgelehnt.
+- Chats, Elternnachrichten, Bilddateien und Streams bleiben an Benutzer und Mandant
+  gebunden. Bilder verwenden die bestehende Upload-Pipeline und deren Grenzen.
+- Konfigurierbare Pflichtbestätigungen für MCP-Werkzeuge gelten auch bei sonst
+  erteilten Dauerfreigaben. Nicht bestätigungsfähige Ausführungspfade werden gesperrt.
+  Persönliche Aliase geschützter HTTP-Connectoren können die Regel nicht entfernen;
+  verwaltete Kopien derselben Adresse übernehmen die Pflichtregeln.
+
 ## 2026-09-16 — Nur freigegebene MCP-Verbindungen anzeigen
 
 - Gateway-Verbindungen anhand der bestehenden Admin-Regeln pro Benutzer filtern;

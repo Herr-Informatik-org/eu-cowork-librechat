@@ -112,7 +112,7 @@ export const usageCreditMiddleware: RequestHandler = async (req, res, next) => {
   const inference =
     req.method === 'POST' &&
     (/^\/api\/ask(?:\/|$)/.test(path) ||
-      /^\/api\/agents\/chat(?:\/|$)/.test(path) ||
+      /^\/api\/agents\/(?:office\/)?chat(?:\/|$)/.test(path) ||
       /^\/api\/agents\/v1\/(?:responses|chat\/completions)(?:\/|$)/.test(path) ||
       /^\/api\/assistants\/(?:chat|v1\/threads)/.test(path));
   if (!inference || path.endsWith('/abort')) return next();

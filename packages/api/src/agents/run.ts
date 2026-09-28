@@ -60,6 +60,7 @@ import { resolveHeaders, createSafeUser } from '~/utils/env';
 import { getAgentCheckpointer } from '~/agents/checkpointer';
 import { getOpenAIConfig } from '~/endpoints/openai/config';
 import { buildHITLRunWiring } from '~/agents/hitl/runtime';
+import { buildMandatoryApproval } from '~/agents/hitl/mandatory';
 import { resolveSubagentMaxTurns } from '~/agents/config';
 import { buildLangfuseConfig } from '~/langfuse/config';
 import { resolveConfigHeaders } from '~/utils/headers';
@@ -1209,6 +1210,7 @@ export async function createRun({
 
   /** Admin kill switch for the ask tool — see {@link isAskUserQuestionAdminDisabled}. */
   const askToolAdminDisabled = isAskUserQuestionAdminDisabled(appConfig);
+  const mandatoryApproval = buildMandatoryApproval(appConfig?.mcpConfig, hitlCapable);
 
   const buildAgentInput = (agent: RunAgent, opts: { isSubagent?: boolean } = {}): AgentInputs => {
     const isSubagent = opts.isSubagent === true;
@@ -1348,6 +1350,17 @@ export async function createRun({
      * admin-disabled) it is stripped fail-closed with no replacement.
      */
     let tools = agent.tools;
+    // Remote programmatic bridges invoke inner MCP tools outside the approval hooks.
+    // Protected writes must stay direct; non-resumable callers/subagents cannot approve.
+    const unavailable = (name: string) =>
+      mandatoryApproval.enabled &&
+      (mandatoryApproval.isProgrammaticBridge(name) ||
+        ((!hitlCapable || isSubagent) && mandatoryApproval.matches(name)));
+    tools = tools?.filter((tool) => !unavailable((tool as { name?: string })?.name ?? ''));
+    toolDefinitions = toolDefinitions.filter((tool) => !unavailable(tool.name));
+    if (toolRegistry && mandatoryApproval.enabled) {
+      toolRegistry = new Map([...toolRegistry].filter(([name]) => !unavailable(name)));
+    }
     let askGraphTools: GenericTool[] | undefined;
     if (agentRequestsAskUserQuestion(agent)) {
       tools = tools?.filter(
@@ -1470,7 +1483,7 @@ export async function createRun({
    * `humanInTheLoop` switch, and bind a durable checkpointer so a run that pauses
    * for review can be rebuilt and resumed on any worker (see `agents/checkpointer.ts`
    * and the resume route). When disabled, nothing attaches and the run is identical
-   * to before this feature shipped.
+   * to before this feature shipped, unless an MCP server requires approval explicitly.
    */
   // Per-agent truth resolved by initializeAgent (admin capability AND builder
   // opt-in AND code env) — the run opts in when any reachable agent did.
@@ -1487,13 +1500,18 @@ export async function createRun({
   // inspect `run.getInterrupt()` or persist a pending action — so an approval-gated tool
   // would pause with no approval surface or resume endpoint, and the route would emit a
   // normal final response / `[DONE]` with the tool call dangling. Only AgentClient (chat +
-  // resume) passes `hitlCapable`; without it the run is identical to the no-HITL path.
+  // resume) passes `hitlCapable`; without it optional approval is off and mandatory MCP writes are denied.
   const hitl = hitlCapable
     ? buildHITLRunWiring(
         // The ask tool is exempt from the approval prompt (unless explicitly
         // listed by the admin) — approving the right to ask a question is a
         // pure double-pause; the tool has no side effects to gate.
-        exemptAskUserQuestionFromApproval(toolApprovalPolicy, ASK_USER_QUESTION_TOOL_NAME),
+        exemptAskUserQuestionFromApproval(
+          mandatoryApproval.enabled && !toolApprovalPolicy?.enabled
+            ? { enabled: true, mode: 'bypass' }
+            : toolApprovalPolicy,
+          ASK_USER_QUESTION_TOOL_NAME,
+        ),
         {
           userId: user?.id,
           conversationId: requestBody?.conversationId,
@@ -1528,6 +1546,11 @@ export async function createRun({
    * this guard is defense in depth).
    */
   let hooks = hitl?.hooks;
+  if (mandatoryApproval.enabled) {
+    hooks = hooks ?? new HookRegistry();
+    // Independent of endpoint allow/bypass settings; denial wins in non-HITL routes.
+    hooks.register('PreToolUse', { hooks: [mandatoryApproval.hook] });
+  }
   if (process.env.HOSTED_USAGE_REQUIRED === 'true') {
     hooks = hooks ?? new HookRegistry();
     for (const event of [
@@ -1586,7 +1609,7 @@ export async function createRun({
     // `interrupt()` from its tool body, which must run inside the Pregel task
     // frame — a speculative eager execution could never pause the run.
     eagerEventToolExecution: {
-      enabled: true,
+      enabled: !mandatoryApproval.enabled,
       excludeToolNames: [
         CREATE_FILE_TOOL_NAME,
         EDIT_FILE_TOOL_NAME,

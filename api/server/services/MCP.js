@@ -27,6 +27,7 @@ const {
   getServerCustomUserVars,
   requiresEphemeralUserConnection,
   containsGraphTokenPlaceholder,
+  isProtectedMCPAlias,
 } = require('@librechat/api');
 const {
   Time,
@@ -893,6 +894,24 @@ async function createMCPTool({
       tenantId: user?.tenantId,
       userId: user?.id,
     });
+    if (
+      isProtectedMCPAlias({
+        serverName,
+        serverConfig: processMCPEnv({
+          options: serverConfig,
+          user,
+          body: requestBody,
+          customUserVars: getServerCustomUserVars(userMCPAuthMap, serverName),
+          dbSourced: isUserSourced(serverConfig),
+        }),
+        adminServers: appConfig?.mcpConfig,
+        userSourced: isUserSourced(serverConfig),
+      })
+    ) {
+      throw new Error(
+        'Persönliche Aliase dieses geschützten MCP-Endpunkts sind gesperrt. Bitte den verwalteten Connector verwenden.',
+      );
+    }
     const allowedDomains = appConfig?.mcpSettings?.allowedDomains;
     const allowedAddresses = appConfig?.mcpSettings?.allowedAddresses;
     const isDomainAllowed = await isEarlyDomainAllowed({
@@ -1038,6 +1057,34 @@ function createToolInstance({
         : await userCanUseMCPServers(permissionUser);
       if (!canUseMCP) {
         throw new Error('Forbidden: Insufficient MCP server permissions');
+      }
+      const approvalConfig = await getAppConfig({
+        role: effectiveUser?.role,
+        tenantId: effectiveUser?.tenantId,
+        userId,
+      });
+      if (
+        isProtectedMCPAlias({
+          serverName,
+          serverConfig: capturedServerConfig
+            ? processMCPEnv({
+                options: capturedServerConfig,
+                user: effectiveUser,
+                body: config?.configurable?.requestBody ?? capturedRequestBody,
+                customUserVars: getServerCustomUserVars(
+                  config?.configurable?.userMCPAuthMap,
+                  serverName,
+                ),
+                dbSourced: isUserSourced(capturedServerConfig),
+              })
+            : undefined,
+          adminServers: approvalConfig?.mcpConfig,
+          userSourced: capturedServerConfig ? isUserSourced(capturedServerConfig) : true,
+        })
+      ) {
+        throw new Error(
+          'Persönliche Aliase dieses geschützten MCP-Endpunkts sind gesperrt. Bitte den verwalteten Connector verwenden.',
+        );
       }
       const flowsCache = getLogStores(CacheKeys.FLOWS);
       const flowManager = getFlowStateManager(flowsCache);

@@ -188,6 +188,8 @@ const BaseOptionsSchema = z.object({
    * If not specified, will be auto-detected during construction
    */
   requiresOAuth: z.boolean().optional(),
+  /** Admin-only raw tool names/globs requiring fresh native-chat approval for every call. */
+  requireToolApproval: z.array(z.string().trim().min(1).max(256)).max(100).optional(),
   /**
    * OAuth configuration for SSE and Streamable HTTP transports
    * - Optional: OAuth can be auto-discovered on 401 responses
@@ -387,6 +389,7 @@ const omitServerManagedFields = <T extends z.ZodObject<z.ZodRawShape>>(schema: T
     chatMenu: true,
     serverInstructions: true,
     requiresOAuth: true,
+    requireToolApproval: true,
     customUserVars: true,
     oauth_headers: true,
   });

@@ -2253,3 +2253,71 @@ describe('ask_user_question run wiring', () => {
     expect(getCheckpointer(config)).toBeDefined();
   });
 });
+
+describe('mandatory MCP approval run wiring', () => {
+  const protectedTool = 'create-event_mcp_office';
+  const reads = 'list-events_mcp_office';
+  const makeProtectedAgent = () =>
+    makeAgent({
+      tools: [{ name: protectedTool }, { name: reads }, { name: 'run_tools_with_bash' }],
+      toolDefinitions: [{ name: protectedTool }, { name: reads }],
+      toolRegistry: new Map([
+        [protectedTool, { name: protectedTool }],
+        [reads, { name: reads }],
+      ]),
+    });
+  const requiredConfig = {
+    config: {},
+    fileStrategy: FileSources.local,
+    imageOutputType: 'png',
+    endpoints: { [EModelEndpoint.agents]: { toolApproval: { enabled: false } } },
+    mcpConfig: {
+      office: {
+        type: 'streamable-http',
+        url: 'http://office/mcp',
+        requireToolApproval: ['create-*'],
+      },
+    },
+  } as unknown as AppConfig;
+  const run = async (hitlCapable: boolean, agent = makeProtectedAgent()) => {
+    await createRun({
+      agents: [agent] as never,
+      signal: new AbortController().signal,
+      appConfig: requiredConfig,
+      streaming: true,
+      streamUsage: true,
+      hitlCapable,
+    });
+    return (Run.create as jest.Mock).mock.calls[0][0];
+  };
+  test('forces durable native approval even if optional endpoint approval is off', async () => {
+    const config = await run(true);
+    expect(config.humanInTheLoop).toEqual({ enabled: true });
+    expect(config.graphConfig.compileOptions.checkpointer).toBeDefined();
+    expect(config.eagerEventToolExecution.enabled).toBe(false);
+    expect(config.graphConfig.agents[0].tools.map((t: { name: string }) => t.name)).toEqual([
+      protectedTool,
+      reads,
+    ]);
+  });
+  test('removes protected writes from every non-HITL discovery surface and keeps a deny hook', async () => {
+    const config = await run(false);
+    const agent = config.graphConfig.agents[0];
+    expect(agent.tools.map((t: { name: string }) => t.name)).toEqual([reads]);
+    expect(agent.toolDefinitions.map((t: { name: string }) => t.name)).toEqual([reads]);
+    expect([...agent.toolRegistry.keys()]).toEqual([reads]);
+    expect(config.humanInTheLoop).toBeUndefined();
+    expect(config.hooks.getMatchers('PreToolUse')).toHaveLength(1);
+  });
+  test('strips writes from child agent inputs without changing the parent registry', async () => {
+    const child = makeProtectedAgent();
+    const parent = makeProtectedAgent();
+    parent.subagents = { enabled: true, allowSelf: false, agent_ids: ['child'] };
+    child.id = 'child';
+    parent.subagentAgentConfigs = [child];
+    const config = await run(true, parent);
+    const outer = config.graphConfig.agents[0];
+    expect(outer.toolRegistry.has(protectedTool)).toBe(true);
+    expect(outer.subagentConfigs[0].agentInputs.toolRegistry.has(protectedTool)).toBe(false);
+  });
+});

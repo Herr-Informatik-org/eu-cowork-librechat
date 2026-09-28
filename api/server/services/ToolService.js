@@ -33,6 +33,7 @@ const {
   buildServerNameAliases,
   findShadowedServerNames,
   isNormalizationSensitiveName,
+  buildMandatoryApproval,
 } = require('@librechat/api');
 const {
   Time,
@@ -227,6 +228,7 @@ async function processRequiredActions(client, requiredActions) {
     requiredActions,
   );
   const appConfig = client.req.config;
+  const mandatoryApproval = buildMandatoryApproval(appConfig?.mcpConfig, false);
   const toolDefinitions = (await getCachedTools()) ?? {};
   const seenToolkits = new Set();
   const tools = requiredActions
@@ -354,6 +356,19 @@ async function processRequiredActions(client, requiredActions) {
         output,
       };
     };
+
+    // Legacy Assistants never persist native approval actions: protected writes fail closed.
+    if (
+      mandatoryApproval.matches(currentAction.tool) ||
+      (mandatoryApproval.enabled && mandatoryApproval.isProgrammaticBridge(currentAction.tool))
+    ) {
+      promises.push(
+        handleToolOutput(
+          'Dieses Werkzeug benötigt eine ausdrückliche Freigabe im Webchat. Der Assistants-Aufruf ist gesperrt.',
+        ),
+      );
+      continue;
+    }
 
     if (!tool) {
       // throw new Error(`Tool ${currentAction.tool} not found.`);

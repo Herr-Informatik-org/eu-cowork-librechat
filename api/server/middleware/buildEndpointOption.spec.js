@@ -65,6 +65,25 @@ describe('buildEndpointOption - defaultParamsEndpoint parsing', () => {
     jest.clearAllMocks();
   });
 
+  it('uses the native agent builder for Office custom-provider cards', async () => {
+    mockGetEndpointsConfig.mockResolvedValue({ OfficeMock: { type: EModelEndpoint.custom } });
+    const req = createReq({
+      endpoint: 'OfficeMock',
+      endpointType: EModelEndpoint.custom,
+      model: 'office-model',
+    });
+    req.baseUrl = '/api/agents/office/chat';
+    const next = jest.fn();
+    await buildEndpointOption(req, createRes(), next);
+    expect(mockAgentBuildOptions).toHaveBeenCalledWith(
+      req,
+      'OfficeMock',
+      expect.objectContaining({ model: 'office-model' }),
+      EModelEndpoint.custom,
+    );
+    expect(next).toHaveBeenCalled();
+  });
+
   it('should pass defaultParamsEndpoint to parseCompactConvo and preserve maxOutputTokens', async () => {
     mockGetEndpointsConfig.mockResolvedValue({
       AnthropicClaude: {

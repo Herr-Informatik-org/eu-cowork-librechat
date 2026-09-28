@@ -28,7 +28,9 @@ const buildFunction = {
 async function buildEndpointOption(req, res, next) {
   const { endpoint, endpointType } = req.body;
   const isAgents =
-    isAgentsEndpoint(endpoint) || req.baseUrl.startsWith(EndpointURLs[EModelEndpoint.agents]);
+    isAgentsEndpoint(endpoint) ||
+    req.baseUrl.startsWith(EndpointURLs[EModelEndpoint.agents]) ||
+    req.baseUrl === '/api/agents/office/chat';
 
   let endpointsConfig;
   try {

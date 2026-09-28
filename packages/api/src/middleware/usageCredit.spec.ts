@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import type { Request, Response } from 'express';
 import {
   assertUsageCredit,
   creditExhausted,
@@ -17,13 +18,16 @@ const lookup = jest.fn();
 const savedFetch = global.fetch;
 beforeEach(() => {
   jest.clearAllMocks();
-  (mongoose.connection as any).db = { collection: () => ({ findOne: lookup }) };
+  mongoose.connection.db = {
+    collection: () => ({ findOne: lookup }),
+  } as unknown as typeof mongoose.connection.db;
   lookup.mockResolvedValue(policy);
   process.env.JWT_SECRET = 'unit-test-purpose-only';
   delete process.env.HOSTED_USAGE_REQUIRED;
-  global.fetch = jest
-    .fn()
-    .mockResolvedValue({ ok: true, json: async () => ({ usdMicros: 62_500_000 }) });
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ usdMicros: 62_500_000 }),
+  }) as unknown as typeof fetch;
 });
 afterEach(() => {
   global.fetch = savedFetch;
@@ -49,7 +53,7 @@ test('managed setup and unavailable metering fail closed', async () => {
   process.env.HOSTED_USAGE_REQUIRED = 'true';
   await expect(assertUsageCredit()).rejects.toThrow('eingerichtet');
   lookup.mockResolvedValue(policy);
-  (global.fetch as jest.Mock).mockRejectedValue(new Error('offline'));
+  (global.fetch as unknown as jest.Mock).mockRejectedValue(new Error('offline'));
   await expect(assertUsageCredit()).rejects.toThrow('offline');
   expect(await usageCreditHook()).toMatchObject({ preventContinuation: true, decision: 'deny' });
 });
@@ -57,6 +61,7 @@ test.each([
   '/api/ask/agents',
   '/api/ask/custom',
   '/api/agents/chat',
+  '/api/agents/office/chat',
   '/api/agents/v1/responses',
   '/api/agents/v1/chat/completions',
   '/api/assistants/chat',
@@ -64,19 +69,26 @@ test.each([
   const next = jest.fn();
   const json = jest.fn();
   const res = { status: jest.fn().mockReturnValue({ json }) };
-  await usageCreditMiddleware({ method: 'POST', originalUrl } as any, res as any, next);
+  await usageCreditMiddleware(
+    { method: 'POST', originalUrl } as Request,
+    res as unknown as Response,
+    next,
+  );
   expect(res.status).toHaveBeenCalledWith(402);
   expect(next).not.toHaveBeenCalled();
 });
-test.each(['/api/ask/abort', '/api/files', '/api/convos'])(
-  'files, history and cancellation remain accessible: %s',
-  async (originalUrl) => {
-    const next = jest.fn();
-    await usageCreditMiddleware({ method: 'POST', originalUrl } as any, {} as any, next);
-    expect(next).toHaveBeenCalled();
-    expect(global.fetch).not.toHaveBeenCalled();
-  },
-);
+test.each([
+  '/api/ask/abort',
+  '/api/files',
+  '/api/convos',
+  '/api/agents/office/chat/abort',
+  '/api/agents/office/files/images',
+])('files, history and cancellation remain accessible: %s', async (originalUrl) => {
+  const next = jest.fn();
+  await usageCreditMiddleware({ method: 'POST', originalUrl } as Request, {} as Response, next);
+  expect(next).toHaveBeenCalled();
+  expect(global.fetch).not.toHaveBeenCalled();
+});
 test('invalid prices and usage cannot silently reopen a trial', () => {
   expect(() => creditExhausted({ ...policy, usdChfRate: NaN }, 0)).toThrow();
   expect(() => creditExhausted(policy, -1)).toThrow();
@@ -91,8 +103,8 @@ test('tenant admin cannot alter hosted metering configuration through the native
       method: 'PATCH',
       originalUrl: '/api/admin/config/role/__base__/fields',
       get: () => '',
-    } as any,
-    res as any,
+    } as unknown as Request,
+    res as unknown as Response,
     next,
   );
   expect(res.status).toHaveBeenCalledWith(403);

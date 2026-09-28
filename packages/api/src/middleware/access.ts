@@ -18,7 +18,10 @@ export function skipAgentCheck(req?: ServerRequest): boolean {
     return false;
   }
 
-  if (!req.originalUrl?.includes(EndpointURLs[EModelEndpoint.agents])) {
+  const isNativeAgentRoute =
+    req.originalUrl?.includes(EndpointURLs[EModelEndpoint.agents]) ||
+    /^\/api\/agents\/office\/chat(?:\/|$)/.test(req.originalUrl?.split('?')[0] ?? '');
+  if (!isNativeAgentRoute) {
     return false;
   }
   return !isAgentsEndpoint(req.body.endpoint);

@@ -473,3 +473,55 @@ describe('createMCPTool', () => {
     expect(reinitMCPServer).not.toHaveBeenCalled();
   });
 });
+
+describe('protected MCP endpoint aliases', () => {
+  const toolKey = 'create-event_mcp_personal';
+  const definition = {
+    type: 'function',
+    function: { name: toolKey, parameters: { type: 'object', properties: {} } },
+  };
+  const admin = {
+    office: {
+      type: 'streamable-http',
+      url: 'http://office/mcp',
+      requireToolApproval: ['create-*'],
+    },
+  };
+  const params = {
+    user: { id: 'user-1', role: 'USER' },
+    serverName: 'personal',
+    toolKey,
+    config: { type: 'streamable-http', source: 'user', url: 'http://OFFICE:80/mcp/?alias=1' },
+    availableTools: { [toolKey]: definition },
+    provider: 'openAI',
+    mcpPermissionContext: { canUseServers: async () => true },
+  };
+  beforeEach(() => {
+    jest.clearAllMocks();
+    require('@librechat/api').isMCPDomainAllowed.mockResolvedValue(true);
+  });
+  test('existing user-managed alias is blocked before tool registration/reconnection', async () => {
+    getAppConfig.mockResolvedValue({ mcpConfig: admin });
+    await expect(createMCPTool(params)).rejects.toThrow(/Persönliche Aliase/);
+    expect(reinitMCPServer).not.toHaveBeenCalled();
+  });
+  test('custom-user-variable URL is resolved before checking the protected endpoint', async () => {
+    getAppConfig.mockResolvedValue({ mcpConfig: admin });
+    await expect(
+      createMCPTool({
+        ...params,
+        config: { ...params.config, url: '{{TARGET}}' },
+        userMCPAuthMap: { mcp_personal: { TARGET: 'http://office/mcp' } },
+      }),
+    ).rejects.toThrow(/Persönliche Aliase/);
+  });
+  test('cached alias is checked again before remote invocation', async () => {
+    getAppConfig.mockResolvedValue({});
+    const toolInstance = await createMCPTool(params);
+    getAppConfig.mockResolvedValue({ mcpConfig: admin });
+    await expect(toolInstance.invoke({}, { configurable: { user: params.user } })).rejects.toThrow(
+      /Persönliche Aliase/,
+    );
+    expect(require('~/config').getMCPManager).not.toHaveBeenCalled();
+  });
+});

@@ -82,6 +82,15 @@ describe('access middleware', () => {
       expect(skipAgentCheck(mockReq as Request)).toBe(true);
     });
 
+    it.each([
+      ['OfficeMock', true],
+      [EModelEndpoint.agents, false],
+    ])('keeps native feature checks for Office endpoint %s', (endpoint, expected) => {
+      mockReq.body = { endpoint };
+      mockReq.originalUrl = '/api/agents/office/chat';
+      expect(skipAgentCheck(mockReq as Request)).toBe(expected);
+    });
+
     it('should return false when is an agents endpoint', () => {
       mockReq.body = { endpoint: EModelEndpoint.agents };
       mockReq.originalUrl = EndpointURLs[EModelEndpoint.agents];
