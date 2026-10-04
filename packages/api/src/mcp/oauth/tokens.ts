@@ -59,6 +59,8 @@ interface GetTokensParams {
       identifier: string;
       clientInfo?: OAuthClientInformation;
       storedTokenEndpoint?: string;
+      storedAuthorizationEndpoint?: string;
+      resourceMode?: OAuthStoredClientMetadata['resource_mode'];
       storedAuthMethods?: string[];
       storedServerUrl?: string;
       clientSource?: OAuthStoredClientMetadata['client_source'];
@@ -822,6 +824,8 @@ export class MCPTokenStorage {
       let clientInfoData;
       let storedClientMetadata: Partial<OAuthStoredClientMetadata> | undefined;
       let storedTokenEndpoint: string | undefined;
+      let storedAuthorizationEndpoint: string | undefined;
+      let resourceMode: OAuthStoredClientMetadata['resource_mode'];
       let storedAuthMethods: string[] | undefined;
       let storedServerUrl: string | undefined;
       let clientSource: OAuthStoredClientMetadata['client_source'] | undefined;
@@ -846,6 +850,17 @@ export class MCPTokenStorage {
             if (typeof raw.token_endpoint === 'string') {
               storedTokenEndpoint = raw.token_endpoint;
             }
+            if (typeof raw.authorization_endpoint === 'string') {
+              storedAuthorizationEndpoint = raw.authorization_endpoint;
+            }
+            if (
+              raw.resource_mode !== undefined &&
+              raw.resource_mode !== 'mcp' &&
+              raw.resource_mode !== 'microsoft_graph'
+            ) {
+              throw new ReauthenticationRequiredError(serverName, 'binding');
+            }
+            resourceMode = raw.resource_mode;
             if (Array.isArray(raw.token_endpoint_auth_methods_supported)) {
               storedAuthMethods = raw.token_endpoint_auth_methods_supported as string[];
             }
@@ -882,6 +897,8 @@ export class MCPTokenStorage {
         identifier,
         clientInfo,
         storedTokenEndpoint,
+        storedAuthorizationEndpoint,
+        resourceMode,
         storedAuthMethods,
         storedServerUrl,
         clientSource,

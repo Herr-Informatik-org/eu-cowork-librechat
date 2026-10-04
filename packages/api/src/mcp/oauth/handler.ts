@@ -1,7 +1,7 @@
 import { randomBytes } from 'crypto';
 import { logger } from '@librechat/data-schemas';
 import { OAuthMetadataSchema } from '@modelcontextprotocol/sdk/shared/auth.js';
-import { TokenExchangeMethodEnum, type MCPOptions } from 'librechat-data-provider';
+import { MicrosoftGraphOAuthOptionsSchema, TokenExchangeMethodEnum } from 'librechat-data-provider';
 import {
   checkResourceAllowed,
   resourceUrlFromServerUrl,
@@ -14,6 +14,7 @@ import {
   discoverOAuthProtectedResourceMetadata,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport';
+import type { MCPOptions, OAuthResourceMode } from 'librechat-data-provider';
 import type { TokenMethods } from '@librechat/data-schemas';
 import type {
   OAuthClientInformation,
@@ -484,6 +485,7 @@ export class MCPOAuthHandler {
     resourceMetadata?: OAuthProtectedResourceMetadata,
     serverUrl?: string,
     clientSource?: OAuthClientSource,
+    resourceMode?: OAuthResourceMode,
   ): OAuthStoredClientMetadata | undefined {
     if (!metadata || !serverUrl || !clientSource) {
       return undefined;
@@ -492,6 +494,7 @@ export class MCPOAuthHandler {
       ...metadata,
       server_url: new URL(serverUrl).href,
       client_source: clientSource,
+      resource_mode: resourceMode ?? 'mcp',
     };
     if (resourceMetadata?.resource) {
       storedMetadata.resource = new URL(resourceMetadata.resource).href;
@@ -539,6 +542,24 @@ export class MCPOAuthHandler {
       });
     }
 
+    const resourceMode = stored.resource_mode ?? 'mcp';
+    if (resourceMode !== (config?.resource_mode ?? 'mcp')) {
+      reauthenticate('verwendet einen anderen OAuth-Ressourcenmodus');
+    }
+    this.assertResourceModeConfig(config);
+    if (resourceMode === 'microsoft_graph') {
+      if (
+        stored.client_source !== 'configured' ||
+        !stored.resource ||
+        !stored.authorization_endpoint ||
+        !this.oauthUrlsMatch(stored.authorization_endpoint, config!.authorization_url!) ||
+        client.scope?.trim().split(/\s+/).sort().join(' ') !==
+          config!.scope?.trim().split(/\s+/).sort().join(' ')
+      ) {
+        reauthenticate('enthält keine passende vollständige Microsoft-Graph-Bindung');
+      }
+    }
+
     if (stored.client_source === 'dynamic') {
       if (config?.client_id) {
         reauthenticate('was dynamically registered but the server now uses a configured client');
@@ -584,6 +605,15 @@ export class MCPOAuthHandler {
     }
     if (storedAuthMethod !== configuredAuthMethod) {
       reauthenticate('no longer matches the current configured token authentication method');
+    }
+  }
+
+  private static assertResourceModeConfig(config?: MCPOptions['oauth']): void {
+    if (config?.resource_mode === undefined || config.resource_mode === 'mcp') {
+      return;
+    }
+    if (!MicrosoftGraphOAuthOptionsSchema.safeParse(config).success) {
+      throw new Error('[MCPOAuth] Ungültige Microsoft-Graph-OAuth-Konfiguration.');
     }
   }
 
@@ -728,6 +758,8 @@ export class MCPOAuthHandler {
 
     try {
       this.assertNoUnpinnedClientSecret(config);
+      this.assertResourceModeConfig(config);
+      const resourceMode = config?.resource_mode ?? 'mcp';
 
       if (config?.authorization_url && config?.token_url && config?.client_id) {
         logger.debug(`[MCPOAuth] Using pre-configured OAuth settings for ${serverName}`);
@@ -789,11 +821,18 @@ export class MCPOAuthHandler {
             }
           }
         } catch (error) {
+          if (resourceMode === 'microsoft_graph') {
+            throw error;
+          }
           /** Preserve compatibility with OAuth providers that do not publish metadata. */
           logger.warn(
             `[MCPOAuth] OAuth metadata discovery failed for pre-configured client ${serverName}; using configured endpoints and defaults`,
             { error },
           );
+        }
+
+        if (resourceMode === 'microsoft_graph' && !resourceMetadata?.resource) {
+          throw new Error('[MCPOAuth] Microsoft Graph benötigt gebundene MCP-Ressourcenmetadaten.');
         }
 
         const skipCodeChallengeCheck =
@@ -881,7 +920,7 @@ export class MCPOAuthHandler {
         authorizationUrl.searchParams.set('state', state);
         logger.debug(`[MCPOAuth] Added state parameter to authorization URL`);
 
-        if (resourceMetadata?.resource) {
+        if (resourceMode === 'mcp' && resourceMetadata?.resource) {
           const canonicalResource = new URL(resourceMetadata.resource).href;
           authorizationUrl.searchParams.set('resource', canonicalResource);
           logger.debug(
@@ -907,6 +946,7 @@ export class MCPOAuthHandler {
           codeVerifier,
           clientInfo,
           clientSource: 'configured',
+          resourceMode,
           metadata,
           resourceMetadata,
           ...(allowedDomains !== undefined && { allowedDomains }),
@@ -1113,6 +1153,7 @@ export class MCPOAuthHandler {
         codeVerifier,
         clientInfo,
         clientSource,
+        resourceMode,
         metadata,
         resourceMetadata,
         ...(allowedDomains !== undefined && { allowedDomains }),
@@ -1191,13 +1232,30 @@ export class MCPOAuthHandler {
         }
       }
 
+      if (metadata.resourceMode === 'microsoft_graph') {
+        if (metadata.clientSource !== 'configured' || !resource) {
+          throw new Error(
+            '[MCPOAuth] Unvollständige Microsoft-Graph-OAuth-Bindung im Anmeldefluss.',
+          );
+        }
+        this.assertResourceModeConfig({
+          resource_mode: metadata.resourceMode,
+          client_id: metadata.clientInfo.client_id,
+          authorization_url: metadata.metadata.authorization_endpoint,
+          token_url: metadata.metadata.token_endpoint,
+          scope: metadata.clientInfo.scope,
+        });
+      } else if (metadata.resourceMode !== undefined && metadata.resourceMode !== 'mcp') {
+        throw new Error('[MCPOAuth] Ungültiger OAuth-Ressourcenmodus im Anmeldefluss.');
+      }
+
       const tokens = await exchangeAuthorization(metadata.serverUrl, {
         redirectUri: metadata.clientInfo.redirect_uris?.[0] || this.getDefaultRedirectUri(),
         metadata: metadata.metadata as unknown as SDKOAuthMetadata,
         clientInformation: metadata.clientInfo,
         codeVerifier: metadata.codeVerifier,
         authorizationCode,
-        resource,
+        resource: metadata.resourceMode === 'microsoft_graph' ? undefined : resource,
         fetchFn: this.createOAuthFetch(
           oauthHeaders,
           metadata.clientInfo,
@@ -1597,6 +1655,8 @@ export class MCPOAuthHandler {
       serverUrl?: string;
       clientInfo?: OAuthClientInformation;
       storedTokenEndpoint?: string;
+      storedAuthorizationEndpoint?: string;
+      resourceMode?: OAuthResourceMode;
       storedAuthMethods?: string[];
       storedServerUrl?: string;
       clientSource?: OAuthClientSource;
@@ -1611,6 +1671,21 @@ export class MCPOAuthHandler {
     logger.debug(`[MCPOAuth] Refreshing tokens for ${metadata.serverName}`);
 
     try {
+      this.assertResourceModeConfig(config);
+      const resourceMode = metadata.resourceMode ?? 'mcp';
+      if (resourceMode !== (config?.resource_mode ?? 'mcp')) {
+        throw new Error(
+          '[MCPOAuth] Der OAuth-Ressourcenmodus hat sich geändert; bitte neu anmelden.',
+        );
+      }
+      if (
+        resourceMode === 'microsoft_graph' &&
+        (!metadata.clientInfo?.client_id || !metadata.storedServerUrl || !metadata.clientSource)
+      ) {
+        throw new Error(
+          '[MCPOAuth] Unvollständige Microsoft-Graph-OAuth-Bindung; bitte neu anmelden.',
+        );
+      }
       /** If we have stored client information from the original flow, use that first */
       if (metadata.clientInfo?.client_id) {
         logger.debug(
@@ -1645,6 +1720,8 @@ export class MCPOAuthHandler {
               server_url: metadata.storedServerUrl ?? '',
               client_source: metadata.clientSource,
               resource: metadata.resource,
+              resource_mode: resourceMode,
+              authorization_endpoint: metadata.storedAuthorizationEndpoint,
             },
             config,
           );
@@ -1749,7 +1826,9 @@ export class MCPOAuthHandler {
         if (metadata.clientInfo.scope) {
           body.append('scope', metadata.clientInfo.scope);
         }
-        this.appendResourceParameter(body, metadata.resource);
+        if (resourceMode === 'mcp') {
+          this.appendResourceParameter(body, metadata.resource);
+        }
 
         /**
          * Forward Auth0-style `audience` on refresh by default — Auth0 strips the

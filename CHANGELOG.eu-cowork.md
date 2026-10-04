@@ -1,5 +1,15 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-04 — Direkte Microsoft-Graph-Anmeldung für interne MCP-Server
+
+- Administrativ konfiguriertes `oauth.resource_mode: microsoft_graph` lässt den
+  OAuth-Parameter `resource` bei Anmeldung, Code-Austausch und Token-Erneuerung weg.
+  Das behebt `invalid_target` bei Entra-v2-Endpunkten mit interner MCP-Adresse.
+- Der Modus setzt explizite Entra-Endpunkte desselben Mandanten, eine Client-ID und
+  Graph-Berechtigungen voraus. Persönlich angelegte Server können ihn nicht setzen.
+- Die interne MCP-Adresse bleibt an Ressourcenmetadaten und gespeicherte Anmeldungen
+  gebunden. Moduswechsel und unvollständige Altbestände erfordern eine neue Anmeldung.
+
 ## 2026-09-28 — Outlook-Transport mit nativer Chat-Persistenz
 
 - Persönliche Outlook-API-Schlüssel erhalten einen eng begrenzten Transport für

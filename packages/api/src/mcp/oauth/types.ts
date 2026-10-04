@@ -1,4 +1,5 @@
 import type { OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
+import type { OAuthResourceMode } from 'librechat-data-provider';
 import type { FlowMetadata } from '~/flow/types';
 
 export interface OAuthMetadata {
@@ -36,8 +37,10 @@ export interface OAuthStoredClientMetadata extends OAuthMetadata {
   server_url: string;
   /** Whether the client came from server configuration or dynamic client registration. */
   client_source: OAuthClientSource;
-  /** Canonical OAuth resource indicator used when the authorization code was exchanged. */
+  /** Bound MCP resource, retained even when Microsoft Graph omits the wire parameter. */
   resource?: string;
+  /** OAuth resource policy captured when the credentials were issued; absent means MCP. */
+  resource_mode?: OAuthResourceMode;
 }
 
 export interface OAuthProtectedResourceMetadata {
@@ -102,6 +105,8 @@ export interface MCPOAuthFlowMetadata extends FlowMetadata {
   clientInfo?: OAuthClientInformation;
   /** Whether this flow uses a configured client or a dynamically registered client. */
   clientSource?: OAuthClientSource;
+  /** Trusted resource policy captured at authorization initiation. */
+  resourceMode?: OAuthResourceMode;
   metadata?: OAuthMetadata;
   resourceMetadata?: OAuthProtectedResourceMetadata;
   authorizationUrl?: string;

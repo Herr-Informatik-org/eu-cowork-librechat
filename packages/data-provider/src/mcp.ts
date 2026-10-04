@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { TokenExchangeMethodEnum } from './types/agents';
 import { extractEnvVariable } from './utils';
 
+const OAuthResourceModeSchema = z.enum(['mcp', 'microsoft_graph']);
+export type OAuthResourceMode = z.infer<typeof OAuthResourceModeSchema>;
+
 const validateOAuthClientCredentials = (
   oauth: {
     client_id?: string;
@@ -47,6 +50,8 @@ const OAuthOptionsBaseSchema = z.object({
   client_secret: z.string().optional(),
   /** OAuth scopes to request */
   scope: z.string().optional(),
+  /** Admin-only resource binding; omitted values preserve standard MCP OAuth behavior. */
+  resource_mode: OAuthResourceModeSchema.optional(),
   /** OAuth redirect URI (defaults to /api/mcp/{serverName}/oauth/callback) */
   redirect_uri: z
     .string()
@@ -112,7 +117,103 @@ const OAuthOptionsBaseSchema = z.object({
   revocation_endpoint_auth_methods_supported: z.array(z.string()).optional(),
 });
 
-const OAuthOptionsSchema = OAuthOptionsBaseSchema.superRefine(validateOAuthClientCredentials);
+const microsoftTenantPattern =
+  /^(?:common|organizations|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
+const microsoftEndpointPattern =
+  /^https:\/\/login\.microsoftonline\.com\/([^/]+)\/oauth2\/v2\.0\/(authorize|token)$/;
+const microsoftGraphScopePattern =
+  /^(?:https:\/\/graph\.microsoft\.com\/)?(?:[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)+|\.default)$/;
+const oidcScopes: ReadonlySet<string> = new Set(['openid', 'profile', 'email', 'offline_access']);
+
+const validateMicrosoftGraphOAuthOptions = (
+  oauth: z.infer<typeof OAuthOptionsBaseSchema>,
+  ctx: z.RefinementCtx,
+): void => {
+  if (oauth.resource_mode !== 'microsoft_graph') {
+    return;
+  }
+
+  if (!oauth.client_id?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['client_id'],
+      message: 'Microsoft-Graph-OAuth benötigt eine konfigurierte client_id.',
+    });
+  }
+
+  const tenants: string[] = [];
+  for (const [field, action] of [
+    ['authorization_url', 'authorize'],
+    ['token_url', 'token'],
+  ] as const) {
+    const endpoint = oauth[field];
+    const match = endpoint?.match(microsoftEndpointPattern);
+    if (
+      !match ||
+      match[0] !== endpoint ||
+      match[2] !== action ||
+      match[1].match(microsoftTenantPattern)?.[0] !== match[1]
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [field],
+        message:
+          'Microsoft-Graph-OAuth benötigt einen HTTPS-Endpunkt unter login.microsoftonline.com/{Mandant}/oauth2/v2.0; erlaubt sind Mandanten-GUIDs, common und organizations, ohne URL-Zusätze.',
+      });
+      continue;
+    }
+    tenants.push(match[1].toLowerCase());
+  }
+
+  if (tenants.length === 2 && tenants[0] !== tenants[1]) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['token_url'],
+      message: 'Die Microsoft-Graph-OAuth-Endpunkte müssen denselben Mandanten verwenden.',
+    });
+  }
+
+  let hasGraphScope = false;
+  let hasInvalidScope = false;
+  const resolvedScope = extractEnvVariable(oauth.scope ?? '');
+  for (const scope of resolvedScope.trim().split(/\s+/)) {
+    if (oidcScopes.has(scope)) {
+      continue;
+    }
+    if (microsoftGraphScopePattern.test(scope)) {
+      hasGraphScope = true;
+      continue;
+    }
+    hasInvalidScope = true;
+  }
+  if (!hasGraphScope || hasInvalidScope) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['scope'],
+      message:
+        'Microsoft-Graph-OAuth benötigt mindestens einen Graph-Scope; zusätzlich sind nur openid, profile, email und offline_access erlaubt.',
+    });
+  }
+
+  if (Object.prototype.hasOwnProperty.call(oauth, 'audience')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['audience'],
+      message: 'Microsoft-Graph-OAuth erlaubt keine audience-Konfiguration.',
+    });
+  }
+};
+
+/** Validates trusted Graph configuration again before starting or refreshing OAuth. */
+export const MicrosoftGraphOAuthOptionsSchema = OAuthOptionsBaseSchema.extend({
+  resource_mode: z.literal('microsoft_graph'),
+})
+  .superRefine(validateOAuthClientCredentials)
+  .superRefine(validateMicrosoftGraphOAuthOptions);
+
+const OAuthOptionsSchema = OAuthOptionsBaseSchema.superRefine(
+  validateOAuthClientCredentials,
+).superRefine(validateMicrosoftGraphOAuthOptions);
 
 const BLOCKED_USER_OAUTH_ENDPOINT_PARAMS = ['audience', 'resource'] as const;
 const envVarPattern = /\$\{[^}]+\}/;
@@ -138,6 +239,7 @@ const userOAuthEndpointUrlSchema = z
 const UserOAuthOptionsSchema = OAuthOptionsBaseSchema.omit({
   audience: true,
   forward_audience_on_refresh: true,
+  resource_mode: true,
 })
   .extend({
     authorization_url: userOAuthEndpointUrlSchema.optional(),
@@ -146,6 +248,7 @@ const UserOAuthOptionsSchema = OAuthOptionsBaseSchema.omit({
     revocation_endpoint: userOAuthEndpointUrlSchema.optional(),
     audience: z.never().optional(),
     forward_audience_on_refresh: z.never().optional(),
+    resource_mode: z.never().optional(),
   })
   .superRefine(validateOAuthClientCredentials);
 
@@ -419,7 +522,7 @@ const userUrlSchema = (protocolCheck: (val: string) => boolean, message: string)
  * MCP Server configuration that comes from UI/API input only.
  * Omits server-managed fields like startup, timeout, customUserVars, etc.
  * Allows: title, description, url, iconPath, oauth (user credentials).
- * Admin-only OAuth audience fields are rejected for user-managed servers.
+ * Admin-only OAuth audience and resource mode fields are rejected for user-managed servers.
  *
  * SECURITY: Stdio transport is intentionally excluded from user input.
  * Stdio allows arbitrary command execution and should only be configured

@@ -4,6 +4,7 @@ import {
   StreamableHTTPOptionsSchema,
   MCPServerUserInputSchema,
   MCP_USER_INPUT_FIELDS,
+  MicrosoftGraphOAuthOptionsSchema,
 } from '../src/mcp';
 
 describe('MCPOptionsSchema', () => {
@@ -701,6 +702,250 @@ describe('MCP schemas', () => {
         expect(result.data.oauth.forward_audience_on_refresh).toBeUndefined();
       }
     });
+  });
+});
+
+describe('administrator-configured Microsoft Graph OAuth', () => {
+  const server = { type: 'streamable-http', url: 'https://office.example/mcp' };
+  const graphOAuth = {
+    resource_mode: 'microsoft_graph' as const,
+    client_id: 'graph-client-id',
+    authorization_url: 'https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize',
+    token_url: 'https://login.microsoftonline.com/organizations/oauth2/v2.0/token',
+    scope: 'openid profile email offline_access User.Read Sites.Read.All',
+  };
+
+  it.each(['common', 'organizations', '11111111-2222-3333-4444-aaaaaaaaaaaa'])(
+    'accepts the Graph resource mode for tenant %s in administrator config and runtime validation',
+    (tenant) => {
+      const oauth = {
+        ...graphOAuth,
+        authorization_url: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`,
+        token_url: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
+      };
+      expect(MCPOptionsSchema.parse({ ...server, oauth }).oauth).toEqual(oauth);
+      expect(MicrosoftGraphOAuthOptionsSchema.parse(oauth)).toEqual(oauth);
+    },
+  );
+
+  it.each([
+    'User.Read',
+    'Sites.Read.All offline_access',
+    '.default',
+    'https://graph.microsoft.com/.default offline_access',
+    'https://graph.microsoft.com/User.Read https://graph.microsoft.com/Sites.Read.All openid',
+  ])('accepts Graph scope %s', (scope) => {
+    const oauth = { ...graphOAuth, scope };
+    expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(true);
+    expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(true);
+  });
+
+  describe('administrator scope environment references', () => {
+    let originalScope: string | undefined;
+    let originalUserScope: string | undefined;
+
+    beforeEach(() => {
+      originalScope = process.env.MS365_OFFICE_OAUTH_SCOPE;
+      originalUserScope = process.env.userVar;
+      delete process.env.MS365_OFFICE_OAUTH_SCOPE;
+      delete process.env.userVar;
+    });
+
+    afterEach(() => {
+      if (originalScope === undefined) {
+        delete process.env.MS365_OFFICE_OAUTH_SCOPE;
+      } else {
+        process.env.MS365_OFFICE_OAUTH_SCOPE = originalScope;
+      }
+      if (originalUserScope === undefined) {
+        delete process.env.userVar;
+      } else {
+        process.env.userVar = originalUserScope;
+      }
+    });
+
+    it('validates resolved administrator scopes while preserving the configured reference', () => {
+      process.env.MS365_OFFICE_OAUTH_SCOPE = graphOAuth.scope;
+      const oauth = { ...graphOAuth, scope: '${MS365_OFFICE_OAUTH_SCOPE}' };
+
+      expect(MCPOptionsSchema.parse({ ...server, oauth }).oauth).toEqual(oauth);
+      expect(MicrosoftGraphOAuthOptionsSchema.parse(oauth)).toEqual(oauth);
+      expect(MCPServerUserInputSchema.safeParse({ ...server, oauth }).success).toBe(false);
+    });
+
+    it('rejects a reference whose administrator environment variable is unset', () => {
+      const oauth = { ...graphOAuth, scope: '${MS365_OFFICE_OAUTH_SCOPE}' };
+
+      expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(false);
+      expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+    });
+
+    it.each(['', ' ', 'openid offline_access', 'api://custom-resource/access_as_user'])(
+      'rejects invalid resolved administrator scope %p',
+      (scope) => {
+        process.env.MS365_OFFICE_OAUTH_SCOPE = scope;
+        const oauth = { ...graphOAuth, scope: '${MS365_OFFICE_OAUTH_SCOPE}' };
+
+        expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(false);
+        expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+      },
+    );
+
+    it('rejects unresolved custom user variables even when another Graph scope is present', () => {
+      const oauth = { ...graphOAuth, scope: 'User.Read ${userVar}' };
+      const customUserVars = { userVar: { title: 'Scope', description: 'Benutzereingabe' } };
+
+      expect(MCPOptionsSchema.safeParse({ ...server, oauth, customUserVars }).success).toBe(false);
+      expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+    });
+  });
+
+  it.each([undefined, '', ' ', '\t\n'])(
+    'rejects a missing or blank client_id (%p)',
+    (client_id) => {
+      const oauth = { ...graphOAuth, client_id };
+      expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(false);
+      expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+    },
+  );
+
+  describe.each([
+    ['authorization_url', 'authorize'],
+    ['token_url', 'token'],
+  ] as const)('%s validation', (field, action) => {
+    it.each([
+      undefined,
+      '',
+      'http://login.microsoftonline.com/organizations/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com.evil.example/organizations/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com@evil.example/organizations/oauth2/v2.0/ACTION',
+      'https://user:password@login.microsoftonline.com/organizations/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com:443/organizations/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com:8443/organizations/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com/consumers/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com/tenant.example.com/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com/tenant/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com/organizations/oauth2/ACTION',
+      'https://login.microsoftonline.com/organizations/oauth2/v2.0/ACTION/',
+      'https://login.microsoftonline.com/organizations/oauth2/v2.0/ACTION?prompt=consent',
+      'https://login.microsoftonline.com/organizations/oauth2/v2.0/ACTION?',
+      'https://login.microsoftonline.com/organizations/oauth2/v2.0/ACTION#fragment',
+      'https://login.microsoftonline.com/organizations/oauth2/v2.0/ACTION#',
+      'https://login.microsoftonline.com/%6frganizations/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com/organizations%2f/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com/organizations/oauth2/v2.0/%61CTION',
+      'https://login.microsoftonline.com/organizations/../organizations/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com/organizations/%2e%2e/organizations/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com\\organizations\\oauth2\\v2.0\\ACTION',
+      'https://login.micro\nsoftonline.com/organizations/oauth2/v2.0/ACTION',
+      'https://login%2emicrosoftonline.com/organizations/oauth2/v2.0/ACTION',
+      'https://login.microsoftonline.com./organizations/oauth2/v2.0/ACTION',
+    ])('rejects unsafe or missing endpoint %p', (endpoint) => {
+      const oauth = { ...graphOAuth, [field]: endpoint?.replace('ACTION', action) };
+      expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(false);
+      expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+    });
+
+    it('requires the endpoint for its intended action', () => {
+      const oauth = {
+        ...graphOAuth,
+        [field]: `https://login.microsoftonline.com/organizations/oauth2/v2.0/${action === 'authorize' ? 'token' : 'authorize'}`,
+      };
+      expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(false);
+      expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+    });
+  });
+
+  it('requires both endpoints to use the same tenant', () => {
+    const oauth = {
+      ...graphOAuth,
+      token_url: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+    };
+    expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(false);
+    expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+  });
+
+  it('compares tenant GUIDs without regard to letter case', () => {
+    const oauth = {
+      ...graphOAuth,
+      authorization_url:
+        'https://login.microsoftonline.com/11111111-2222-3333-4444-AAAAAAAAAAAA/oauth2/v2.0/authorize',
+      token_url:
+        'https://login.microsoftonline.com/11111111-2222-3333-4444-aaaaaaaaaaaa/oauth2/v2.0/token',
+    };
+    expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(true);
+    expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(true);
+  });
+
+  it('rejects tenant line breaks even when both endpoints share them', () => {
+    const oauth = {
+      ...graphOAuth,
+      authorization_url: 'https://login.microsoftonline.com/organizations\n/oauth2/v2.0/authorize',
+      token_url: 'https://login.microsoftonline.com/organizations\n/oauth2/v2.0/token',
+    };
+    expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(false);
+    expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+  });
+
+  it.each([
+    undefined,
+    '',
+    ' ',
+    'openid profile email offline_access',
+    'read',
+    'User.Read api://custom-resource/access_as_user',
+    'https://tenant.sharepoint.com/Sites.Read.All',
+    'https://graph.microsoft.com.evil.example/User.Read',
+    'https://graph.microsoft.com@evil.example/User.Read',
+    'https://graph.microsoft.com:443/User.Read',
+    'http://graph.microsoft.com/User.Read',
+    'https://graph.microsoft.com/',
+    'https://graph.microsoft.com/openid',
+    'https://graph.microsoft.com/User.Read?resource=other',
+    'https://graph.microsoft.com/User.Read#fragment',
+    'https://graph.microsoft.com/../User.Read',
+    'https://graph.microsoft.com/%55ser.Read',
+    'https://graph%2emicrosoft.com/User.Read',
+    'User..Read',
+    'User.Read/',
+    'User.Read custom_scope',
+  ])('rejects scopes outside Graph and OIDC or without a Graph permission (%p)', (scope) => {
+    const oauth = { ...graphOAuth, scope };
+    expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(false);
+    expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+  });
+
+  it.each(['https://graph.microsoft.com', '', undefined])(
+    'rejects an explicit audience even when empty or undefined (%p)',
+    (audience) => {
+      const oauth = { ...graphOAuth, audience };
+      expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(false);
+      expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+    },
+  );
+
+  it.each(['mcp', 'microsoft_graph', 'other', null])(
+    'rejects resource_mode %p in user-managed configuration',
+    (resource_mode) => {
+      expect(
+        MCPServerUserInputSchema.safeParse({
+          ...server,
+          oauth: { ...graphOAuth, resource_mode },
+        }).success,
+      ).toBe(false);
+    },
+  );
+
+  it('rejects unknown resource modes in administrator and runtime schemas', () => {
+    const oauth = { ...graphOAuth, resource_mode: 'custom' };
+    expect(MCPOptionsSchema.safeParse({ ...server, oauth }).success).toBe(false);
+    expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
+  });
+
+  it.each([undefined, 'mcp'])('preserves standard OAuth with resource_mode %p', (resource_mode) => {
+    const oauth = { client_id: 'public-client', scope: 'read', resource_mode };
+    expect(MCPOptionsSchema.parse({ ...server, oauth }).oauth).toEqual(oauth);
+    expect(MicrosoftGraphOAuthOptionsSchema.safeParse(oauth).success).toBe(false);
   });
 });
 

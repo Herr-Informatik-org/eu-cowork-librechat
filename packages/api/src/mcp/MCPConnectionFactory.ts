@@ -569,6 +569,8 @@ export class MCPConnectionFactory {
           oauth?.client_secret,
           oauth?.authorization_url,
           oauth?.token_url,
+          oauth?.resource_mode ?? 'mcp',
+          oauth?.scope,
           oauth?.token_exchange_method,
           oauth?.token_endpoint_auth_methods_supported,
         ]),
@@ -656,6 +658,8 @@ export class MCPConnectionFactory {
       identifier: string;
       clientInfo?: OAuthClientInformation;
       storedTokenEndpoint?: string;
+      storedAuthorizationEndpoint?: string;
+      resourceMode?: OAuthStoredClientMetadata['resource_mode'];
       storedAuthMethods?: string[];
       storedServerUrl?: string;
       clientSource?: OAuthClientSource;
@@ -671,6 +675,8 @@ export class MCPConnectionFactory {
           serverName: metadata.serverName,
           clientInfo: metadata.clientInfo,
           storedTokenEndpoint: metadata.storedTokenEndpoint,
+          storedAuthorizationEndpoint: metadata.storedAuthorizationEndpoint,
+          resourceMode: metadata.resourceMode,
           storedAuthMethods: metadata.storedAuthMethods,
           storedServerUrl: metadata.storedServerUrl,
           clientSource: metadata.clientSource,
@@ -892,6 +898,7 @@ export class MCPConnectionFactory {
           meta?.resourceMetadata,
           meta?.serverUrl,
           meta?.clientSource,
+          meta?.resourceMode,
         ),
         this.serverConfig.oauth,
       );

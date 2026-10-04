@@ -425,6 +425,7 @@ router.get('/:serverName/oauth/callback', async (req, res) => {
                   flowState.resourceMetadata,
                   flowState.serverUrl,
                   flowState.clientSource,
+                  flowState.resourceMode,
                 ),
               })) ?? exchangedTokens;
             logger.debug('[MCP OAuth] Stored OAuth tokens before completing callback flow', {
