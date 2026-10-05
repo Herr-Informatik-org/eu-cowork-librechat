@@ -1,5 +1,13 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-05 — Bestehende Microsoft-Zustimmung bei MCP-Anmeldung nutzen
+
+- Im explizit administrativ konfigurierten Microsoft-Graph-Modus wird keine erneute
+  Zustimmung durch `prompt=consent` erzwungen. Entra kann vorhandene
+  Administratorfreigaben nutzen und prüft weiterhin die angeforderten Berechtigungen.
+- `offline_access`, persönliche Anmeldung, State und PKCE bleiben erhalten.
+  Andere OAuth-Anbieter und die dynamische MCP-Registrierung bleiben unverändert.
+
 ## 2026-10-04 — Direkte Microsoft-Graph-Anmeldung für interne MCP-Server
 
 - Administrativ konfiguriertes `oauth.resource_mode: microsoft_graph` lässt den

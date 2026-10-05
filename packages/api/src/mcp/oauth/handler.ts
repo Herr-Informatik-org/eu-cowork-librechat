@@ -916,6 +916,11 @@ export class MCPOAuthHandler {
           scope: config.scope,
         });
 
+        /** Entra must evaluate existing grants; SDK-forced consent can block approved users. */
+        if (resourceMode === 'microsoft_graph') {
+          authorizationUrl.searchParams.delete('prompt');
+        }
+
         /** Add cryptographic state parameter to the authorization URL */
         authorizationUrl.searchParams.set('state', state);
         logger.debug(`[MCPOAuth] Added state parameter to authorization URL`);

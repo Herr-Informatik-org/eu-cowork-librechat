@@ -1,4 +1,5 @@
 import { Keyv } from 'keyv';
+import { createHash } from 'node:crypto';
 import { MCPOptionsSchema } from 'librechat-data-provider';
 import type { MCPOptions, OAuthResourceMode } from 'librechat-data-provider';
 import type { MCPOAuthFlowMetadata, MCPOAuthTokens } from '~/mcp/oauth';
@@ -163,6 +164,7 @@ describe('Microsoft Graph OAuth resource policy with real MCP SDK functions', ()
       const config = { ...GRAPH_CONFIG, resource_mode: resourceMode };
       const { authorizationUrl, flowMetadata } = await initiate(config);
       expect(new URL(authorizationUrl).searchParams.get('resource')).toBe(SERVER_URL);
+      expect(new URL(authorizationUrl).searchParams.getAll('prompt')).toEqual(['consent']);
       await expect(exchange(flowMetadata)).rejects.toThrow('invalid_target');
       await expect(
         MCPOAuthHandler.refreshOAuthTokens(
@@ -191,9 +193,13 @@ describe('Microsoft Graph OAuth resource policy with real MCP SDK functions', ()
       const { authorizationUrl, flowMetadata } = await initiate(config);
       const auth = new URL(authorizationUrl);
       expect(auth.searchParams.has('resource')).toBe(false);
+      expect(auth.searchParams.has('prompt')).toBe(false);
       expect(auth.searchParams.get('scope')).toBe(SCOPE);
       expect(auth.searchParams.get('state')).toBe(flowMetadata.state);
       expect(auth.searchParams.get('code_challenge_method')).toBe('S256');
+      expect(auth.searchParams.get('code_challenge')).toBe(
+        createHash('sha256').update(flowMetadata.codeVerifier!).digest('base64url'),
+      );
       expect(flowMetadata.resourceMode).toBe('microsoft_graph');
       expect(flowMetadata.resourceMetadata?.resource).toBe(SERVER_URL);
 
@@ -288,21 +294,45 @@ describe('Microsoft Graph OAuth resource policy with real MCP SDK functions', ()
     }
   });
 
-  it('preserves the MCP resource in normal discovery, dynamic registration, and all grants', async () => {
-    dcr = true;
-    const { authorizationUrl, flowMetadata } = await initiate({ scope: 'read' });
-    expect(flowMetadata.clientSource).toBe('dynamic');
-    expect(new URL(authorizationUrl).searchParams.get('resource')).toBe(SERVER_URL);
-    await exchange(flowMetadata);
-    await MCPOAuthHandler.refreshOAuthTokens(
-      'refresh-token',
-      refreshMetadata(flowMetadata),
-      {},
-      undefined,
-      ALLOWED_DOMAINS,
-    );
-    expect(tokenRequests.map(({ body }) => body.get('resource'))).toEqual([SERVER_URL, SERVER_URL]);
-  });
+  it.each(['read', 'read offline_access'])(
+    'preserves normal discovery, dynamic registration, and all grants with scope %s',
+    async (scope) => {
+      dcr = true;
+      const { authorizationUrl, flowMetadata } = await initiate({ scope });
+      const auth = new URL(authorizationUrl);
+      expect(flowMetadata.clientSource).toBe('dynamic');
+      expect(auth.searchParams.get('resource')).toBe(SERVER_URL);
+      expect(auth.searchParams.get('scope')).toBe(scope);
+      expect(auth.searchParams.getAll('prompt')).toEqual(
+        scope.includes('offline_access') ? ['consent'] : [],
+      );
+      await exchange(flowMetadata);
+      await MCPOAuthHandler.refreshOAuthTokens(
+        'refresh-token',
+        refreshMetadata(flowMetadata),
+        {},
+        undefined,
+        ALLOWED_DOMAINS,
+      );
+      expect(tokenRequests.map(({ body }) => body.get('resource'))).toEqual([
+        SERVER_URL,
+        SERVER_URL,
+      ]);
+    },
+  );
+
+  it.each(['consent', 'none', 'select_account'])(
+    'rejects Graph endpoint prompt=%s before authorizing rather than overriding configuration',
+    async (prompt) => {
+      await expect(
+        initiate({
+          ...GRAPH_CONFIG,
+          authorization_url: `${ENTRA_BASE}/authorize?prompt=${prompt}`,
+        }),
+      ).rejects.toThrow(/Ungültige Microsoft-Graph-OAuth-Konfiguration/);
+      expect(global.fetch).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(['mcp', 'microsoft_graph'] as OAuthResourceMode[])(
     'requires reauthorization when the stored %s mode changes',
