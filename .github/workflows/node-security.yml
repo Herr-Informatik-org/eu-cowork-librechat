@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: node-security-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   tests:
@@ -23,20 +23,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
+          node-version: '24.16.0'
+      - name: Record old runtime for unchanged-source regression comparisons only
+        run: echo "NODE_BASELINE=$(command -v node)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
           node-version: '24.22.1'
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run build:packages
       - name: Run all five workspace test suites
-        shell: bash
-        run: |
-          status=0
-          for workspace in packages/data-provider packages/data-schemas packages/api api client; do
-            echo "::group::$workspace"
-            npm run test:ci --workspace="$workspace" -- --coverage=false --runInBand || status=1
-            echo '::endgroup::'
-          done
-          exit "$status"
+        run: node .github/scripts/check-node-security-tests.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: node-security-test-results
+          path: ${{ runner.temp }}/node-security-tests
+          retention-days: 7
 
   image:
     name: Production image (${{ matrix.arch }})
