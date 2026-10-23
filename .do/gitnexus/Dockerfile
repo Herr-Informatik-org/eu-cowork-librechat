@@ -13,12 +13,13 @@ ARG GITNEXUS_VERSION=1.6.7
 ARG LADYBUG_VERSION=0.17.1
 
 # 1. Build native addons with Bookworm toolchain, then remove build tools.
+#    Node 24 requires C++20 when arm64 builds tree-sitter from source.
 #    curl stays for the docker healthcheck; Caddy lives in its own container.
 #    LadybugDB is pinned nested under gitnexus so step 3's require() resolves it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ curl \
-    && npm install -g gitnexus@${GITNEXUS_VERSION} \
-    && npm install --no-save --prefix /usr/local/lib/node_modules/gitnexus "@ladybugdb/core@${LADYBUG_VERSION}" \
+    && CXXFLAGS='-std=c++20' npm install -g gitnexus@${GITNEXUS_VERSION} \
+    && CXXFLAGS='-std=c++20' npm install --no-save --prefix /usr/local/lib/node_modules/gitnexus "@ladybugdb/core@${LADYBUG_VERSION}" \
     && apt-get purge -y --auto-remove python3 make g++ \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 

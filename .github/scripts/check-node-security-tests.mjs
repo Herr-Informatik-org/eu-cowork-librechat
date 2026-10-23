@@ -49,6 +49,7 @@ function run(node, workspace, config, suffix, files = []) {
 
 function clean(message) {
   return stripVTControlCharacters(String(message || ''))
+    .replace(/<br>(?:\s|&nbsp;)*at [^<]*/g, '')
     .replaceAll(root, '<repo>')
     .split('\n')
     .filter((line) => !/^\s+at /.test(line))
