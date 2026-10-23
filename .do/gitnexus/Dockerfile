@@ -5,7 +5,7 @@
 # startup. A fresh index only requires rsync + container restart — no
 # image rebuild on every push.
 
-FROM node:24.16.0-slim
+FROM node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205
 
 ARG GITNEXUS_VERSION=1.6.7
 # Pin the native DB to match the index workflow; gitnexus's ^0.17.0 range
