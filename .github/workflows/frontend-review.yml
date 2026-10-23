@@ -23,10 +23,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 24.16.0
+      - name: Use Node.js 24.22.1
         uses: actions/setup-node@v4
         with:
-          node-version: '24.16.0'
+          node-version: '24.22.1'
 
       - name: Restore node_modules cache
         id: cache-node-modules
@@ -37,7 +37,7 @@ jobs:
             client/node_modules
             packages/client/node_modules
             packages/data-provider/node_modules
-          key: node-modules-frontend-${{ runner.os }}-24.16.0-${{ hashFiles('package-lock.json') }}
+          key: node-modules-frontend-${{ runner.os }}-24.22.1-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -87,10 +87,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 24.16.0
+      - name: Use Node.js 24.22.1
         uses: actions/setup-node@v4
         with:
-          node-version: '24.16.0'
+          node-version: '24.22.1'
 
       - name: Restore node_modules cache
         id: cache-node-modules
@@ -101,7 +101,7 @@ jobs:
             client/node_modules
             packages/client/node_modules
             packages/data-provider/node_modules
-          key: node-modules-frontend-${{ runner.os }}-24.16.0-${{ hashFiles('package-lock.json') }}
+          key: node-modules-frontend-${{ runner.os }}-24.22.1-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -131,10 +131,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 24.16.0
+      - name: Use Node.js 24.22.1
         uses: actions/setup-node@v4
         with:
-          node-version: '24.16.0'
+          node-version: '24.22.1'
 
       - name: Restore node_modules cache
         id: cache-node-modules
@@ -145,7 +145,7 @@ jobs:
             client/node_modules
             packages/client/node_modules
             packages/data-provider/node_modules
-          key: node-modules-frontend-${{ runner.os }}-24.16.0-${{ hashFiles('package-lock.json') }}
+          key: node-modules-frontend-${{ runner.os }}-24.22.1-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -173,10 +173,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 24.16.0
+      - name: Use Node.js 24.22.1
         uses: actions/setup-node@v4
         with:
-          node-version: '24.16.0'
+          node-version: '24.22.1'
 
       - name: Restore node_modules cache
         id: cache-node-modules
@@ -187,7 +187,7 @@ jobs:
             client/node_modules
             packages/client/node_modules
             packages/data-provider/node_modules
-          key: node-modules-frontend-${{ runner.os }}-24.16.0-${{ hashFiles('package-lock.json') }}
+          key: node-modules-frontend-${{ runner.os }}-24.22.1-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -221,10 +221,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 24.16.0
+      - name: Use Node.js 24.22.1
         uses: actions/setup-node@v4
         with:
-          node-version: '24.16.0'
+          node-version: '24.22.1'
 
       - name: Restore node_modules cache
         id: cache-node-modules
@@ -235,7 +235,7 @@ jobs:
             client/node_modules
             packages/client/node_modules
             packages/data-provider/node_modules
-          key: node-modules-frontend-${{ runner.os }}-24.16.0-${{ hashFiles('package-lock.json') }}
+          key: node-modules-frontend-${{ runner.os }}-24.22.1-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -265,10 +265,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 24.16.0
+      - name: Use Node.js 24.22.1
         uses: actions/setup-node@v4
         with:
-          node-version: '24.16.0'
+          node-version: '24.22.1'
 
       - name: Restore node_modules cache
         id: cache-node-modules
@@ -279,7 +279,7 @@ jobs:
             client/node_modules
             packages/client/node_modules
             packages/data-provider/node_modules
-          key: node-modules-frontend-${{ runner.os }}-24.16.0-${{ hashFiles('package-lock.json') }}
+          key: node-modules-frontend-${{ runner.os }}-24.22.1-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'

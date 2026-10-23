@@ -1,0 +1,116 @@
+name: Node Security Verification
+
+on:
+  push:
+    branches: [eu-cowork, 'codex/node-security-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      HUSKY: '0'
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:packages
+      - name: Run all five workspace test suites
+        shell: bash
+        run: |
+          status=0
+          for workspace in packages/data-provider packages/data-schemas packages/api api client; do
+            echo "::group::$workspace"
+            npm run test:ci --workspace="$workspace" -- --coverage=false --runInBand || status=1
+            echo '::endgroup::'
+          done
+          exit "$status"
+
+  image:
+    name: Production image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: node
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: librechat-node-security:ci
+          cache-from: type=gha,scope=eu-cowork-${{ matrix.arch }}
+          cache-to: type=gha,mode=min,scope=eu-cowork-${{ matrix.arch }}
+          build-args: BUILD_COMMIT=${{ github.sha }}
+      - name: Check actual Node runtime and Brotli round trip
+        run: |
+          docker run --rm --entrypoint node librechat-node-security:ci -e '
+            const a = require("node:assert/strict");
+            const z = require("node:zlib");
+            a.equal(process.versions.node, "24.22.1");
+            const input = Buffer.from("EU-Cowork runtime check ".repeat(4096));
+            a.deepEqual(z.brotliDecompressSync(z.brotliCompressSync(input)), input);
+            require("@librechat/api");
+            console.log("Runtime and module resolution OK", process.version);
+          '
+      - name: Start real API with MongoDB and check readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker logs security-api 2>&1 | tail -80; docker rm -f security-api security-mongo >/dev/null 2>&1 || true; docker network rm lc-security >/dev/null 2>&1 || true' EXIT
+          docker network create lc-security
+          docker run -d --name security-mongo --network lc-security mongo:8.0.20
+          docker run -d --name security-api --network lc-security -p 127.0.0.1:3080:3080 \
+            -e HOST=0.0.0.0 -e PORT=3080 -e NODE_ENV=production \
+            -e MONGO_URI=mongodb://security-mongo:27017/LibreChat \
+            -e CREDS_KEY="$(openssl rand -hex 32)" -e CREDS_IV="$(openssl rand -hex 16)" \
+            -e JWT_SECRET="$(openssl rand -hex 32)" -e JWT_REFRESH_SECRET="$(openssl rand -hex 32)" \
+            -e SEARCH=false -e ALLOW_REGISTRATION=true -e ALLOW_EMAIL_LOGIN=true \
+            librechat-node-security:ci
+          ready=0
+          for attempt in $(seq 1 90); do
+            test "$(docker inspect -f '{{.State.Running}}' security-api)" = true
+            if curl -fsS http://127.0.0.1:3080/readyz; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = 1
+          curl -fsS http://127.0.0.1:3080/api/config -o /tmp/public-config.json
+          python3 -c 'import json; assert isinstance(json.load(open("/tmp/public-config.json")), dict)'
+          curl -fsS http://127.0.0.1:3080/ | grep -q '<html'
+          python3 - <<'PY'
+          import json, secrets, urllib.request
+          password = secrets.token_urlsafe(24)
+          def post(path, body):
+              request = urllib.request.Request('http://127.0.0.1:3080' + path,
+                  json.dumps(body).encode(), {'Content-Type': 'application/json'})
+              with urllib.request.urlopen(request) as response:
+                  assert response.status == 200
+                  return json.load(response)
+          post('/api/auth/register', {'name': 'Runtime Test', 'username': 'runtime-test',
+              'email': 'runtime@example.test', 'password': password, 'confirm_password': password})
+          result = post('/api/auth/login', {'email': 'runtime@example.test', 'password': password})
+          assert result.get('token') and result.get('user', {}).get('email') == 'runtime@example.test'
+          print('Real registration and login OK')
+          PY

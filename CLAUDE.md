@@ -156,7 +156,7 @@ Multi-line imports count total character length across all lines. Consolidate va
 | `npm run frontend:dev` | Start frontend dev server with HMR (port 3090, requires backend running) |
 | `npm run build:data-provider` | Rebuild `packages/data-provider` after changes |
 
-- Node.js: v24.16.0
+- Node.js: v24.22.1
 - Database: MongoDB
 - Backend runs on `http://localhost:3080/`; frontend dev server on `http://localhost:3090/`
 
