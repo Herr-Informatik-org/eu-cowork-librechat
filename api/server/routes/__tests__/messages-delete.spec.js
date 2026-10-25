@@ -194,7 +194,11 @@ describe('DELETE /:conversationId/:messageId – route handler', () => {
     const response = await request(app).delete('/api/messages/convo-1/msg-owned');
 
     expect(response.status).toBe(503);
-    expect(deleteBrainSources).toHaveBeenCalledWith(authenticatedUserId, ['convo-1'], ['msg-owned']);
+    expect(deleteBrainSources).toHaveBeenCalledWith(
+      authenticatedUserId,
+      ['convo-1'],
+      ['msg-owned'],
+    );
     expect(deleteMessages).not.toHaveBeenCalled();
   });
 

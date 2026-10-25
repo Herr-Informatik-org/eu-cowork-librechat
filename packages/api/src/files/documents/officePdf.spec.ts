@@ -11,7 +11,7 @@ import {
 } from './officePdf';
 
 describe('private Office PDF cache', () => {
-  const originalFetch = global.fetch;
+  let fetchMock: jest.SpyInstance<ReturnType<typeof fetch>, Parameters<typeof fetch>>;
   let directory: string;
   const input = Buffer.from('original office fixture');
   const pdf = Buffer.from('%PDF-1.7\nfixture');
@@ -19,19 +19,20 @@ describe('private Office PDF cache', () => {
     directory = await mkdtemp(join(tmpdir(), 'office-pdf-test-'));
     process.env.OFFICE_PREVIEW_CACHE_DIR = directory;
     process.env.OFFICE_PREVIEW_RENDERER_URL = 'http://office-preview:8090';
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      headers: new Headers({ 'content-type': 'application/pdf' }),
-      body: new ReadableStream({
-        start(controller) {
-          controller.enqueue(pdf);
-          controller.close();
-        },
-      }),
-    });
+    fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(pdf);
+            controller.close();
+          },
+        }),
+        { headers: { 'content-type': 'application/pdf' } },
+      ),
+    );
   });
   afterEach(async () => {
-    global.fetch = originalFetch;
+    fetchMock.mockRestore();
     delete process.env.OFFICE_PREVIEW_CACHE_DIR;
     delete process.env.OFFICE_PREVIEW_RENDERER_URL;
     await rm(directory, { recursive: true, force: true });
@@ -72,16 +73,17 @@ describe('private Office PDF cache', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
   it('rejects non-PDF responses without caching them', async () => {
-    (global.fetch as jest.Mock).mockResolvedValue({
-      ok: true,
-      headers: new Headers({ 'content-type': 'application/pdf' }),
-      body: new ReadableStream({
-        start(controller) {
-          controller.enqueue(Buffer.from('<html>'));
-          controller.close();
-        },
-      }),
-    });
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(Buffer.from('<html>'));
+            controller.close();
+          },
+        }),
+        { headers: { 'content-type': 'application/pdf' } },
+      ),
+    );
     await expect(prepareOfficePdf(input, 'docx')).rejects.toThrow('kein PDF');
     expect(await readdir(directory)).toEqual([]);
   });

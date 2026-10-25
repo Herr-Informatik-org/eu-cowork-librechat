@@ -18,9 +18,9 @@ const lookup = jest.fn();
 const savedFetch = global.fetch;
 beforeEach(() => {
   jest.clearAllMocks();
-  mongoose.connection.db = {
+  jest.replaceProperty(mongoose.connection, 'db', {
     collection: () => ({ findOne: lookup }),
-  } as unknown as typeof mongoose.connection.db;
+  } as unknown as NonNullable<typeof mongoose.connection.db>);
   lookup.mockResolvedValue(policy);
   process.env.JWT_SECRET = 'unit-test-purpose-only';
   delete process.env.HOSTED_USAGE_REQUIRED;
@@ -31,6 +31,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   global.fetch = savedFetch;
+  jest.restoreAllMocks();
   delete process.env.JWT_SECRET;
   delete process.env.HOSTED_USAGE_REQUIRED;
 });
