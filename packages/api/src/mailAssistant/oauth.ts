@@ -3,7 +3,18 @@ import type { Collection } from 'mongodb';
 import type { MailFetch } from './types';
 
 export const MAIL_ASSISTANT_SCOPES = 'User.Read Mail.ReadWrite offline_access';
-const acceptedScopes = new Set(MAIL_ASSISTANT_SCOPES.split(' '));
+/** Entra can return previously consented Graph scopes for the same application identity. */
+const acceptedScopes = new Set([
+  ...MAIL_ASSISTANT_SCOPES.split(' '),
+  'Mail.Read',
+  'Calendars.Read',
+  'Tasks.Read',
+  'Files.Read.All',
+  'Sites.Read.All',
+  'openid',
+  'profile',
+  'email',
+]);
 const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -161,7 +172,7 @@ export function createMailOAuth(config: MailOAuthConfig, deps: OAuthDependencies
       scopes.some((scope) => !acceptedScopes.has(scope))
     )
       throw new MailAuthorizationError(
-        'Microsoft hat nicht die ausschliesslich freigegebenen Postfachrechte bestätigt.',
+        'Microsoft hat die erforderlichen Postfachrechte nicht bestätigt oder zusätzliche, nicht freigegebene Rechte zurückgegeben.',
       );
     return tokens;
   };

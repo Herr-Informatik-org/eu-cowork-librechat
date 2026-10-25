@@ -13,6 +13,7 @@ const config = {
   callback: 'https://cowork.example/api/agents/office/mail-assistant/callback',
 };
 const codec = createMailCodec('ab'.repeat(32));
+const existingGraphScopes = 'Mail.Read Calendars.Read Tasks.Read Files.Read.All Sites.Read.All';
 describe('Personal mailbox OAuth ownership and lifecycle', () => {
   let server: MongoMemoryServer;
   let client: MongoClient;
@@ -61,6 +62,7 @@ describe('Personal mailbox OAuth ownership and lifecycle', () => {
         calls.push(url);
         expect(init?.redirect).toBe('error');
         if (url.includes('/token')) {
+          expect(new URLSearchParams(String(init?.body)).get('scope')).toBe(MAIL_ASSISTANT_SCOPES);
           await beforeToken?.();
           return new Response(
             JSON.stringify({
@@ -112,15 +114,71 @@ describe('Personal mailbox OAuth ownership and lifecycle', () => {
     await expect(instance.complete(state, 'fixture-code')).rejects.toThrow('bestätigten Cowork');
     expect((await instance.status(owner)).connected).toBe(false);
   });
-  it.each(['Mail.Send', 'Mail.ReadWrite.Shared', 'Files.Read.All'])(
-    'rejects extra granted scope %s',
-    async (scope) => {
+  it('accepts existing delegated Graph read permissions without requesting them at login or refresh', async () => {
+    scopes = `${MAIL_ASSISTANT_SCOPES} ${existingGraphScopes} openid profile email`;
+    const { instance, state, url } = await begin();
+    expect(url.searchParams.get('scope')).toBe(MAIL_ASSISTANT_SCOPES);
+    await instance.complete(state, 'fixture-code');
+    expect((await instance.status(owner)).connected).toBe(true);
+    clock += 3500000;
+    calls.length = 0;
+    expect(await instance.token(owner)).toBe('fixture-access');
+    expect(calls.filter((url) => url.includes('/token'))).toHaveLength(1);
+    expect((await instance.status(owner)).connected).toBe(true);
+  });
+  it('normalizes fully qualified Graph scopes at login and refresh', async () => {
+    scopes = `User.Read Mail.ReadWrite ${existingGraphScopes}`
+      .split(' ')
+      .map((scope) => `https://graph.microsoft.com/${scope}`)
+      .concat('offline_access', 'openid', 'profile', 'email')
+      .join(' ');
+    const { instance, state } = await begin();
+    await instance.complete(state, 'fixture-code');
+    clock += 3500000;
+    expect(await instance.token(owner)).toBe('fixture-access');
+    expect((await instance.status(owner)).connected).toBe(true);
+  });
+  it.each(['User.Read', 'Mail.ReadWrite'])(
+    'still requires %s when existing read permissions are returned',
+    async (missingScope) => {
       const { instance, state } = await begin();
-      scopes += ` ${scope}`;
+      scopes = `${MAIL_ASSISTANT_SCOPES} ${existingGraphScopes}`
+        .split(' ')
+        .filter((scope) => scope !== missingScope)
+        .join(' ');
       await expect(instance.complete(state, 'fixture-code')).rejects.toThrow('Postfachrechte');
       expect(calls).toHaveLength(1);
     },
   );
+  const unsafeScopes = [
+    'Mail.Send',
+    'Mail.ReadWrite.Shared',
+    'Mail.Read.Shared',
+    'Calendars.ReadWrite',
+    'Calendars.Read.Shared',
+    'Tasks.ReadWrite',
+    'Files.ReadWrite.All',
+    'Sites.ReadWrite.All',
+    'Directory.Read.All',
+    'https://graph.microsoft.com/Mail.Send',
+    'https://outlook.office.com/Mail.Read',
+  ];
+  it.each(unsafeScopes)('rejects extra granted scope %s at login', async (scope) => {
+    const { instance, state } = await begin();
+    scopes += ` ${scope}`;
+    await expect(instance.complete(state, 'fixture-code')).rejects.toThrow('Postfachrechte');
+    expect(calls).toHaveLength(1);
+  });
+  it.each(unsafeScopes)('rejects extra granted scope %s at refresh', async (scope) => {
+    const { instance, state } = await begin();
+    await instance.complete(state, 'fixture-code');
+    clock += 3500000;
+    calls.length = 0;
+    scopes += ` ${scope}`;
+    await expect(instance.token(owner)).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+    expect((await instance.status(owner)).connected).toBe(false);
+  });
   it('refuses expired authorization state', async () => {
     const { instance, state } = await begin();
     clock += 11 * 60000;

@@ -6,8 +6,12 @@
   Freigabe, manuelle Ausführung und Arbeitszeitplanung; zunächst nur intern auf CW01.
 - Kategorien und Antwortentwürfe entstehen über begrenzte Graph-Operationen. Es gibt
   keinen Versand-, Lösch- oder Verschiebeweg. Vorhandene Entwürfe werden nicht verändert.
-- Eigene OAuth-App mit PKCE, Kontoabgleich und verschlüsselten, benutzergebundenen
+- Persönlicher OAuth-Ablauf mit PKCE, Kontoabgleich und verschlüsselten, benutzergebundenen
   Zugangsdaten. Modellroute, Konto und Freigabe werden vor jedem Schritt erneut geprüft.
+- Eine bestehende Entra-App kann erweitert werden. Bereits freigegebene delegierte
+  Lesezugriffe auf Mail, Kalender, Aufgaben, Dateien und Sites werden bei Anmeldung und
+  Erneuerung zusätzlich toleriert; angefordert bleiben nur `User.Read`, `Mail.ReadWrite`
+  und `offline_access`. Zusätzliche Schreib-, Versand- und Shared-Postfachrechte bleiben gesperrt.
 - Das konfigurierte Standardmodell wird vor der persönlichen Freigabe angezeigt
   und bei zentralen Änderungen automatisch übernommen. Keine Ersatzroute bei Fehlern.
 - Verschlüsselte persönliche Hinweise mit 30 Tagen Aufbewahrung, atomare Auftragssperren,
