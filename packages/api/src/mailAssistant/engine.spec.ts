@@ -1,0 +1,430 @@
+import { createHash } from 'node:crypto';
+import { createMailAssistantEngine } from './engine';
+import { MailGraphError } from './graph';
+import { defaultMailSettings } from './schedule';
+import type {
+  MailJob,
+  MailStore,
+  StoredMailResult,
+  MailMessage,
+  MailRuntimeAdapter,
+  MailAnalysis,
+} from './types';
+
+function fixture() {
+  const owner = 'alice';
+  let instant = new Date('2026-10-26T08:00:00Z');
+  const jobs = new Map<string, MailJob>([
+    [
+      owner,
+      {
+        ownerId: owner,
+        revision: 1,
+        enabledAt: '2026-10-26T07:00:00Z',
+        settings: {
+          ...defaultMailSettings(),
+          enabled: true,
+          mode: 'scheduled',
+          consentVersion: '2026-10-25',
+        },
+      },
+    ],
+  ]);
+  const results = new Map<string, StoredMailResult>();
+  const operations = new Map<
+    string,
+    { sourceHash: string; state: 'pending' | 'completed' | 'failed' }
+  >();
+  const message: MailMessage = {
+    id: 'mail',
+    conversationId: 'conversation',
+    changeKey: 'version',
+    subject: 'Support',
+    sender: 'customer@example.invalid',
+    receivedAt: '2026-10-26T07:30:00Z',
+    body: 'Bitte senden Sie die Anleitung.',
+    etag: 'W/"version"',
+    categories: ['Kunde'],
+    isDraft: false,
+  };
+  const copy = <T>(value: T): T => structuredClone(value);
+  const store: MailStore = {
+    draftState: async (id, key) => operations.get(id + ':' + key) ?? null,
+    reserveDraft: async (id, _token, key, sourceHash) => {
+      const old = operations.get(id + ':' + key);
+      if (old?.state === 'pending' || old?.sourceHash === sourceHash) return false;
+      operations.set(id + ':' + key, { sourceHash, state: 'pending' });
+      return true;
+    },
+    finishDraft: async (id, key, sourceHash, state) => {
+      if (operations.get(id + ':' + key)?.sourceHash === sourceHash)
+        operations.set(id + ':' + key, { sourceHash, state });
+    },
+    read: jest.fn(async (id) => (jobs.has(id) ? copy(jobs.get(id)!) : null)),
+    saveSettings: jest.fn(async (id, settings) => {
+      jobs.get(id)!.settings = settings;
+      jobs.get(id)!.revision++;
+      delete jobs.get(id)!.leaseToken;
+      delete jobs.get(id)!.leaseUntil;
+    }),
+    pause: jest.fn(async (id) => {
+      jobs.get(id)!.settings.enabled = false;
+      jobs.get(id)!.revision++;
+      delete jobs.get(id)!.leaseToken;
+      delete jobs.get(id)!.leaseUntil;
+    }),
+    purge: jest.fn(async (id) => {
+      jobs.delete(id);
+      for (const key of results.keys()) if (key.startsWith(id + ':')) results.delete(key);
+    }),
+    due: jest.fn(async () => [...jobs.keys()]),
+    prune: jest.fn(async () => {}),
+    claim: jest.fn(async (id, token, now) => {
+      const job = jobs.get(id);
+      if (!job?.settings.enabled || (job.leaseUntil && job.leaseUntil > now)) return null;
+      job.leaseToken = token;
+      job.leaseUntil = new Date(now.getTime() + 120000);
+      return copy(job);
+    }),
+    update: jest.fn(async (id, token, fields) => {
+      if (jobs.get(id)?.leaseToken !== token || !jobs.get(id)?.settings.enabled) return false;
+      Object.assign(jobs.get(id)!, copy(fields));
+      return true;
+    }),
+    release: jest.fn(async (id, token, fields) => {
+      const job = jobs.get(id);
+      if (!job || job.leaseToken !== token) return;
+      Object.assign(job, copy(fields));
+      delete job.leaseToken;
+      delete job.leaseUntil;
+    }),
+    results: jest.fn(async (id) =>
+      [...results].filter(([key]) => key.startsWith(id + ':')).map(([, value]) => copy(value)),
+    ),
+    result: jest.fn(async (id, key) =>
+      results.has(id + ':' + key) ? copy(results.get(id + ':' + key)!) : null,
+    ),
+    putResult: jest.fn(async (id, token, result) => {
+      if (jobs.get(id)?.leaseToken !== token || !jobs.get(id)?.settings.enabled)
+        throw Error('lost lease');
+      results.set(id + ':' + result.id, copy(result));
+    }),
+  };
+  let guard = async () => {};
+  const graph = {
+    identity: jest.fn(async () => ({
+      id: 'own-ms-id',
+      mail: 'alice@example.invalid',
+      userPrincipalName: 'alice@example.invalid',
+    })),
+    page: jest.fn(async () => {
+      await guard();
+      return { messages: [copy(message)], nextUrl: 'cursor' };
+    }),
+    message: jest.fn(async () => {
+      await guard();
+      return copy(message);
+    }),
+    thread: jest.fn(async () => {
+      await guard();
+      return { messages: [copy(message)], complete: true };
+    }),
+    categorize: jest.fn(async (_id, categories) => {
+      await guard();
+      message.categories = categories;
+    }),
+    createReply: jest.fn(async (_id: string, _text: string) => {
+      await guard();
+      return { id: 'draft-id', url: 'https://outlook.office.com/mail/draft' };
+    }),
+  };
+  const adapter: MailRuntimeAdapter = {
+    authorize: jest.fn(async (id) => {
+      if (!jobs.has(id)) throw Error('No account');
+    }),
+    availability: jest.fn(async () => ({
+      available: true,
+      modelLabel: 'Default · approved',
+      modelFingerprint: 'a'.repeat(64),
+    })),
+    connection: jest.fn(async () => ({ connected: true, mailbox: 'alice@example.invalid' })),
+    graph: jest.fn(async (_id, before) => {
+      guard = before;
+      return graph;
+    }),
+    analyze: jest.fn(
+      async (): Promise<MailAnalysis> => ({
+        priority: 'normal',
+        action: 'reply',
+        summary: 'Kunde benötigt Anleitung.',
+        reason: 'Gewöhnliche Anfrage.',
+        questions: ['Welche Version?'],
+        draft: 'Guten Tag\n\nGerne unterstützen wir Sie.',
+      }),
+    ),
+    audit: jest.fn(async () => {}),
+  };
+  const engine = createMailAssistantEngine({ store, adapter, now: () => instant });
+  return {
+    engine,
+    owner,
+    jobs,
+    results,
+    operations,
+    store,
+    graph,
+    adapter,
+    message,
+    now: (value: string) => {
+      instant = new Date(value);
+    },
+  };
+}
+
+describe('mail assistant deterministic safety boundary', () => {
+  test('creates a reply draft and keeps existing categories, questions only in overview', async () => {
+    const f = fixture();
+    await f.engine.run(f.owner);
+    expect(f.graph.categorize).toHaveBeenCalledWith('mail', ['Kunde', 'KI: Normal'], 'W/"version"');
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply.mock.calls[0][1]).not.toContain('Welche Version');
+    const status = await f.engine.status(f.owner);
+    expect(status.results[0]).toMatchObject({
+      draftStatus: 'created',
+      questions: ['Welche Version?'],
+    });
+    expect(status.results[0]).not.toHaveProperty('messageId');
+    expect(status.results[0]).not.toHaveProperty('sourceHash');
+    expect(status.results[0]).not.toHaveProperty('draft');
+    expect(JSON.stringify([...f.results.values()])).not.toContain(f.message.body);
+    expect(JSON.stringify(f.jobs.get(f.owner)?.checkpoint)).not.toContain(f.message.body);
+  });
+  test('ordinary delta echoes never analyze or create twice', async () => {
+    const f = fixture();
+    await f.engine.run(f.owner);
+    await f.engine.run(f.owner);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+  });
+  test('records manual Outlook category changes without reclassification', async () => {
+    const f = fixture();
+    await f.engine.run(f.owner);
+    f.message.categories = ['Kunde', 'KI: Wichtig'];
+    await f.engine.run(f.owner);
+    expect((await f.engine.status(f.owner)).results[0]).toMatchObject({
+      priority: 'important',
+      manualPriority: true,
+    });
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(1);
+    expect(f.graph.categorize).toHaveBeenCalledTimes(1);
+  });
+  test.each(['information', 'review'] as const)('never drafts for action %s', async (action) => {
+    const f = fixture();
+    (f.adapter.analyze as jest.Mock).mockResolvedValue({
+      priority: 'important',
+      action,
+      summary: 'Info',
+      reason: 'Grund',
+      questions: [],
+      draft: 'must not create',
+    });
+    await f.engine.run(f.owner);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+  });
+  test('low priority never drafts, even if model says reply', async () => {
+    const f = fixture();
+    (f.adapter.analyze as jest.Mock).mockResolvedValue({
+      priority: 'low',
+      action: 'reply',
+      summary: 'Werbung',
+      reason: 'Newsletter',
+      questions: [],
+      draft: 'do not use',
+    });
+    await f.engine.run(f.owner);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+  });
+  test('existing human draft is neither replaced nor duplicated', async () => {
+    const f = fixture();
+    f.graph.thread.mockImplementation(async () => ({
+      complete: true,
+      messages: [
+        f.message,
+        { ...f.message, id: 'human-draft', isDraft: true, body: 'Private correction' },
+      ],
+    }));
+    await f.engine.run(f.owner);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    expect((await f.engine.status(f.owner)).results[0].draftStatus).toBe('existing');
+  });
+  test('human response while model runs prevents a draft', async () => {
+    const f = fixture();
+    f.graph.thread
+      .mockResolvedValueOnce({ complete: true, messages: [f.message] })
+      .mockResolvedValue({
+        complete: true,
+        messages: [
+          f.message,
+          { ...f.message, id: 'sent', sentByUser: true, sentAt: '2026-10-26T07:59:00Z' },
+        ],
+      });
+    await f.engine.run(f.owner);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+  });
+  test('unknown POST outcome is persisted and never automatically repeated', async () => {
+    const f = fixture();
+    f.graph.createReply.mockRejectedValue(new MailGraphError(0, true));
+    await f.engine.run(f.owner);
+    await f.engine.run(f.owner);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect((await f.engine.status(f.owner)).results[0].draftStatus).toBe('uncertain');
+  });
+  test('unknown POST barrier survives result expiry and still allows new summaries', async () => {
+    const f = fixture();
+    f.graph.createReply.mockRejectedValue(new MailGraphError(0, true));
+    await f.engine.run(f.owner);
+    f.results.clear();
+    f.message.id = 'new-message';
+    f.message.receivedAt = '2026-10-26T07:45:00Z';
+    await f.engine.run(f.owner);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(2);
+    expect((await f.engine.status(f.owner)).results[0].draftStatus).toBe('uncertain');
+  });
+  test('central default-model changes apply automatically without renewed personal consent', async () => {
+    const f = fixture();
+    (f.adapter.availability as jest.Mock).mockResolvedValue({
+      available: true,
+      modelLabel: 'New centrally configured default',
+      modelFingerprint: 'b'.repeat(64),
+    });
+    const status = await f.engine.status(f.owner);
+    expect(status.modelLabel).toBe('New centrally configured default');
+    expect(status.settings.enabled).toBe(true);
+    expect(status.settings.consentVersion).toBe('2026-10-25');
+    await f.engine.run(f.owner);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect(f.store.pause).not.toHaveBeenCalled();
+    await expect(
+      f.engine.settings(f.owner, { ...f.jobs.get(f.owner)!.settings, enabled: true }),
+    ).resolves.toBeUndefined();
+  });
+  test('enabled settings changed during guard invalidate the pending external call', async () => {
+    const f = fixture();
+    let calls = 0;
+    (f.adapter.connection as jest.Mock).mockImplementation(async () => {
+      if (++calls === 2)
+        await f.store.saveSettings(
+          f.owner,
+          { ...f.jobs.get(f.owner)!.settings, startTime: '09:00' },
+          new Date(),
+        );
+      return { connected: true, mailbox: 'alice@example.invalid' };
+    });
+    await f.engine.run(f.owner);
+    expect(f.graph.categorize).not.toHaveBeenCalled();
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+  });
+  test('failed durable intent audit blocks writes', async () => {
+    const f = fixture();
+    (f.adapter.audit as jest.Mock).mockImplementation(async (_owner, event) => {
+      if (event === 'category_requested') throw Error('audit offline');
+    });
+    await f.engine.run(f.owner);
+    expect(f.graph.categorize).not.toHaveBeenCalled();
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+  });
+  test('pause during model request blocks every following mailbox write', async () => {
+    const f = fixture();
+    const analyze = f.adapter.analyze;
+    f.adapter.analyze = async (...args) => {
+      const value = await analyze(...args);
+      await f.engine.pause(f.owner);
+      return value;
+    };
+    await f.engine.run(f.owner);
+    expect(f.graph.categorize).not.toHaveBeenCalled();
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+  });
+  test('work window end during analysis stops scheduled writes', async () => {
+    const f = fixture();
+    const analyze = f.adapter.analyze;
+    f.adapter.analyze = async (...args) => {
+      const value = await analyze(...args);
+      f.now('2026-10-26T16:00:00Z');
+      return value;
+    };
+    await f.engine.run(f.owner, true);
+    expect(f.graph.categorize).not.toHaveBeenCalled();
+  });
+  test('no automatic reads outside hours, explicit manual run works', async () => {
+    const f = fixture();
+    f.now('2026-10-26T20:00:00Z');
+    await f.engine.run(f.owner, true);
+    expect(f.graph.page).not.toHaveBeenCalled();
+    expect(f.jobs.get(f.owner)?.nextRunAt).toBe('2026-10-27T07:00:00.000Z');
+    await f.engine.run(f.owner);
+    expect(f.graph.page).toHaveBeenCalledTimes(1);
+  });
+  test('disabled account never fetches mailbox', async () => {
+    const f = fixture();
+    f.jobs.get(f.owner)!.settings.enabled = false;
+    await expect(f.engine.run(f.owner)).rejects.toThrow();
+    expect(f.graph.page).not.toHaveBeenCalled();
+  });
+  test('no available default route never reads or modifies mail', async () => {
+    const f = fixture();
+    (f.adapter.availability as jest.Mock).mockResolvedValue({ available: false, modelLabel: '' });
+    await expect(f.engine.run(f.owner)).rejects.toThrow();
+    expect(f.graph.page).not.toHaveBeenCalled();
+  });
+  test('lease prevents concurrent manual requests from duplicating drafts', async () => {
+    const f = fixture();
+    await Promise.allSettled([f.engine.run(f.owner), f.engine.run(f.owner)]);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+  });
+  test('scheduled collision leaves the active worker and personal opt-in intact', async () => {
+    const f = fixture();
+    await f.store.claim(f.owner, 'manual-worker', new Date('2026-10-26T08:00:00Z'));
+    await f.engine.tick();
+    expect(f.store.pause).not.toHaveBeenCalled();
+    expect(f.jobs.get(f.owner)?.settings.enabled).toBe(true);
+    expect(f.jobs.get(f.owner)?.leaseToken).toBe('manual-worker');
+    expect(f.graph.page).not.toHaveBeenCalled();
+  });
+  test('other user cannot access results or correct priority by known ID', async () => {
+    const f = fixture();
+    await f.engine.run(f.owner);
+    f.jobs.set('bob', { ...structuredClone(f.jobs.get(f.owner)!), ownerId: 'bob' });
+    const id = createHash('sha256')
+      .update(JSON.stringify([f.owner, 'conversation']))
+      .digest('hex');
+    expect((await f.engine.status('bob')).results).toEqual([]);
+    await expect(f.engine.priority('bob', id, 'important')).rejects.toThrow('nicht gefunden');
+    expect(f.graph.categorize).toHaveBeenCalledTimes(1);
+  });
+  test('very long content goes to manual review, not model or auto draft', async () => {
+    const f = fixture();
+    f.message.bodyTruncated = true;
+    await f.engine.run(f.owner);
+    expect(f.adapter.analyze).not.toHaveBeenCalled();
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    expect((await f.engine.status(f.owner)).results[0].action).toBe('review');
+  });
+  test('no full history backfill or pre-consent mail processing', async () => {
+    const f = fixture();
+    f.message.receivedAt = '2026-10-20T08:00:00Z';
+    await f.engine.run(f.owner);
+    expect(f.adapter.analyze).not.toHaveBeenCalled();
+    expect(f.graph.categorize).not.toHaveBeenCalled();
+  });
+  test('local disconnect purges metadata without deleting Outlook mail', async () => {
+    const f = fixture();
+    await f.engine.run(f.owner);
+    await f.engine.disconnect(f.owner);
+    expect(f.jobs.has(f.owner)).toBe(false);
+    expect(f.results.size).toBe(0);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+  });
+});

@@ -1,5 +1,19 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-25 — Freiwilliger persönlicher Mail-Assistent
+
+- Neue Office-API für eigene Microsoft-Postfachverbindung, ausdrückliche persönliche
+  Freigabe, manuelle Ausführung und Arbeitszeitplanung; zunächst nur intern auf CW01.
+- Kategorien und Antwortentwürfe entstehen über begrenzte Graph-Operationen. Es gibt
+  keinen Versand-, Lösch- oder Verschiebeweg. Vorhandene Entwürfe werden nicht verändert.
+- Eigene OAuth-App mit PKCE, Kontoabgleich und verschlüsselten, benutzergebundenen
+  Zugangsdaten. Modellroute, Konto und Freigabe werden vor jedem Schritt erneut geprüft.
+- Das konfigurierte Standardmodell wird vor der persönlichen Freigabe angezeigt
+  und bei zentralen Änderungen automatisch übernommen. Keine Ersatzroute bei Fehlern.
+- Verschlüsselte persönliche Hinweise mit 30 Tagen Aufbewahrung, atomare Auftragssperren,
+  dauerhafter Schutz vor unklaren doppelten Entwurfsversuchen und verpflichtendes Audit.
+  Kontolöschung und Trennung entfernen die persönlichen Assistentendaten.
+
 ## 2026-10-05 — Bestehende Microsoft-Zustimmung bei MCP-Anmeldung nutzen
 
 - Im explizit administrativ konfigurierten Microsoft-Graph-Modus wird keine erneute

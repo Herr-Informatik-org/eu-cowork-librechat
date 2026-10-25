@@ -79,6 +79,33 @@ describe('auditLog methods', () => {
       expect(persisted?.createdAt).toBeInstanceOf(Date);
     });
 
+    it('records personal mail operations with route metadata in the native integrity chain', async () => {
+      const metadata = {
+        event: 'model.request',
+        provider: 'OpenRouter',
+        model: 'fixture-model',
+        modelFingerprint: 'ab'.repeat(32),
+      };
+      await methods.recordAuditEntry(
+        {
+          action: 'mail_assistant.operation',
+          actor: { type: 'user', id: actorObjectId, name: 'Persönlicher Mail-Assistent' },
+          target: { type: 'personal_mailbox', id: actorObjectId.toString() },
+          metadata,
+        },
+        { failClosed: true },
+      );
+      const persisted = await AuditLog.findOne({ chainKey: PLATFORM_CHAIN_KEY }).lean();
+      expect(persisted).toMatchObject({
+        action: 'mail_assistant.operation',
+        category: 'tool_call',
+        metadata,
+        seq: 1,
+        prevHash: GENESIS_HASH,
+      });
+      expect(persisted?.hash).toMatch(/^[a-f0-9]{64}$/);
+    });
+
     it('derives a warning severity for non-success outcomes', async () => {
       await methods.recordAuditEntry(baseInput({ outcome: 'denied' }));
       const persisted = await AuditLog.findOne({ chainKey: CK_A }).lean();

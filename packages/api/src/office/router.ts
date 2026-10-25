@@ -37,6 +37,8 @@ const uploadMetadataSchema = z
 
 export interface OfficeDependencies {
   authenticate: RequestHandler[];
+  mailAssistantRouter?: Router;
+  mailAssistantCallbackRouter?: Router;
   configure: RequestHandler;
   chatRouter: Router;
   imageUpload: RequestHandler[];
@@ -101,6 +103,7 @@ function asyncRoute(
 /** The Office transport reuses native chat persistence, accounting and stream ownership. */
 export function createOfficeRouter(deps: OfficeDependencies): Router {
   const router = Router();
+  if (deps.mailAssistantCallbackRouter) router.use(deps.mailAssistantCallbackRouter);
   router.use(...deps.authenticate);
   router.use((req, res, next) => {
     const request = req as ServerRequest & { tenantId?: string };
@@ -119,6 +122,8 @@ export function createOfficeRouter(deps: OfficeDependencies): Router {
     res.set('Cache-Control', 'no-store');
     next();
   });
+
+  if (deps.mailAssistantRouter) router.use('/mail-assistant', deps.mailAssistantRouter);
 
   router.get(
     '/models',

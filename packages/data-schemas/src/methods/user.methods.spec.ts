@@ -598,6 +598,45 @@ describe('User Methods - Database Tests', () => {
       expect(found).toBeNull();
     });
 
+    test('purges only the deleted users personal mailbox credentials, states and results', async () => {
+      const user = await User.create({
+        name: 'Mailbox Owner',
+        email: 'mailbox-owner@example.com',
+        provider: 'local',
+      });
+      const ownerId = user._id!.toString();
+      const otherId = new mongoose.Types.ObjectId().toString();
+      for (const name of ['eucowork_mail_credentials', 'eucowork_mail_assistant']) {
+        const collection = mongoose.connection.collection<{
+          _id: string;
+          ownerId: string;
+          settings?: { enabled: boolean };
+          revision?: number;
+        }>(name);
+        await collection.insertMany([
+          { _id: ownerId, ownerId, settings: { enabled: true }, revision: 1 },
+          { _id: otherId, ownerId: otherId },
+        ]);
+      }
+      await mongoose.connection
+        .collection('eucowork_mail_operations')
+        .insertMany([{ ownerId }, { ownerId: otherId }]);
+      const states = mongoose.connection.collection('eucowork_mail_oauth_states');
+      await states.insertMany([{ ownerId }, { ownerId: otherId }]);
+      await methods.deleteUserById(ownerId);
+      for (const name of [
+        'eucowork_mail_credentials',
+        'eucowork_mail_assistant',
+        'eucowork_mail_oauth_states',
+        'eucowork_mail_operations',
+      ]) {
+        const collection = mongoose.connection.collection(name);
+        expect(await collection.countDocuments({ ownerId })).toBe(0);
+        expect(await collection.countDocuments({ ownerId: otherId })).toBe(1);
+        await collection.deleteMany({ ownerId: otherId });
+      }
+    });
+
     test('should return zero count for non-existent user', async () => {
       const fakeId = new mongoose.Types.ObjectId();
       const result = await methods.deleteUserById(fakeId.toString());

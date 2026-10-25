@@ -358,7 +358,38 @@ export function createUserMethods(
   async function deleteUserById(userId: string): Promise<UserDeleteResult> {
     try {
       const User = mongoose.models.User;
+      const mailbox = mongoose.connection.collection<{
+        _id: string;
+        ownerId: string;
+        revision: number;
+        settings: { enabled: boolean };
+      }>('eucowork_mail_assistant');
+      await mailbox.updateOne(
+        { _id: userId, ownerId: userId },
+        { $set: { 'settings.enabled': false }, $inc: { revision: 1 } },
+      );
+      await mongoose.connection
+        .collection<{ _id: string }>('eucowork_mail_credentials')
+        .deleteOne({ _id: userId });
+      await mongoose.connection
+        .collection('eucowork_mail_oauth_states')
+        .deleteMany({ ownerId: userId });
+      await mongoose.connection
+        .collection('eucowork_mail_operations')
+        .deleteMany({ ownerId: userId });
+      await mailbox.deleteOne({ _id: userId, ownerId: userId });
       const result = await User.deleteOne({ _id: userId });
+      // Close a connection-start race between the initial cleanup and account deletion.
+      await mongoose.connection
+        .collection<{ _id: string }>('eucowork_mail_credentials')
+        .deleteOne({ _id: userId });
+      await mongoose.connection
+        .collection('eucowork_mail_oauth_states')
+        .deleteMany({ ownerId: userId });
+      await mongoose.connection
+        .collection('eucowork_mail_operations')
+        .deleteMany({ ownerId: userId });
+      await mailbox.deleteOne({ _id: userId, ownerId: userId });
       if (result.deletedCount === 0) {
         return { deletedCount: 0, message: 'No user found with that ID.' };
       }

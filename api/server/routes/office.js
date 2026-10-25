@@ -1,6 +1,10 @@
 const fs = require('fs').promises;
+const mongoose = require('mongoose');
 const {
   createOfficeRouter,
+  createMailAssistantRuntime,
+  createMailAssistantRouter,
+  createMailAssistantCallbackRouter,
   tenantContextMiddleware,
   restoreTenantContextFromReq,
 } = require('@librechat/api');
@@ -16,11 +20,51 @@ const {
 const { createMulterInstance } = require('./files/multer');
 const images = require('./files/images');
 const db = require('~/models');
+const { getAppConfig } = require('~/server/services/Config');
 
 async function initialize() {
   const upload = await createMulterInstance();
   const { fileUploadIpLimiter, fileUploadUserLimiter } = createFileLimiters();
+  const mailAssistant = createMailAssistantRuntime({
+    collection: (name) => mongoose.connection.collection(name),
+    getUserById: db.getUserById,
+    getRoleByName: db.getRoleByName,
+    getAppConfig,
+    getAccessibleAgent: async (req, agentId) => {
+      const ids = await findAccessibleResources({
+        userId: req.user.id,
+        role: req.user.role,
+        resourceType: ResourceType.REMOTE_AGENT,
+        requiredPermissions: PermissionBits.VIEW,
+      });
+      if (!ids.length) return null;
+      return db.getAgent({ id: agentId, _id: { $in: ids } });
+    },
+    checkUserBan: async (ownerId) => {
+      let allowed = false;
+      await checkBan(
+        { user: { id: ownerId }, headers: {}, body: {}, get: () => undefined },
+        { status: () => ({ json: () => undefined }) },
+        (error) => {
+          if (error) throw error;
+          allowed = true;
+        },
+      );
+      if (!allowed) throw new Error('Das Benutzerkonto ist gesperrt.');
+    },
+    audit: db.recordAuditEntry,
+    createTransaction: db.createTransaction,
+    balance: {
+      getMultiplier: db.getMultiplier,
+      findBalanceByUser: db.findBalanceByUser,
+      createAutoRefillTransaction: db.createAutoRefillTransaction,
+      upsertBalanceFields: db.upsertBalanceFields,
+    },
+  });
+  mailAssistant?.engine.start();
   return createOfficeRouter({
+    mailAssistantRouter: createMailAssistantRouter(mailAssistant),
+    mailAssistantCallbackRouter: createMailAssistantCallbackRouter(mailAssistant),
     authenticate: [
       preAuthTenantMiddleware,
       requireRemoteAgentAuth,
