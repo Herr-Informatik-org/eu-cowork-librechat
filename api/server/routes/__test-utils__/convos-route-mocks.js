@@ -15,6 +15,8 @@ module.exports = {
     deleteConvoSharedLinksWithCleanup: jest.fn(),
     deleteAllSharedLinksWithCleanup: jest.fn(),
     deleteAgentCheckpoints: jest.fn(),
+    purgeBrainConversations: jest.fn().mockResolvedValue(undefined),
+    BrainServiceError: class BrainServiceError extends Error {},
     ...overrides,
   }),
 

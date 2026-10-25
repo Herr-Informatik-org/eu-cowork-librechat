@@ -235,15 +235,9 @@ describe('libreoffice (env gating + wrapper)', () => {
        * cause `convertOfficeToPdf` to throw and `tryLibreOfficePreview`
        * to swallow it. The dispatcher pipeline takes over from there. */
       process.env.OFFICE_PREVIEW_LIBREOFFICE = 'true';
-      const garbage = Buffer.from('this-is-definitely-not-a-docx');
-      let threw = false;
-      try {
-        const out = await tryLibreOfficePreview(garbage, 'docx', 512 * 1024);
-        expect(out).toBeNull();
-      } catch {
-        threw = true;
-      }
-      expect(threw).toBe(false);
+      // Plain text is a supported LibreOffice import, so truncate an actual ZIP instead.
+      const corruptDocument = readFixture('sample.docx').subarray(0, 32);
+      await expect(tryLibreOfficePreview(corruptDocument, 'docx', 512 * 1024)).resolves.toBeNull();
     });
   });
 

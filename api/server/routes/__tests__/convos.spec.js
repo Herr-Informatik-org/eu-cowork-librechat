@@ -48,6 +48,18 @@ describe('Convos Routes', () => {
   });
 
   describe('DELETE /all', () => {
+    it('keeps conversations when their owner-bound Brain cleanup is unavailable', async () => {
+      const { purgeBrainConversations, BrainServiceError } = require('@librechat/api');
+      purgeBrainConversations.mockRejectedValueOnce(new BrainServiceError('unavailable'));
+
+      const response = await request(app).delete('/api/convos/all');
+
+      expect(response.status).toBe(503);
+      expect(purgeBrainConversations).toHaveBeenCalledWith('test-user-123');
+      expect(deleteConvos).not.toHaveBeenCalled();
+      expect(deleteToolCalls).not.toHaveBeenCalled();
+    });
+
     it('prunes the deleted conversations’ agent checkpoints (bulk, ids from deleteConvos)', async () => {
       // HITL: a paused conversation's durable checkpoint must not outlive the conversation.
       const conversationIds = ['conv-a', 'conv-b'];

@@ -13,6 +13,8 @@ jest.mock('@librechat/api', () => ({
   countTokens: jest.fn().mockResolvedValue(10),
   sendFeedbackScore: jest.fn().mockResolvedValue(undefined),
   traceIdForMessage: jest.fn((messageId) => `trace-${messageId}`),
+  deleteBrainSources: jest.fn().mockResolvedValue(undefined),
+  BrainServiceError: class BrainServiceError extends Error {},
 }));
 
 jest.mock('@librechat/data-schemas', () => ({
@@ -183,6 +185,17 @@ describe('DELETE /:conversationId/:messageId – route handler', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('keeps the message if its owner-bound Brain sources cannot be deleted', async () => {
+    const { deleteBrainSources, BrainServiceError } = require('@librechat/api');
+    deleteBrainSources.mockRejectedValueOnce(new BrainServiceError('unavailable'));
+
+    const response = await request(app).delete('/api/messages/convo-1/msg-owned');
+
+    expect(response.status).toBe(503);
+    expect(deleteBrainSources).toHaveBeenCalledWith(authenticatedUserId, ['convo-1'], ['msg-owned']);
+    expect(deleteMessages).not.toHaveBeenCalled();
   });
 
   it('should pass user and conversationId in the deleteMessages filter', async () => {
