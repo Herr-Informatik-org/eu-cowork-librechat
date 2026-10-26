@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-26 — Mail-Vorgang persönlich zur Überarbeitung öffnen
+
+- Der Mail-Assistent kann die eigene Originalmail und einen weiterhin gültigen
+  Antwortentwurf gezielt als Textvorschau bereitstellen. Nur gespeicherte eigene
+  Ergebniskennungen werden akzeptiert; persönliche Zustimmung, Kontoberechtigung
+  und dieselbe Postfachverbindung werden vor und nach dem Abruf geprüft.
+- Inhaltsfreie Vorab-Protokollierung und feste lesende Graph-Abfragen schützen
+  diesen Weg. Es wird keine automatische Mailprüfung oder Modellanfrage gestartet;
+  die Vorschau speichert oder verändert keine Postfachinhalte. Veraltete, fehlende oder
+  bereits gesendete Entwürfe werden nicht als verfügbare Entwürfe ausgegeben.
+
 ## 2026-10-26 — Microsoft-Folgeseiten beim Mail-Verlauf lesen
 
 - Die rückwirkende Posteingangsprüfung akzeptiert von Microsoft gelieferte

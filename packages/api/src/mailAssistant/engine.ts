@@ -8,6 +8,7 @@ import type {
   MailMessage,
   MailPriority,
   MailResult,
+  MailResultContent,
   MailRuntimeAdapter,
   MailStore,
   StoredMailResult,
@@ -463,14 +464,121 @@ export function createMailAssistantEngine({
       ticking = false;
     }
   }
+  async function content(owner: string, id: string): Promise<MailResultContent> {
+    await adapter.authorize(owner);
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id))
+      throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
+    const job = await store.read(owner);
+    if (job?.settings.consentVersion !== MAIL_CONSENT_VERSION)
+      throw new MailAssistantError('Bitte bestätige zuerst deine persönliche Freigabe.');
+    const connection = await adapter.connection(owner);
+    if (!connection.connected || !connection.mailbox || !connection.generation)
+      throw new MailAssistantError('Bitte verbinde dein persönliches Microsoft-Konto erneut.');
+    const result = await store.result(owner, id);
+    if (!result) throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
+    const guard = async () => {
+      await adapter.authorize(owner);
+      const latest = await store.read(owner);
+      if (
+        latest?.settings.consentVersion !== MAIL_CONSENT_VERSION ||
+        latest.revision !== job.revision
+      )
+        throw new MailAssistantError(
+          'Die persönliche Freigabe wurde verändert. Bitte erneut öffnen.',
+        );
+      const current = await adapter.connection(owner);
+      if (
+        !current.connected ||
+        current.mailbox !== connection.mailbox ||
+        current.generation !== connection.generation
+      )
+        throw new MailAssistantError(
+          'Die Postfachverbindung wurde verändert. Bitte erneut verbinden.',
+        );
+      const currentResult = await store.result(owner, id);
+      if (
+        currentResult?.messageId !== result.messageId ||
+        currentResult.conversationId !== result.conversationId ||
+        currentResult.draftId !== result.draftId ||
+        currentResult.draftStatus !== result.draftStatus ||
+        currentResult.operationPending !== result.operationPending
+      )
+        throw new MailAssistantError(
+          'Der Mail-Vorgang wurde verändert. Bitte die Übersicht aktualisieren.',
+        );
+    };
+    await guard();
+    await adapter.audit(owner, 'result_content_requested', id);
+    const graph = await adapter.graph(owner, guard);
+    try {
+      const message = await graph.message(result.messageId);
+      await guard();
+      if (
+        message.id !== result.messageId ||
+        message.conversationId !== result.conversationId ||
+        message.isDraft
+      )
+        throw new MailAssistantError('Die Originalmail passt nicht mehr zum Mail-Vorgang.');
+      const response: MailResultContent = {
+        resultId: id,
+        mailbox: connection.mailbox,
+        message: {
+          subject: message.subject,
+          sender: message.sender,
+          receivedAt: message.receivedAt,
+          body: message.body,
+          bodyTruncated: message.bodyTruncated === true,
+        },
+      };
+      if (result.draftId || result.draftStatus !== 'none') response.draftUnavailable = true;
+      if (result.draftId && result.draftStatus === 'created' && !result.operationPending) {
+        try {
+          const draft = await graph.message(result.draftId);
+          await guard();
+          if (
+            draft.id === result.draftId &&
+            draft.isDraft &&
+            draft.conversationId === result.conversationId
+          ) {
+            response.draft = {
+              subject: draft.subject,
+              body: draft.body,
+              bodyTruncated: draft.bodyTruncated === true,
+            };
+            delete response.draftUnavailable;
+          }
+        } catch (error) {
+          if (!(error instanceof MailGraphError) || ![404, 410].includes(error.status)) throw error;
+        }
+      }
+      await guard();
+      await adapter.audit(owner, 'result_content_read', id);
+      await guard();
+      return response;
+    } catch (error) {
+      if (error instanceof MailGraphError) {
+        throw new MailAssistantError(
+          [404, 410].includes(error.status)
+            ? 'Die Originalmail ist nicht mehr verfügbar. Bitte in Outlook prüfen.'
+            : error.message,
+        );
+      }
+      throw error;
+    }
+  }
   return {
+    content,
     async status(owner: string) {
       await adapter.authorize(owner);
       const availability = await adapter.availability(owner);
       const job = await store.read(owner);
+      const connection = await adapter.connection(owner);
       return {
         ...availability,
-        connection: await adapter.connection(owner),
+        connection: {
+          connected: connection.connected,
+          ...(connection.mailbox ? { mailbox: connection.mailbox } : {}),
+        },
         settings: {
           ...(job?.settings ?? defaultMailSettings()),
           history: job?.settings.history ?? { mode: 'off' },

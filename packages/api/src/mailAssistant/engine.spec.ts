@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createMailAssistantEngine } from './engine';
-import { MailGraphError } from './graph';
+import { createMailGraph, MailGraphError } from './graph';
 import { defaultMailSettings } from './schedule';
 import type {
   MailJob,
@@ -153,7 +153,11 @@ function fixture() {
       modelLabel: 'Default · approved',
       modelFingerprint: 'a'.repeat(64),
     })),
-    connection: jest.fn(async () => ({ connected: true, mailbox: 'alice@example.invalid' })),
+    connection: jest.fn(async () => ({
+      connected: true,
+      mailbox: 'alice@example.invalid',
+      generation: 'connection-v1',
+    })),
     graph: jest.fn(async (_id, before) => {
       guard = before;
       return graph;
@@ -672,5 +676,238 @@ describe('mail assistant deterministic safety boundary', () => {
     expect(f.jobs.has(f.owner)).toBe(false);
     expect(f.results.size).toBe(0);
     expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('mail result content boundary', () => {
+  function preview() {
+    const f = fixture();
+    const id = 'result-1';
+    const result: StoredMailResult = {
+      id,
+      messageId: f.message.id,
+      conversationId: f.message.conversationId,
+      sourceHash: 'source',
+      categoryApplied: true,
+      subject: f.message.subject,
+      sender: f.message.sender,
+      receivedAt: f.message.receivedAt,
+      priority: 'normal',
+      summary: 'Zusammenfassung',
+      reason: 'Anfrage',
+      action: 'reply',
+      questions: [],
+      draftStatus: 'created',
+      draftId: 'draft-id',
+    };
+    f.results.set(`${f.owner}:${id}`, result);
+    const draft: MailMessage = {
+      ...f.message,
+      id: 'draft-id',
+      isDraft: true,
+      body: 'Aktueller Entwurf',
+    };
+    const originalRead = f.graph.message.getMockImplementation()!;
+    f.graph.message.mockImplementation(async (messageId) => {
+      await originalRead(messageId);
+      return structuredClone(messageId === draft.id ? draft : f.message);
+    });
+    return { ...f, id, result, draft };
+  }
+  it('reads only the owner-selected original and current draft while paused without invoking model or mutations', async () => {
+    const f = preview();
+    f.jobs.get(f.owner)!.settings.enabled = false;
+    const content = await f.engine.content(f.owner, f.id);
+    expect(content).toEqual({
+      resultId: f.id,
+      mailbox: 'alice@example.invalid',
+      message: {
+        subject: f.message.subject,
+        sender: f.message.sender,
+        receivedAt: f.message.receivedAt,
+        body: f.message.body,
+        bodyTruncated: false,
+      },
+      draft: { subject: f.draft.subject, body: f.draft.body, bodyTruncated: false },
+    });
+    expect(f.graph.message.mock.calls.map(([id]) => id)).toEqual(['mail', 'draft-id']);
+    expect(f.adapter.analyze).not.toHaveBeenCalled();
+    expect(f.adapter.availability).not.toHaveBeenCalled();
+    expect(f.graph.categorize).not.toHaveBeenCalled();
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    expect(f.graph.thread).not.toHaveBeenCalled();
+    expect(f.store.claim).not.toHaveBeenCalled();
+    expect(f.store.putResult).not.toHaveBeenCalled();
+    expect(f.adapter.audit).toHaveBeenNthCalledWith(1, f.owner, 'result_content_requested', f.id);
+    expect(f.adapter.audit).toHaveBeenNthCalledWith(2, f.owner, 'result_content_read', f.id);
+    expect((await f.engine.status(f.owner)).connection).not.toHaveProperty('generation');
+  });
+  it('cannot select another owner result or supply a Graph URL', async () => {
+    const f = preview();
+    f.jobs.set('bob', { ...f.jobs.get(f.owner)!, ownerId: 'bob' });
+    await expect(f.engine.content('bob', f.id)).rejects.toThrow('Mail-Vorgang nicht gefunden');
+    await expect(
+      f.engine.content(f.owner, 'https://graph.microsoft.com/v1.0/me/messages/a'),
+    ).rejects.toThrow();
+    expect(f.graph.message).not.toHaveBeenCalled();
+    expect(f.adapter.audit).not.toHaveBeenCalled();
+  });
+  it.each(['revoked', 'unauthorized', 'disconnected', 'generation-missing', 'audit-failed'])(
+    'fails closed before reading when %s',
+    async (reason) => {
+      const f = preview();
+      if (reason === 'revoked') delete f.jobs.get(f.owner)!.settings.consentVersion;
+      if (reason === 'unauthorized')
+        jest.spyOn(f.adapter, 'authorize').mockRejectedValue(new Error('denied'));
+      if (reason === 'disconnected')
+        jest.spyOn(f.adapter, 'connection').mockResolvedValue({ connected: false });
+      if (reason === 'generation-missing')
+        jest
+          .spyOn(f.adapter, 'connection')
+          .mockResolvedValue({ connected: true, mailbox: 'alice@example.invalid' });
+      if (reason === 'audit-failed')
+        jest.spyOn(f.adapter, 'audit').mockRejectedValue(new Error('audit failed'));
+      await expect(f.engine.content(f.owner, f.id)).rejects.toThrow();
+      expect(f.graph.message).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['none', 'existing', 'stale', 'uncertain', 'error'] as const)(
+    'does not treat stored draft state %s as editable',
+    async (state) => {
+      const f = preview();
+      f.result.draftStatus = state;
+      const content = await f.engine.content(f.owner, f.id);
+      expect(content.draft).toBeUndefined();
+      expect(content.draftUnavailable).toBe(true);
+      expect(f.graph.message).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each(['sent', 'wrong-conversation', 'wrong-id', 'deleted', 'gone'])(
+    'does not expose a %s draft',
+    async (state) => {
+      const f = preview();
+      if (state === 'sent') f.draft.isDraft = false;
+      if (state === 'wrong-conversation') f.draft.conversationId = 'other-conversation';
+      if (state === 'wrong-id') {
+        const read = f.graph.message.getMockImplementation()!;
+        f.graph.message.mockImplementation(async (id) => ({
+          ...(await read(id)),
+          ...(id === 'draft-id' && { id: 'other-id' }),
+        }));
+      }
+      if (state === 'deleted' || state === 'gone') {
+        const read = f.graph.message.getMockImplementation()!;
+        f.graph.message.mockImplementation(async (id) => {
+          if (id === 'draft-id') throw new MailGraphError(state === 'deleted' ? 404 : 410);
+          return read(id);
+        });
+      }
+      const content = await f.engine.content(f.owner, f.id);
+      expect(content.draft).toBeUndefined();
+      expect(content.draftUnavailable).toBe(true);
+    },
+  );
+  it('returns safe missing-original error and never reads its draft', async () => {
+    const f = preview();
+    f.graph.message.mockRejectedValue(new MailGraphError(404));
+    await expect(f.engine.content(f.owner, f.id)).rejects.toThrow(
+      'Die Originalmail ist nicht mehr verfügbar',
+    );
+    expect(f.graph.message).toHaveBeenCalledTimes(1);
+  });
+  it.each(['id', 'conversationId', 'isDraft'] as const)(
+    'rejects an original with changed %s',
+    async (field) => {
+      const f = preview();
+      if (field === 'isDraft') f.message.isDraft = true;
+      else f.message[field] = 'different';
+      await expect(f.engine.content(f.owner, f.id)).rejects.toThrow(
+        'Originalmail passt nicht mehr',
+      );
+      expect(f.graph.message).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each(['consent', 'connection', 'reauth', 'result'])(
+    'withholds content when %s changes during Graph response',
+    async (change) => {
+      const f = preview();
+      const read = f.graph.message.getMockImplementation()!;
+      f.graph.message.mockImplementation(async (id) => {
+        const value = await read(id);
+        if (change === 'consent') delete f.jobs.get(f.owner)!.settings.consentVersion;
+        if (change === 'connection')
+          jest.spyOn(f.adapter, 'connection').mockResolvedValue({ connected: false });
+        if (change === 'reauth')
+          jest.spyOn(f.adapter, 'connection').mockResolvedValue({
+            connected: true,
+            mailbox: 'alice@example.invalid',
+            generation: 'connection-v2',
+          });
+        if (change === 'result') f.results.delete(`${f.owner}:${f.id}`);
+        return value;
+      });
+      await expect(f.engine.content(f.owner, f.id)).rejects.toThrow();
+      expect(f.adapter.audit).not.toHaveBeenCalledWith(f.owner, 'result_content_read', f.id);
+    },
+  );
+  it('uses only fixed GET requests after audit and applies existing Graph text limits', async () => {
+    const f = preview();
+    const calls: Array<{ url: string; method: string }> = [];
+    jest.spyOn(f.adapter, 'graph').mockImplementation(async (_owner, beforeRequest) =>
+      createMailGraph({
+        beforeRequest,
+        token: async () => 'fixture-token',
+        fetch: async (input, init) => {
+          expect(f.adapter.audit).toHaveBeenCalledWith(f.owner, 'result_content_requested', f.id);
+          const url = new URL(String(input));
+          calls.push({ url: url.origin + url.pathname, method: init?.method ?? '' });
+          const draft = url.pathname.endsWith('/draft-id');
+          return new Response(
+            JSON.stringify({
+              id: draft ? 'draft-id' : 'mail',
+              conversationId: 'conversation',
+              subject: 'x'.repeat(600),
+              from: { emailAddress: { address: 'alice@example.invalid' } },
+              receivedDateTime: '2026-10-26T07:30:00Z',
+              isDraft: draft,
+              body: { content: 'x'.repeat(13000), contentType: 'text' },
+            }),
+          );
+        },
+      }),
+    );
+    const content = await f.engine.content(f.owner, f.id);
+    expect(calls).toEqual([
+      { url: 'https://graph.microsoft.com/v1.0/me/messages/mail', method: 'GET' },
+      { url: 'https://graph.microsoft.com/v1.0/me/messages/draft-id', method: 'GET' },
+    ]);
+    expect(content.message.subject).toHaveLength(500);
+    expect(content.message.body).toHaveLength(12000);
+    expect(content.message.bodyTruncated).toBe(true);
+    expect(content.draft?.body).toHaveLength(12000);
+    expect(content.draft?.bodyTruncated).toBe(true);
+    expect(content).not.toHaveProperty('message.id');
+  });
+  it('does not issue a Graph request if reauthorization races token acquisition', async () => {
+    const f = preview();
+    const fetch = jest.fn();
+    jest.spyOn(f.adapter, 'graph').mockImplementation(async (_owner, beforeRequest) =>
+      createMailGraph({
+        beforeRequest,
+        token: async () => {
+          jest.spyOn(f.adapter, 'connection').mockResolvedValue({
+            connected: true,
+            mailbox: 'alice@example.invalid',
+            generation: 'new-connection',
+          });
+          return 'old-fixture-token';
+        },
+        fetch,
+      }),
+    );
+    await expect(f.engine.content(f.owner, f.id)).rejects.toThrow(
+      'Postfachverbindung wurde verändert',
+    );
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

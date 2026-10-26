@@ -101,6 +101,7 @@ describe('Personal mailbox OAuth ownership and lifecycle', () => {
     expect(await instance.status(owner)).toEqual({
       connected: true,
       mailbox: 'person@example.com',
+      generation: expect.any(String),
     });
     const stored = await db.collection<MailCredential>('credentials').findOne({ _id: owner });
     expect(stored!.ciphertext).not.toContain('fixture-access');

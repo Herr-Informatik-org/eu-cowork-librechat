@@ -342,7 +342,9 @@ export function createMailOAuth(config: MailOAuthConfig, deps: OAuthDependencies
         .credentials()
         .findOne(
           { _id: ownerId },
-          { projection: { _id: 1, tenantId: 1, clientId: 1, email: 1, expiresAt: 1 } },
+          {
+            projection: { _id: 1, tenantId: 1, clientId: 1, email: 1, expiresAt: 1, generation: 1 },
+          },
         );
       return {
         connected: Boolean(
@@ -353,6 +355,7 @@ export function createMailOAuth(config: MailOAuthConfig, deps: OAuthDependencies
             record.email.trim().toLowerCase() === user.email.trim().toLowerCase(),
         ),
         mailbox: record?.email ?? null,
+        generation: record?.generation,
       };
     },
     async disconnect(ownerId: string): Promise<void> {
@@ -426,7 +429,9 @@ function hashBase64(value: string): string {
 export interface MailOAuth {
   start(ownerId: string): Promise<string>;
   complete(state: string, code: string): Promise<void>;
-  status(ownerId: string): Promise<{ connected: boolean; mailbox: string | null }>;
+  status(
+    ownerId: string,
+  ): Promise<{ connected: boolean; mailbox: string | null; generation?: string }>;
   disconnect(ownerId: string): Promise<void>;
   token(ownerId: string): Promise<string>;
 }

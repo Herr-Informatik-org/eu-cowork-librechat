@@ -7,7 +7,10 @@ import { createMailAssistantRouter, createMailAssistantCallbackRouter } from './
 import { defaultMailSettings } from './schedule';
 import type { MailAssistantRuntime } from './runtime';
 const owner = '64b123456789012345678901';
-function setup(runtime: MailAssistantRuntime | null = null) {
+function setup(
+  runtime: MailAssistantRuntime | null = null,
+  identity: { id?: string; tenantId?: string } = { id: owner },
+) {
   const app = express();
   app.use(express.json());
   app.use(
@@ -19,7 +22,7 @@ function setup(runtime: MailAssistantRuntime | null = null) {
             res.sendStatus(401);
             return;
           }
-          (req as ServerRequest).user = { id: owner } as IUser;
+          (req as ServerRequest).user = identity as IUser;
           next();
         },
       ],
@@ -47,6 +50,82 @@ describe('Personal mail HTTP boundary', () => {
       expect((await request(app).post(`/api/agents/office/mail-assistant${path}`)).status).toBe(
         401,
       );
+    expect(
+      (await request(app).get('/api/agents/office/mail-assistant/results/result-1/content')).status,
+    ).toBe(401);
+  });
+  it('uses authenticated ownership for bounded result content and disables response caching', async () => {
+    const content = jest.fn(async () => ({
+      resultId: 'result-1',
+      mailbox: 'person@example.invalid',
+      message: {
+        subject: 'Test',
+        sender: 'sender@example.invalid',
+        receivedAt: '2026-10-26T08:00:00Z',
+        body: 'Privater Inhalt',
+        bodyTruncated: false,
+      },
+    }));
+    const runtime: MailAssistantRuntime = {
+      engine: {
+        content,
+        status: jest.fn(),
+        settings: jest.fn(),
+        run: jest.fn(),
+        pause: jest.fn(),
+        disconnect: jest.fn(),
+        priority: jest.fn(),
+        tick: jest.fn(),
+        start: jest.fn(),
+        stop: jest.fn(),
+      },
+      oauth: {
+        start: jest.fn(),
+        complete: jest.fn(),
+        status: jest.fn(),
+        disconnect: jest.fn(),
+        token: jest.fn(),
+      },
+      adapter: {
+        authorize: jest.fn(),
+        availability: jest.fn(),
+        connection: jest.fn(),
+        graph: jest.fn(),
+        analyze: jest.fn(),
+        audit: jest.fn(),
+      },
+    };
+    const app = setup(runtime);
+    const response = await request(app)
+      .get(
+        '/api/agents/office/mail-assistant/results/result-1/content?owner=other-user&messageId=external',
+      )
+      .set('authorization', 'Bearer fixture');
+    expect(response.status).toBe(200);
+    expect(content).toHaveBeenCalledWith(owner, 'result-1');
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body.message.body).toBe('Privater Inhalt');
+    content.mockClear();
+    for (const id of ['invalid%20id', 'a'.repeat(129)]) {
+      const invalid = await request(app)
+        .get(`/api/agents/office/mail-assistant/results/${id}/content`)
+        .set('authorization', 'Bearer fixture');
+      expect(invalid.status).toBe(400);
+    }
+    expect(content).not.toHaveBeenCalled();
+    for (const identity of [{}, { id: owner, tenantId: 'other-tenant' }]) {
+      const unauthorized = await request(setup(runtime, identity))
+        .get('/api/agents/office/mail-assistant/results/result-1/content')
+        .set('authorization', 'Bearer fixture');
+      expect(unauthorized.status).toBe(identity.id ? 403 : 401);
+    }
+    expect(content).not.toHaveBeenCalled();
+    content.mockRejectedValueOnce(new Error('provider-private-token'));
+    const failure = await request(app)
+      .get('/api/agents/office/mail-assistant/results/result-1/content')
+      .set('authorization', 'Bearer fixture');
+    expect(failure.status).toBe(400);
+    expect(failure.text).not.toContain('provider-private-token');
   });
   it('returns complete safe defaults while the feature is off', async () => {
     const result = await request(setup())

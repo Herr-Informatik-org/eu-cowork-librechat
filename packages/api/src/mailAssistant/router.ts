@@ -132,6 +132,18 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
       res.json(await runtime!.engine.status(owner(req)));
     }),
   );
+  router.get(
+    '/results/:id/content',
+    safeRoute(async (req, res) => {
+      const id = z
+        .string()
+        .min(1)
+        .max(128)
+        .regex(/^[a-zA-Z0-9_-]+$/)
+        .parse(req.params.id);
+      res.json(await runtime!.engine.content(owner(req), id));
+    }),
+  );
   return router;
 }
 

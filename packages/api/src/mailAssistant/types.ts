@@ -69,6 +69,20 @@ export interface StoredMailResult extends MailResult {
   operationPending?: boolean;
 }
 
+export interface MailResultContent {
+  resultId: string;
+  mailbox: string;
+  message: {
+    subject: string;
+    sender: string;
+    receivedAt: string;
+    body: string;
+    bodyTruncated: boolean;
+  };
+  draft?: { subject: string; body: string; bodyTruncated: boolean };
+  draftUnavailable?: boolean;
+}
+
 export interface MailCheckpoint {
   url?: string;
   pending: string[];
@@ -154,7 +168,9 @@ export interface MailRuntimeAdapter {
     modelLabel: string;
     modelFingerprint?: string;
   }>;
-  connection(ownerId: string): Promise<{ connected: boolean; mailbox?: string }>;
+  connection(
+    ownerId: string,
+  ): Promise<{ connected: boolean; mailbox?: string; generation?: string }>;
   graph(ownerId: string, beforeRequest: () => Promise<void>): Promise<MailGraph>;
   analyze(
     ownerId: string,
@@ -198,6 +214,7 @@ export interface MailAssistantEngine {
   pause(owner: string): Promise<void>;
   disconnect(owner: string): Promise<void>;
   priority(owner: string, id: string, priority: MailPriority): Promise<void>;
+  content(owner: string, id: string): Promise<MailResultContent>;
   tick(): Promise<void>;
   start(): void;
   stop(): void;

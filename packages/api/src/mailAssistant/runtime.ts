@@ -468,7 +468,11 @@ export function createMailAssistantRuntime(
     },
     connection: async (ownerId) => {
       const state = await oauth.status(ownerId);
-      return { connected: state.connected, ...(state.mailbox ? { mailbox: state.mailbox } : {}) };
+      return {
+        connected: state.connected,
+        ...(state.mailbox ? { mailbox: state.mailbox } : {}),
+        ...(state.generation ? { generation: state.generation } : {}),
+      };
     },
     graph: async (ownerId, beforeRequest) =>
       createMailGraph({ token: () => oauth.token(ownerId), beforeRequest, fetch: request }),
