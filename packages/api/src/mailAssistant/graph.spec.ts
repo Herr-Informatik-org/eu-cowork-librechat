@@ -123,16 +123,87 @@ describe('fixed personal Graph adapter', () => {
     expect(request.mock.calls[1][0]).toBe(next);
   });
   test.each([
+    "mailFolders('inbox')",
+    "mailfolders('AQMk123-_+=')",
+    "mailFolders('AQMk123-_%2B%3D')",
+    'mailFolders(%27inbox%27)',
+    'mailFolders(%27AQMk123-_%2B%3D%27)',
+    "mailFolders(%27AQMk123-_%2B%3D')",
+    'mailFolders/AQMk123-_+=',
+    'mailFolders/AQMk123-_%2b%3d',
+  ])('reads the first and next historical page with Graph folder form %s', async (folder) => {
+    const { graph, request } = setup();
+    const next =
+      `https://graph.microsoft.com/v1.0/me/${folder}/messages` +
+      "?$skiptoken=opaque%2Bvalue%2f%3D&custom=a'b+Ω&$filter=receivedDateTime%20lt%202026-10-26T07%3A00%3A00Z";
+    request.mockResolvedValueOnce(response({ value: [row], '@odata.nextLink': next }));
+    const first = await graph.historyPage(undefined, '2026-10-26T07:00:00Z');
+    expect(first).toEqual({
+      messages: [expect.objectContaining({ id: row.id, body: '' })],
+      nextUrl: next,
+      hasMore: true,
+    });
+    request.mockResolvedValueOnce(response({ value: [] }));
+    expect(await graph.historyPage(undefined, '2026-10-26T07:00:00Z', first.nextUrl)).toEqual({
+      messages: [],
+      hasMore: false,
+    });
+    expect(request.mock.calls[1][0]).toBe(next);
+    expect(request.mock.calls.map(([, init]) => init.method)).toEqual(['GET', 'GET']);
+  });
+  test.each([
     'https://attacker.test/v1.0/me/mailFolders/inbox/messages',
+    'http://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages',
+    'https://graph.microsoft.com:444/v1.0/me/mailFolders/inbox/messages',
+    'https://graph.microsoft.com.attacker.test/v1.0/me/mailFolders/inbox/messages',
     'https://graph.microsoft.com/v1.0/users/other/mailFolders/inbox/messages',
     'https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages',
+    "https://graph.microsoft.com/v1.0/me/mailFolders('sentitems')/messages",
+    'https://graph.microsoft.com/v1.0/me/mailFolders/drafts/messages',
+    "https://graph.microsoft.com/v1.0/me/mailFolders('deleteditems')/messages",
+    "https://graph.microsoft.com/v1.0/me/mailFolders('%73entitems')/messages",
+    'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/childFolders/AQMk123/messages',
     'https://graph.microsoft.com/v1.0/me/messages',
     'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta',
     'https://name:secret@graph.microsoft.com/v1.0/me/mailFolders/inbox/messages',
+    'https://@graph.microsoft.com/v1.0/me/mailFolders/inbox/messages',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages#',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages#fragment',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages\n',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/../inbox/messages',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/%2e%2e/inbox/messages',
+    'https://graph.microsoft.com/v1.0/me/mailFolders\\inbox/messages',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/AQMk%2F123/messages',
+    "https://graph.microsoft.com/v1.0/me/mailFolders('AQMk%5C123')/messages",
+    "https://graph.microsoft.com/v1.0/me/mailFolders('AQMk%2E123')/messages",
+    "https://graph.microsoft.com/v1.0/me/mailFolders('AQMk%00123')/messages",
+    "https://graph.microsoft.com/v1.0/me/mailFolders('AQMk%27123')/messages",
+    "https://graph.microsoft.com/v1.0/me/mailFolders('AQMk%252F123')/messages",
+    'https://graph.microsoft.com/v1.0/me/mailFolders(%2527inbox%2527)/messages',
+    'https://graph.microsoft.com/v1.0/me/mailFolders%28%27inbox%27%29/messages',
+    "https://graph.microsoft.com/v1.0/me/mailFolders('AQMk%123')/messages",
+    "https://graph.microsoft.com/v1.0/me/mailFolders('AQMk%ZZ')/messages",
+    "https://graph.microsoft.com/v1.0/me/mailFolders('')/messages",
   ])('rejects unsafe historical next link %s', async (url) => {
-    const { graph, request } = setup();
-    await expect(graph.historyPage(undefined, '2026-10-26T07:00:00Z', url)).rejects.toThrow();
+    const { graph, request, token, beforeRequest } = setup();
+    await expect(graph.historyPage(undefined, '2026-10-26T07:00:00Z', url)).rejects.toThrow(
+      'Die nächste Posteingangsseite von Microsoft konnte nicht sicher geprüft werden.',
+    );
     expect(request).not.toHaveBeenCalled();
+    expect(token).not.toHaveBeenCalled();
+    expect(beforeRequest).not.toHaveBeenCalled();
+  });
+  test('rejects an unsafe link in a Graph response without leaking it or following it', async () => {
+    const { graph, request } = setup();
+    const next = 'https://attacker.test/private-folder?token=private-token';
+    request.mockResolvedValueOnce(response({ value: [row], '@odata.nextLink': next }));
+    const error = await graph
+      .historyPage(undefined, '2026-10-26T07:00:00Z')
+      .catch((value) => value);
+    expect(error).toBeInstanceOf(MailGraphError);
+    expect(error.status).toBe(400);
+    expect(error.message).not.toMatch(/attacker|private-folder|private-token|nicht erreichbar/);
+    expect(request).toHaveBeenCalledTimes(1);
   });
   test('rechecks pause after obtaining token and never sends request if stopped', async () => {
     const { graph, beforeRequest, request } = setup();

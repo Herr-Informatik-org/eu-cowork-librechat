@@ -3,6 +3,24 @@ import type { MailFetch, MailGraph, MailMessage } from './types';
 const origin = 'https://graph.microsoft.com';
 const fields =
   'id,conversationId,changeKey,subject,from,receivedDateTime,sentDateTime,categories,isDraft,webLink,parentFolderId';
+const otherFolderAliases = new Set([
+  'archive',
+  'clutter',
+  'conflicts',
+  'conversationhistory',
+  'deleteditems',
+  'drafts',
+  'junkemail',
+  'localfailures',
+  'msgfolderroot',
+  'outbox',
+  'recoverableitemsdeletions',
+  'scheduled',
+  'searchfolders',
+  'sentitems',
+  'serverfailures',
+  'syncissues',
+]);
 const text = (value: unknown, max: number) =>
   typeof value === 'string' ? value.slice(0, max) : '';
 
@@ -20,6 +38,14 @@ export class MailGraphError extends Error {
             ? 'Microsoft begrenzt die Anfragen. Die Verarbeitung pausiert bis zur nächsten Prüfung.'
             : 'Microsoft ist momentan nicht erreichbar. Bitte prüfe die Verbindung.',
     );
+  }
+}
+
+class MailHistoryLinkError extends MailGraphError {
+  constructor() {
+    super(400);
+    this.message =
+      'Die nächste Posteingangsseite von Microsoft konnte nicht sicher geprüft werden. Bitte den Support kontaktieren.';
   }
 }
 
@@ -134,21 +160,32 @@ export function createMailGraph({
     return url.pathname + url.search;
   }
   function historyPath(value: string): string {
-    let url: URL;
     try {
-      url = new URL(value);
+      if (/[\\\u0000-\u0020\u007f]/.test(value)) throw new MailHistoryLinkError();
+      const raw = /^https:\/\/graph\.microsoft\.com(?::443)?(\/[^?#]*)(\?[^#]*)?$/i.exec(value);
+      const url = new URL(value);
+      if (
+        !raw ||
+        raw[1] !== url.pathname ||
+        url.origin !== origin ||
+        url.username ||
+        url.password ||
+        url.hash
+      )
+        throw new MailHistoryLinkError();
+      const path =
+        /^\/v1\.0\/me\/mailfolders(?:\/([^/]+)|\((?:'|%27)(.+?)(?:'|%27)\))\/messages$/i.exec(
+          raw[1],
+        );
+      if (!path) throw new MailHistoryLinkError();
+      const folder = decodeURIComponent(path[1] ?? path[2]);
+      if (!/^[A-Za-z0-9_+=-]+$/.test(folder) || otherFolderAliases.has(folder.toLowerCase()))
+        throw new MailHistoryLinkError();
+      // Only Graph responses and owner-bound encrypted checkpoints supply these opaque links.
+      return raw[1] + (raw[2] ?? '');
     } catch {
-      throw new MailGraphError(400);
+      throw new MailHistoryLinkError();
     }
-    if (
-      url.origin !== origin ||
-      url.username ||
-      url.password ||
-      url.hash ||
-      !/^\/v1\.0\/me\/mailFolders\/inbox\/messages$/i.test(url.pathname)
-    )
-      throw new MailGraphError(400);
-    return url.pathname + url.search;
   }
   const id = (value: string) => {
     if (!value || value.length > 2048 || /[\r\n]/.test(value)) throw new MailGraphError(400);

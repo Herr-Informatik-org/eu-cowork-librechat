@@ -1,5 +1,14 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-26 — Microsoft-Folgeseiten beim Mail-Verlauf lesen
+
+- Die rückwirkende Posteingangsprüfung akzeptiert von Microsoft gelieferte
+  Folgeseiten mit aufgelöster Ordner-ID und OData-Klammerform. Die erste Seite
+  wird dadurch bei grösseren Posteingängen nicht mehr vor der Verarbeitung verworfen.
+- Zielhost, eigenes Postfach, Nachrichten-Sammlung und sichere Pfadsegmente bleiben
+  geprüft; andere bekannte Ordnernamen und manipulierte Links werden abgewiesen.
+  Eine nicht sicher prüfbare Folgeseite wird als solche gemeldet.
+
 ## 2026-10-26 — Freiwillige Prüfung bestehender Eingangsmails
 
 - Persönliche Einstellungen erlauben eine rückwirkende Prüfung seit einem Datum
