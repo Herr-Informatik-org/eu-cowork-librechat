@@ -1,11 +1,18 @@
 import type { Collection, Document } from 'mongodb';
-import type { MailCheckpoint, MailJob, MailStore, StoredMailResult } from './types';
+import type {
+  MailCheckpoint,
+  MailHistoryCheckpoint,
+  MailJob,
+  MailStore,
+  StoredMailResult,
+} from './types';
 import type { MailCodec } from './privateData';
-import { nextMailRun } from './schedule';
+import { nextMailRun, mailHistoryStart } from './schedule';
 
-interface Row extends Omit<MailJob, 'checkpoint'> {
+interface Row extends Omit<MailJob, 'checkpoint' | 'history'> {
   _id: string;
   checkpointEncrypted?: string;
+  historyEncrypted?: string;
   results?: Record<string, { encrypted: string; updatedAt: Date }>;
 }
 export interface MailDraftOperation {
@@ -27,11 +34,18 @@ export function createMongoMailStore({
   codec: MailCodec;
 }): MailStore {
   const decode = (row: Row): MailJob => {
-    const { checkpointEncrypted, results: _results, _id: _id, ...job } = row;
+    const { checkpointEncrypted, historyEncrypted, results: _results, _id: _id, ...job } = row;
     return {
       ...job,
       ...(checkpointEncrypted && {
         checkpoint: codec.open<MailCheckpoint>(row.ownerId, 'checkpoint', checkpointEncrypted),
+      }),
+      ...(historyEncrypted && {
+        history: codec.open<MailHistoryCheckpoint>(
+          row.ownerId,
+          'history-checkpoint',
+          historyEncrypted,
+        ),
       }),
     };
   };
@@ -42,6 +56,8 @@ export function createMongoMailStore({
     }
     if (fields.checkpoint)
       result.checkpointEncrypted = codec.seal(owner, 'checkpoint', fields.checkpoint);
+    if (fields.history)
+      result.historyEncrypted = codec.seal(owner, 'history-checkpoint', fields.history);
     return result;
   };
   const read = async (owner: string) => {
@@ -51,21 +67,60 @@ export function createMongoMailStore({
   return {
     read,
     async saveSettings(ownerId, settings, now) {
-      const old = await read(ownerId);
-      await collection().updateOne(
-        { _id: ownerId, ownerId },
-        {
-          $set: {
-            settings,
-            nextRunAt: nextMailRun(settings, now) ?? '',
-            ...(settings.enabled && !old?.enabledAt && { enabledAt: now.toISOString() }),
-          },
-          $inc: { revision: 1 },
-          $setOnInsert: { ownerId },
-          $unset: { leaseToken: '', leaseUntil: '' },
-        },
-        { upsert: true },
-      );
+      let observedExisting = false;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const old = await read(ownerId);
+        if (!old && observedExisting)
+          throw Error('Die persönliche Verbindung wurde während des Speicherns getrennt.');
+        observedExisting ||= !!old;
+        const selection = settings.history ?? { mode: 'off' };
+        const previous = old?.settings.history ?? { mode: 'off' };
+        const changed =
+          selection.mode !== previous.mode ||
+          selection.from !== previous.from ||
+          (selection.mode === 'since' && settings.timeZone !== old?.settings.timeZone);
+        const until = old?.enabledAt ?? now.toISOString();
+        const history: MailHistoryCheckpoint | undefined =
+          settings.enabled && selection.mode !== 'off' && (!old?.history || changed)
+            ? {
+                ...(selection.mode === 'since' && {
+                  from: mailHistoryStart(selection.from!, settings.timeZone),
+                }),
+                until,
+                pending: [],
+                processed: 0,
+                completed: false,
+                hasMore: true,
+              }
+            : undefined;
+        try {
+          const saved = await collection().updateOne(
+            { _id: ownerId, ownerId, revision: old ? old.revision : { $exists: false } },
+            {
+              $set: {
+                settings,
+                nextRunAt: nextMailRun(settings, now) ?? '',
+                ...(settings.enabled && !old?.enabledAt && { enabledAt: until }),
+                ...(history && {
+                  historyEncrypted: codec.seal(ownerId, 'history-checkpoint', history),
+                }),
+              },
+              $inc: { revision: 1 },
+              $setOnInsert: { ownerId },
+              $unset: {
+                leaseToken: '',
+                leaseUntil: '',
+                ...(!history && (changed || selection.mode === 'off') && { historyEncrypted: '' }),
+              },
+            },
+            { upsert: !old },
+          );
+          if (saved.matchedCount || saved.upsertedCount) return;
+        } catch (error) {
+          if (!(error instanceof Error && 'code' in error && error.code === 11000)) throw error;
+        }
+      }
+      throw Error('Die Einstellungen wurden gleichzeitig geändert. Bitte erneut speichern.');
     },
     async pause(ownerId) {
       await collection().updateOne(

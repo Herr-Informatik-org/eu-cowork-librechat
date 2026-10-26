@@ -20,6 +20,7 @@ export interface MailSettings {
   timeZone: string;
   intervalMinutes: 15 | 30 | 60;
   consentVersion?: string;
+  history?: { mode: 'off' | 'since' | 'all'; from?: string };
 }
 
 export interface MailMessage {
@@ -72,6 +73,15 @@ export interface MailCheckpoint {
   url?: string;
   pending: string[];
   nextUrl?: string;
+  hasMore?: boolean;
+}
+
+export interface MailHistoryCheckpoint extends MailCheckpoint {
+  from?: string;
+  until: string;
+  processed: number;
+  completed: boolean;
+  nextFirst?: 'live' | 'history';
 }
 
 export interface MailJob {
@@ -85,6 +95,7 @@ export interface MailJob {
   leaseToken?: string;
   leaseUntil?: Date;
   checkpoint?: MailCheckpoint;
+  history?: MailHistoryCheckpoint;
 }
 
 export interface MailStore {
@@ -120,7 +131,15 @@ export interface MailStore {
 
 export interface MailGraph {
   identity(): Promise<{ id: string; mail: string; userPrincipalName: string }>;
-  page(since: string, url?: string): Promise<{ messages: MailMessage[]; nextUrl?: string }>;
+  page(
+    since: string,
+    url?: string,
+  ): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }>;
+  historyPage(
+    from: string | undefined,
+    until: string,
+    url?: string,
+  ): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }>;
   message(id: string): Promise<MailMessage>;
   thread(id: string): Promise<{ messages: MailMessage[]; complete: boolean }>;
   categorize(id: string, categories: string[], etag?: string): Promise<void>;
@@ -158,6 +177,16 @@ export interface MailAssistantStatus {
     nextRunAt?: string;
     lastError?: string;
     pending: number;
+    hasMore: boolean;
+    history: {
+      mode: 'off' | 'since' | 'all';
+      processed: number;
+      pending: number;
+      hasMore: boolean;
+      completed: boolean;
+      from?: string;
+      until?: string;
+    };
   };
   results: MailResult[];
 }

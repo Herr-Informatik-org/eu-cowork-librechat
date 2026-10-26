@@ -1,5 +1,19 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-26 — Freiwillige Prüfung bestehender Eingangsmails
+
+- Persönliche Einstellungen erlauben eine rückwirkende Prüfung seit einem Datum
+  in der gewählten Zeitzone oder für den gesamten bestehenden Posteingang. Standard bleibt aus.
+- Separater verschlüsselter Fortschritt ergänzt die laufende Prüfung neuer Eingänge.
+  Der historische Zeitraum endet unveränderlich bei der ersten persönlichen Aktivierung;
+  pro Aufruf werden höchstens 20 Nachrichten verarbeitet. Nach vier Minuten beginnt
+  keine weitere Nachricht; ein bereits laufender Aufruf kann länger dauern.
+  Neue und bestehende Eingänge wechseln sich bei der Vorrangigkeit ab, damit langsame
+  Modellantworten keine der beiden Prüfungen dauerhaft aufhalten.
+- Offene Folgeseiten und historische Fortschritte werden ausdrücklich angezeigt.
+  Pausen, Kontobindung, persönliche Freigabe, Schutz vorhandener Entwürfe und Versandverbot
+  gelten unverändert; zusätzliche Microsoft-Berechtigungen werden nicht benötigt.
+
 ## 2026-10-25 — Freiwilliger persönlicher Mail-Assistent
 
 - Neue Office-API für eigene Microsoft-Postfachverbindung, ausdrückliche persönliche

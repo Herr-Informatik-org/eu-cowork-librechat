@@ -1,4 +1,10 @@
-import { defaultMailSettings, insideMailWindow, mailSettingsSchema, nextMailRun } from './schedule';
+import {
+  defaultMailSettings,
+  insideMailWindow,
+  mailSettingsSchema,
+  nextMailRun,
+  mailHistoryStart,
+} from './schedule';
 import { createMailCodec } from './privateData';
 
 describe('personal mail privacy and working windows', () => {
@@ -18,6 +24,31 @@ describe('personal mail privacy and working windows', () => {
       mailSettingsSchema.safeParse({ ...settings, mailbox: 'other@example.com' }).success,
     ).toBe(false);
     expect(mailSettingsSchema.safeParse(settings).success).toBe(true);
+  });
+  test('history defaults off and accepts only explicit valid ranges', () => {
+    expect(defaultMailSettings().history).toEqual({ mode: 'off' });
+    expect(mailSettingsSchema.parse({ ...settings, history: undefined }).history).toEqual({
+      mode: 'off',
+    });
+    for (const history of [
+      { mode: 'since' },
+      { mode: 'since', from: '2026-02-30' },
+      { mode: 'since', from: '0000-01-01' },
+      { mode: 'all', from: '2026-01-01' },
+      { mode: 'all', mailbox: 'other' },
+    ])
+      expect(mailSettingsSchema.safeParse({ ...settings, history }).success).toBe(false);
+    expect(mailSettingsSchema.safeParse({ ...settings, history: { mode: 'all' } }).success).toBe(
+      true,
+    );
+  });
+  test.each([
+    ['2026-03-29', '2026-03-28T23:00:00.000Z'],
+    ['2026-03-30', '2026-03-29T22:00:00.000Z'],
+    ['2026-10-25', '2026-10-24T22:00:00.000Z'],
+    ['2026-10-26', '2026-10-25T23:00:00.000Z'],
+  ])('historical date %s starts at midnight in Zurich (%s)', (date, expected) => {
+    expect(mailHistoryStart(date, 'Europe/Zurich')).toBe(expected);
   });
   test.each(['Bad/Zone', '', 'Europe/Zurich<script>'])('rejects invalid zone %s', (timeZone) => {
     expect(mailSettingsSchema.safeParse({ ...settings, timeZone }).success).toBe(false);

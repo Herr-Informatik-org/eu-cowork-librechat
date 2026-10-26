@@ -119,13 +119,19 @@ function fixture() {
     })),
     page: jest.fn(async () => {
       await guard();
-      return { messages: [copy(message)], nextUrl: 'cursor' };
+      return { messages: [copy(message)], nextUrl: 'cursor', hasMore: false };
     }),
-    message: jest.fn(async () => {
+    historyPage: jest.fn(
+      async (): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }> => {
+        await guard();
+        return { messages: [copy(message)], hasMore: false };
+      },
+    ),
+    message: jest.fn(async (_id: string) => {
       await guard();
       return copy(message);
     }),
-    thread: jest.fn(async () => {
+    thread: jest.fn(async (_conversation: string) => {
       await guard();
       return { messages: [copy(message)], complete: true };
     }),
@@ -182,6 +188,246 @@ function fixture() {
 }
 
 describe('mail assistant deterministic safety boundary', () => {
+  function historyFixture() {
+    const f = fixture();
+    const job = f.jobs.get(f.owner)!;
+    job.settings.history = { mode: 'all' };
+    job.history = {
+      until: job.enabledAt!,
+      pending: [],
+      processed: 0,
+      completed: false,
+      hasMore: true,
+    };
+    f.message.receivedAt = '2026-10-25T07:30:00Z';
+    f.graph.page.mockResolvedValue({ messages: [], nextUrl: 'live-cursor', hasMore: false });
+    return f;
+  }
+  function backloggedFixture() {
+    const f = historyFixture();
+    const messages = new Map<string, MailMessage>();
+    for (const stream of ['history', 'live']) {
+      for (let i = 0; i < 20; i++) {
+        const id = `${stream}-${i}`;
+        messages.set(id, {
+          ...f.message,
+          id,
+          conversationId: id,
+          receivedAt: stream === 'history' ? '2026-10-25T07:30:00Z' : '2026-10-26T07:30:00Z',
+        });
+      }
+    }
+    f.graph.historyPage.mockResolvedValue({
+      messages: [...messages.values()].filter((mail) => mail.id.startsWith('history-')),
+      hasMore: false,
+    });
+    f.graph.page.mockResolvedValue({
+      messages: [...messages.values()].filter((mail) => mail.id.startsWith('live-')),
+      nextUrl: 'live-cursor',
+      hasMore: false,
+    });
+    const message = f.graph.message.getMockImplementation()!;
+    f.graph.message.mockImplementation(async (id) => {
+      await message(id);
+      return structuredClone(messages.get(id)!);
+    });
+    const thread = f.graph.thread.getMockImplementation()!;
+    f.graph.thread.mockImplementation(async (id) => {
+      await thread(id);
+      return { messages: [structuredClone(messages.get(id)!)], complete: true };
+    });
+    (f.adapter.analyze as jest.Mock).mockResolvedValue({
+      priority: 'normal',
+      action: 'information',
+      summary: 'Info',
+      reason: 'Grund',
+      questions: [],
+      draft: '',
+    });
+    return f;
+  }
+  test('live and historical backlogs share the twenty-message limit without losing either cursor', async () => {
+    const f = backloggedFixture();
+    await f.engine.run(f.owner);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(20);
+    expect(f.jobs.get(f.owner)!.history).toMatchObject({ processed: 10, completed: false });
+    expect(f.jobs.get(f.owner)!.history!.pending).toHaveLength(10);
+    expect(f.jobs.get(f.owner)!.checkpoint!.pending).toHaveLength(10);
+    await f.engine.run(f.owner);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(40);
+    expect(f.jobs.get(f.owner)!.history).toMatchObject({ processed: 20, completed: true });
+    expect(f.jobs.get(f.owner)!.checkpoint).toMatchObject({ pending: [], url: 'live-cursor' });
+    expect(f.graph.historyPage).toHaveBeenCalledTimes(1);
+    expect(f.graph.page).toHaveBeenCalledTimes(1);
+  });
+  test('slow model calls alternate priority durably so neither backlog starves across runs', async () => {
+    const f = backloggedFixture();
+    let clock = Date.parse('2026-10-26T08:00:00Z');
+    const analyze = f.adapter.analyze;
+    f.adapter.analyze = jest.fn(async (...args) => {
+      const result = await analyze(...args);
+      clock += 60_000;
+      f.now(new Date(clock).toISOString());
+      return result;
+    });
+    await f.engine.run(f.owner);
+    expect(f.jobs.get(f.owner)!.history).toMatchObject({ processed: 4, nextFirst: 'live' });
+    expect(f.graph.page).not.toHaveBeenCalled();
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(4);
+    await f.engine.run(f.owner);
+    expect(f.jobs.get(f.owner)!.history).toMatchObject({ processed: 4, nextFirst: 'history' });
+    expect(f.jobs.get(f.owner)!.checkpoint!.pending).toHaveLength(16);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(8);
+    await f.engine.run(f.owner);
+    expect(f.jobs.get(f.owner)!.history).toMatchObject({ processed: 8, nextFirst: 'live' });
+    expect(f.jobs.get(f.owner)!.checkpoint!.pending).toHaveLength(16);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(12);
+    expect(f.graph.historyPage).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+  });
+  test('history is opt-in and old live-page metadata never triggers body reads', async () => {
+    const f = fixture();
+    f.message.receivedAt = '2026-10-25T07:30:00Z';
+    await f.engine.run(f.owner);
+    expect(f.graph.message).not.toHaveBeenCalled();
+    expect(f.graph.historyPage).not.toHaveBeenCalled();
+    expect((await f.engine.status(f.owner)).activity.history).toMatchObject({
+      mode: 'off',
+      hasMore: false,
+    });
+  });
+  test('historical entries use the same own-mail draft boundary and never restart after completion', async () => {
+    const f = historyFixture();
+    await f.engine.run(f.owner);
+    const status = await f.engine.status(f.owner);
+    expect(status.activity.history).toMatchObject({
+      processed: 1,
+      completed: true,
+      hasMore: false,
+      until: f.jobs.get(f.owner)!.enabledAt,
+    });
+    expect(status.results).toHaveLength(1);
+    expect(f.graph.historyPage).toHaveBeenCalledWith(undefined, '2026-10-26T07:00:00Z', undefined);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    await f.engine.run(f.owner);
+    expect(f.graph.historyPage).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect(f.jobs.get(f.owner)!.checkpoint?.url).toBe('live-cursor');
+  });
+  test('empty historical pages still report more work and resume at their own cursor', async () => {
+    const f = historyFixture();
+    f.graph.historyPage.mockResolvedValueOnce({
+      messages: [],
+      nextUrl: 'history-next',
+      hasMore: true,
+    });
+    await f.engine.run(f.owner);
+    expect((await f.engine.status(f.owner)).activity.history).toMatchObject({
+      processed: 0,
+      pending: 0,
+      hasMore: true,
+      completed: false,
+    });
+    await f.engine.run(f.owner);
+    expect(f.graph.historyPage).toHaveBeenLastCalledWith(
+      undefined,
+      '2026-10-26T07:00:00Z',
+      'history-next',
+    );
+    expect((await f.engine.status(f.owner)).activity.history.completed).toBe(true);
+  });
+  test('live next pages are distinguished from a completed delta round', async () => {
+    const f = fixture();
+    f.graph.page
+      .mockResolvedValueOnce({ messages: [], nextUrl: 'next-page', hasMore: true })
+      .mockResolvedValueOnce({ messages: [], nextUrl: 'delta-token', hasMore: false });
+    await f.engine.run(f.owner);
+    expect((await f.engine.status(f.owner)).activity).toMatchObject({ pending: 0, hasMore: true });
+    await f.engine.run(f.owner);
+    expect((await f.engine.status(f.owner)).activity).toMatchObject({ pending: 0, hasMore: false });
+    f.jobs.get(f.owner)!.checkpoint = { pending: [], url: 'legacy-cursor' };
+    expect((await f.engine.status(f.owner)).activity.hasMore).toBe(true);
+  });
+  test('historical metadata outside the frozen range is discarded before body reads', async () => {
+    const f = historyFixture();
+    const job = f.jobs.get(f.owner)!;
+    job.settings.history = { mode: 'since', from: '2026-10-24' };
+    job.history!.from = '2026-10-23T22:00:00.000Z';
+    f.graph.historyPage.mockResolvedValue({
+      messages: [
+        { ...f.message, receivedAt: '2026-10-23T21:59:59Z' },
+        { ...f.message, id: 'newer', receivedAt: job.enabledAt! },
+        { ...f.message, id: 'draft', isDraft: true },
+      ],
+      hasMore: false,
+    });
+    await f.engine.run(f.owner);
+    expect(f.graph.message).not.toHaveBeenCalled();
+    expect(f.adapter.analyze).not.toHaveBeenCalled();
+  });
+  test.each(['pause', 'settings', 'disconnect'] as const)(
+    'historical processing stops after %s before a body read',
+    async (action) => {
+      const f = historyFixture();
+      f.graph.historyPage.mockImplementation(async () => {
+        if (action === 'pause') await f.engine.pause(f.owner);
+        else if (action === 'disconnect') await f.engine.disconnect(f.owner);
+        else
+          await f.store.saveSettings(
+            f.owner,
+            { ...f.jobs.get(f.owner)!.settings, history: { mode: 'off' } },
+            new Date(),
+          );
+        return { messages: [f.message], hasMore: false };
+      });
+      await f.engine.run(f.owner);
+      expect(f.graph.message).not.toHaveBeenCalled();
+      expect(f.adapter.analyze).not.toHaveBeenCalled();
+      expect(f.graph.categorize).not.toHaveBeenCalled();
+    },
+  );
+  test('historical model completion cannot write after a settings revision', async () => {
+    const f = historyFixture();
+    const analyze = f.adapter.analyze;
+    f.adapter.analyze = async (...args) => {
+      const result = await analyze(...args);
+      await f.store.saveSettings(
+        f.owner,
+        { ...f.jobs.get(f.owner)!.settings, history: { mode: 'off' } },
+        new Date(),
+      );
+      return result;
+    };
+    await f.engine.run(f.owner);
+    expect(f.graph.categorize).not.toHaveBeenCalled();
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+  });
+  test('historical processing preserves human drafts and account boundaries', async () => {
+    const f = historyFixture();
+    f.graph.thread.mockResolvedValue({
+      complete: true,
+      messages: [f.message, { ...f.message, id: 'draft', isDraft: true }],
+    });
+    await expect(f.engine.run('other-user')).rejects.toThrow();
+    expect(f.graph.historyPage).not.toHaveBeenCalled();
+    await f.engine.run(f.owner);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    expect((await f.engine.status(f.owner)).results[0].draftStatus).toBe('existing');
+  });
+  test('historical range changes can rescan without duplicating completed draft operations', async () => {
+    const f = historyFixture();
+    await f.engine.run(f.owner);
+    f.results.clear();
+    f.jobs.get(f.owner)!.history = {
+      until: f.jobs.get(f.owner)!.enabledAt!,
+      pending: [],
+      processed: 0,
+      completed: false,
+      hasMore: true,
+    };
+    await f.engine.run(f.owner);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+  });
   test('creates a reply draft and keeps existing categories, questions only in overview', async () => {
     const f = fixture();
     await f.engine.run(f.owner);

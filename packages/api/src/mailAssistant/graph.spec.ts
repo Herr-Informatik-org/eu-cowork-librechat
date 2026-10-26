@@ -33,6 +33,7 @@ describe('fixed personal Graph adapter', () => {
     expect(Object.keys(graph).sort()).toEqual([
       'categorize',
       'createReply',
+      'historyPage',
       'identity',
       'message',
       'page',
@@ -71,6 +72,67 @@ describe('fixed personal Graph adapter', () => {
       "https://graph.microsoft.com/v1.0/me/mailfolders('AQMk123==')/messages/delta?$deltatoken=abc";
     request.mockResolvedValue(response({ value: [row], '@odata.deltaLink': url }));
     expect((await graph.page('2026-10-26T08:00:00Z', url)).nextUrl).toBe(url);
+  });
+  test('distinguishes empty live nextLink pages from a completed delta round', async () => {
+    const { graph, request } = setup();
+    const url =
+      'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?$skiptoken=opaque';
+    request.mockResolvedValueOnce(response({ value: [], '@odata.nextLink': url }));
+    expect(await graph.page('2026-10-26T08:00:00Z')).toMatchObject({ messages: [], hasMore: true });
+    request.mockResolvedValueOnce(
+      response({ value: [], '@odata.deltaLink': url.replace('$skiptoken', '$deltatoken') }),
+    );
+    expect(await graph.page('2026-10-26T08:00:00Z', url)).toMatchObject({
+      messages: [],
+      hasMore: false,
+    });
+  });
+  test.each([undefined, '2026-10-23T22:00:00Z'])(
+    'history reads only bounded inbox metadata, latest first (%s)',
+    async (from) => {
+      const { graph, request } = setup();
+      request.mockResolvedValue(response({ value: [row] }));
+      expect(await graph.historyPage(from, '2026-10-26T07:00:00Z')).toMatchObject({
+        messages: [expect.objectContaining({ body: '' })],
+        hasMore: false,
+      });
+      const url = new URL(request.mock.calls[0][0]);
+      expect(url.pathname).toBe('/v1.0/me/mailFolders/inbox/messages');
+      expect(url.searchParams.get('$filter')).toBe(
+        `${from ? 'receivedDateTime ge 2026-10-23T22:00:00.000Z and ' : ''}receivedDateTime lt 2026-10-26T07:00:00.000Z`,
+      );
+      expect(url.searchParams.get('$orderby')).toBe('receivedDateTime desc');
+      expect(url.searchParams.get('$select')?.split(',')).not.toContain('body');
+    },
+  );
+  test('historical pagination preserves an opaque next link and has a real terminal page', async () => {
+    const { graph, request } = setup();
+    const next =
+      'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skip=20&$filter=opaque';
+    request.mockResolvedValueOnce(response({ value: [], '@odata.nextLink': next }));
+    expect(await graph.historyPage(undefined, '2026-10-26T07:00:00Z')).toEqual({
+      messages: [],
+      nextUrl: next,
+      hasMore: true,
+    });
+    request.mockResolvedValueOnce(response({ value: [] }));
+    expect(await graph.historyPage(undefined, '2026-10-26T07:00:00Z', next)).toEqual({
+      messages: [],
+      hasMore: false,
+    });
+    expect(request.mock.calls[1][0]).toBe(next);
+  });
+  test.each([
+    'https://attacker.test/v1.0/me/mailFolders/inbox/messages',
+    'https://graph.microsoft.com/v1.0/users/other/mailFolders/inbox/messages',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages',
+    'https://graph.microsoft.com/v1.0/me/messages',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta',
+    'https://name:secret@graph.microsoft.com/v1.0/me/mailFolders/inbox/messages',
+  ])('rejects unsafe historical next link %s', async (url) => {
+    const { graph, request } = setup();
+    await expect(graph.historyPage(undefined, '2026-10-26T07:00:00Z', url)).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
   });
   test('rechecks pause after obtaining token and never sends request if stopped', async () => {
     const { graph, beforeRequest, request } = setup();

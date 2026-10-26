@@ -3,6 +3,13 @@ import { MAIL_CONSENT_VERSION } from './types';
 import type { MailSettings } from './types';
 
 const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
+const date = z
+  .string()
+  .regex(/^[1-9]\d{3}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const instant = Date.parse(`${value}T00:00:00Z`);
+    return Number.isFinite(instant) && new Date(instant).toISOString().slice(0, 10) === value;
+  });
 export const mailSettingsSchema: z.ZodType<MailSettings> = z
   .object({
     enabled: z.boolean(),
@@ -24,6 +31,13 @@ export const mailSettingsSchema: z.ZodType<MailSettings> = z
       }),
     intervalMinutes: z.union([z.literal(15), z.literal(30), z.literal(60)]),
     consentVersion: z.literal(MAIL_CONSENT_VERSION).optional(),
+    history: z
+      .discriminatedUnion('mode', [
+        z.object({ mode: z.literal('off') }).strict(),
+        z.object({ mode: z.literal('all') }).strict(),
+        z.object({ mode: z.literal('since'), from: date }).strict(),
+      ])
+      .default({ mode: 'off' }),
   })
   .strict()
   .refine((value) => value.startTime < value.endTime, 'Die Endzeit muss nach der Startzeit liegen.')
@@ -41,7 +55,34 @@ export function defaultMailSettings(): MailSettings {
     endTime: '17:00',
     timeZone: 'Europe/Zurich',
     intervalMinutes: 30,
+    history: { mode: 'off' },
   };
+}
+
+/** Find the first instant of a calendar date in its selected zone, including midnight DST changes. */
+export function mailHistoryStart(date: string, timeZone: string): string {
+  const nominal = Date.parse(`${date}T00:00:00Z`);
+  if (!Number.isFinite(nominal)) throw Error('Ungültiges Startdatum.');
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const localDate = (instant: number) => {
+    const parts = formatter.formatToParts(new Date(instant));
+    const part = (key: string) => parts.find((item) => item.type === key)?.value ?? '';
+    return `${part('year').padStart(4, '0')}-${part('month')}-${part('day')}`;
+  };
+  let lower = nominal - 36 * 3600_000;
+  let upper = nominal + 36 * 3600_000;
+  while (lower < upper) {
+    const middle = Math.floor((lower + upper) / 2);
+    if (localDate(middle) < date) lower = middle + 1;
+    else upper = middle;
+  }
+  if (localDate(lower) !== date) throw Error('Das Startdatum existiert in dieser Zeitzone nicht.');
+  return new Date(lower).toISOString();
 }
 
 /** Convert the instant in the configured zone; never infer working hours from server time. */

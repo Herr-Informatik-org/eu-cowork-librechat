@@ -133,6 +133,23 @@ export function createMailGraph({
       throw new MailGraphError(400);
     return url.pathname + url.search;
   }
+  function historyPath(value: string): string {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      throw new MailGraphError(400);
+    }
+    if (
+      url.origin !== origin ||
+      url.username ||
+      url.password ||
+      url.hash ||
+      !/^\/v1\.0\/me\/mailFolders\/inbox\/messages$/i.test(url.pathname)
+    )
+      throw new MailGraphError(400);
+    return url.pathname + url.search;
+  }
   const id = (value: string) => {
     if (!value || value.length > 2048 || /[\r\n]/.test(value)) throw new MailGraphError(400);
     return encodeURIComponent(value);
@@ -163,6 +180,32 @@ export function createMailGraph({
       return {
         messages: value.value.filter((row) => !row['@removed']).map(message),
         nextUrl: next,
+        hasMore: typeof value['@odata.nextLink'] === 'string',
+      };
+    },
+    async historyPage(from, until, url) {
+      if (
+        !Number.isFinite(Date.parse(until)) ||
+        (from && (!Number.isFinite(Date.parse(from)) || Date.parse(from) >= Date.parse(until)))
+      )
+        throw new MailGraphError(400);
+      const query = new URLSearchParams({
+        $select: fields,
+        $filter: `${from ? `receivedDateTime ge ${new Date(from).toISOString()} and ` : ''}receivedDateTime lt ${new Date(until).toISOString()}`,
+        $orderby: 'receivedDateTime desc',
+        $top: '20',
+      });
+      const value = await call(
+        url ? historyPath(url) : `/v1.0/me/mailFolders/inbox/messages?${query}`,
+      );
+      if (!Array.isArray(value.value)) throw new MailGraphError(502);
+      const next = value['@odata.nextLink'];
+      if (next !== undefined && typeof next !== 'string') throw new MailGraphError(502);
+      if (typeof next === 'string') historyPath(next);
+      return {
+        messages: value.value.filter((row) => !row['@removed']).map(message),
+        ...(typeof next === 'string' && { nextUrl: next }),
+        hasMore: typeof next === 'string',
       };
     },
     async message(value) {

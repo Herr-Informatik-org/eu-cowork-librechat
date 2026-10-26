@@ -42,7 +42,12 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
           modelLabel: '',
           connection: { connected: false },
           settings: defaultMailSettings(),
-          activity: { running: false, pending: 0 },
+          activity: {
+            running: false,
+            pending: 0,
+            hasMore: false,
+            history: { mode: 'off', processed: 0, pending: 0, hasMore: false, completed: false },
+          },
           results: [],
         });
         return;

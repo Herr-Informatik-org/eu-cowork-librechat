@@ -4,6 +4,7 @@ import type {
   MailAnalysis,
   MailAssistantEngine,
   MailJob,
+  MailHistoryCheckpoint,
   MailMessage,
   MailPriority,
   MailResult,
@@ -12,13 +13,23 @@ import type {
   StoredMailResult,
 } from './types';
 import { MAIL_CATEGORIES, MAIL_CONSENT_VERSION } from './types';
-import { defaultMailSettings, insideMailWindow, mailSettingsSchema, nextMailRun } from './schedule';
+import {
+  defaultMailSettings,
+  insideMailWindow,
+  mailSettingsSchema,
+  nextMailRun,
+  mailHistoryStart,
+} from './schedule';
 import { MailGraphError } from './graph';
 
 export class MailAssistantError extends Error {}
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const sourceHash = (mail: MailMessage) =>
   hash([mail.id, mail.subject, mail.sender, mail.receivedAt, mail.body]);
+const insideHistory = (mail: MailMessage, history: MailHistoryCheckpoint) =>
+  !mail.isDraft &&
+  Date.parse(mail.receivedAt) < Date.parse(history.until) &&
+  (!history.from || Date.parse(mail.receivedAt) >= Date.parse(history.from));
 export const mailAnalysisSchema: z.ZodType<MailAnalysis> = z
   .object({
     priority: z.enum(['important', 'normal', 'low']),
@@ -93,6 +104,7 @@ export function createMailAssistantEngine({
     token: string,
     id: string,
     guard: () => Promise<void>,
+    history?: MailHistoryCheckpoint,
   ) {
     const graph = await adapter.graph(owner, guard);
     let mail: MailMessage;
@@ -102,7 +114,12 @@ export function createMailAssistantEngine({
       if (error instanceof MailGraphError && error.status === 404) return;
       throw error;
     }
-    if (mail.isDraft || Date.parse(mail.receivedAt) < Date.parse(job.enabledAt!)) return;
+    if (
+      history
+        ? !insideHistory(mail, history)
+        : mail.isDraft || Date.parse(mail.receivedAt) < Date.parse(job.enabledAt!)
+    )
+      return;
     const resultId = hash([owner, mail.conversationId]);
     const previous = await store.result(owner, resultId);
     const barrier = await store.draftState(owner, resultId);
@@ -295,33 +312,118 @@ export function createMailAssistantEngine({
     try {
       await guard();
       await adapter.audit(owner, scheduled ? 'scheduled_run_started' : 'manual_run_started');
-      let checkpoint = job.checkpoint ?? { pending: [] };
-      const graph = await adapter.graph(owner, guard);
-      if (!checkpoint.pending.length) {
-        const page = await graph.page(job.enabledAt!, checkpoint.url);
-        checkpoint = {
-          ...checkpoint,
-          pending: [...new Set(page.messages.map((item) => item.id))],
-          nextUrl: page.nextUrl,
-        };
-        if (!(await store.update(owner, token, { checkpoint })))
-          throw new MailAssistantError('Die Verarbeitung wurde angehalten.');
-      }
       const deadline = now().getTime() + 4 * 60_000;
-      for (
-        let count = 0;
-        checkpoint.pending.length && count < 20 && now().getTime() < deadline;
-        count++
-      ) {
+      let processed = 0;
+      const history = job.settings.history?.mode !== 'off' ? job.history : undefined;
+      const graph = await adapter.graph(owner, guard);
+      const live = async (limit: number) => {
+        if (processed >= limit || now().getTime() >= deadline) return;
+        let checkpoint = job.checkpoint ?? { pending: [] };
+        if (!checkpoint.pending.length) {
+          const page = await graph.page(job.enabledAt!, checkpoint.url);
+          checkpoint = {
+            ...checkpoint,
+            pending: [
+              ...new Set(
+                page.messages
+                  .filter(
+                    (item) =>
+                      !item.isDraft && Date.parse(item.receivedAt) >= Date.parse(job.enabledAt!),
+                  )
+                  .map((item) => item.id),
+              ),
+            ],
+            nextUrl: page.nextUrl,
+            hasMore: page.hasMore,
+          };
+          if (!(await store.update(owner, token, { checkpoint })))
+            throw new MailAssistantError('Die Verarbeitung wurde angehalten.');
+        }
+        while (checkpoint.pending.length && processed < limit && now().getTime() < deadline) {
+          await guard();
+          await process(owner, job, token, checkpoint.pending[0], guard);
+          processed++;
+          checkpoint.pending.shift();
+          if (!checkpoint.pending.length)
+            checkpoint = { pending: [], url: checkpoint.nextUrl, hasMore: checkpoint.hasMore };
+          if (!(await store.update(owner, token, { checkpoint })))
+            throw new MailAssistantError('Die Verarbeitung wurde angehalten.');
+        }
+        if (!checkpoint.pending.length && checkpoint.nextUrl)
+          if (
+            !(await store.update(owner, token, {
+              checkpoint: { pending: [], url: checkpoint.nextUrl, hasMore: checkpoint.hasMore },
+            }))
+          )
+            throw new MailAssistantError('Die Verarbeitung wurde angehalten.');
+      };
+      const historical = async (limit: number) => {
+        if (!history || history.completed || processed >= limit || now().getTime() >= deadline)
+          return;
+        const selection = job.settings.history!;
+        if (
+          history.until !== job.enabledAt ||
+          history.from !==
+            (selection.mode === 'since'
+              ? mailHistoryStart(selection.from!, job.settings.timeZone)
+              : undefined)
+        )
+          throw new MailAssistantError(
+            'Der Zeitraum der Bestandsprüfung passt nicht zur gespeicherten Freigabe. Bitte die Einstellungen prüfen.',
+          );
         await guard();
-        await process(owner, job, token, checkpoint.pending[0], guard);
-        checkpoint.pending.shift();
-        if (!checkpoint.pending.length) checkpoint = { pending: [], url: checkpoint.nextUrl };
-        if (!(await store.update(owner, token, { checkpoint })))
+        await adapter.audit(owner, 'history_batch_started');
+        if (!history.pending.length) {
+          const page = await graph.historyPage(history.from, history.until, history.url);
+          history.pending = [
+            ...new Set(
+              page.messages
+                .filter((item) => insideHistory(item, history))
+                .sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt))
+                .map((item) => item.id),
+            ),
+          ];
+          history.nextUrl = page.nextUrl;
+          history.hasMore = page.hasMore;
+          if (!history.pending.length) {
+            history.url = history.nextUrl;
+            history.completed = !history.hasMore;
+          }
+          if (!(await store.update(owner, token, { history })))
+            throw new MailAssistantError('Die Bestandsprüfung wurde angehalten.');
+        }
+        while (history.pending.length && processed < limit && now().getTime() < deadline) {
+          await guard();
+          await process(owner, job, token, history.pending[0], guard, history);
+          processed++;
+          history.processed++;
+          history.pending.shift();
+          if (!history.pending.length) {
+            history.url = history.nextUrl;
+            history.completed = !history.hasMore;
+          }
+          if (!(await store.update(owner, token, { history })))
+            throw new MailAssistantError('Die Bestandsprüfung wurde angehalten.');
+        }
+        await adapter.audit(
+          owner,
+          history.completed ? 'history_completed' : 'history_batch_completed',
+        );
+      };
+      if (history && !history.completed) {
+        const historyFirst = history.nextFirst !== 'live';
+        history.nextFirst = historyFirst ? 'live' : 'history';
+        if (!(await store.update(owner, token, { history })))
           throw new MailAssistantError('Die Verarbeitung wurde angehalten.');
-      }
-      if (!checkpoint.pending.length && checkpoint.nextUrl)
-        await store.update(owner, token, { checkpoint: { pending: [], url: checkpoint.nextUrl } });
+        // Alternate the first batch durably so slow model responses cannot starve either stream.
+        if (historyFirst) {
+          await historical(10);
+          await live(20);
+        } else {
+          await live(10);
+          await historical(20);
+        }
+      } else await live(20);
       await adapter.audit(owner, 'run_completed');
     } catch (error) {
       errorMessage =
@@ -371,6 +473,7 @@ export function createMailAssistantEngine({
         connection: await adapter.connection(owner),
         settings: {
           ...(job?.settings ?? defaultMailSettings()),
+          history: job?.settings.history ?? { mode: 'off' },
         },
         activity: {
           running: !!job?.leaseUntil && job.leaseUntil.getTime() > now().getTime(),
@@ -378,6 +481,18 @@ export function createMailAssistantEngine({
           nextRunAt: job?.nextRunAt || undefined,
           lastError: job?.lastError || undefined,
           pending: job?.checkpoint?.pending.length ?? 0,
+          hasMore:
+            !!job?.checkpoint?.pending.length ||
+            (job?.checkpoint?.hasMore ?? !!(job?.checkpoint?.url || job?.checkpoint?.nextUrl)),
+          history: {
+            mode: job?.settings.history?.mode ?? 'off',
+            processed: job?.history?.processed ?? 0,
+            pending: job?.history?.pending.length ?? 0,
+            hasMore: !!job?.history && !job.history.completed,
+            completed: job?.history?.completed ?? false,
+            ...(job?.history?.from && { from: job.history.from }),
+            ...(job?.history?.until && { until: job.history.until }),
+          },
         },
         results: (await store.results(owner)).map(publicResult),
       };
@@ -391,6 +506,19 @@ export function createMailAssistantEngine({
         );
       if (parsed.data.enabled && !(await adapter.connection(owner)).connected)
         throw new MailAssistantError('Bitte verbinde zuerst dein persönliches Microsoft-Konto.');
+      if (parsed.data.history?.mode === 'since') {
+        const existing = await store.read(owner);
+        let from: string;
+        try {
+          from = mailHistoryStart(parsed.data.history.from!, parsed.data.timeZone);
+        } catch {
+          throw new MailAssistantError('Bitte ein gültiges Startdatum in deiner Zeitzone wählen.');
+        }
+        if (Date.parse(from) >= Date.parse(existing?.enabledAt ?? now().toISOString()))
+          throw new MailAssistantError(
+            'Das Startdatum muss vor der ersten persönlichen Aktivierung liegen. Neuere Eingänge gehören bereits zur laufenden Prüfung.',
+          );
+      }
       await adapter.audit(owner, parsed.data.enabled ? 'settings_enabled' : 'settings_disabled');
       await store.saveSettings(owner, parsed.data, now());
     },
