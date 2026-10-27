@@ -1,5 +1,11 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-27 — Lange Odoo-Mailvorschauen innerhalb des Werkzeuglimits
+
+- Die bestätigte Aufgabenbeschreibung hält das Limit von 20 000 Zeichen auch
+  einschliesslich Absender, Betreff und Kürzungshinweis ein. Lange Mails werden vor
+  der Bestätigung sichtbar gekürzt und nicht erst vom sicheren Odoo-Werkzeug abgelehnt.
+
 ## 2026-10-27 — Kompakte Mailbearbeitung und gezielte Folgeaktionen auf CW01
 
 - Eine schmale gemeinsame Statuszeile und Tastenkürzel lassen mehr Platz für Liste
