@@ -1,7 +1,8 @@
 import React from 'react';
 import { RecoilRoot } from 'recoil';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import '@testing-library/jest-dom/extend-expect';
-import { MessagesSquare, NotebookPen } from 'lucide-react';
+import { Mail, MessagesSquare, NotebookPen } from 'lucide-react';
 import { render, fireEvent, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { MutableSnapshot } from 'recoil';
@@ -58,12 +59,15 @@ jest.mock('~/components/Nav/AccountSettings', () => ({
 import ExpandedPanel from '../ExpandedPanel';
 import store from '~/store';
 
-const createLinks = () => [
+const createLinks = (openMail?: () => void) => [
   {
     title: 'com_ui_chat_history' as const,
     icon: MessagesSquare,
     id: DEFAULT_PANEL,
   },
+  ...(openMail
+    ? [{ title: 'com_ui_mail_workspace' as const, icon: Mail, id: 'mail', onClick: openMail }]
+    : []),
   {
     title: 'com_ui_prompts' as const,
     icon: NotebookPen,
@@ -73,17 +77,38 @@ const createLinks = () => [
 
 const createQueryClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
+function PanelHarness({
+  mailAvailable,
+  ...props
+}: Omit<React.ComponentProps<typeof ExpandedPanel>, 'links'> & { mailAvailable: boolean }) {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  return (
+    <>
+      <ExpandedPanel
+        {...props}
+        links={createLinks(mailAvailable ? () => navigate('/mail') : undefined)}
+      />
+      <output data-testid="current-route">{pathname}</output>
+    </>
+  );
+}
+
 function renderPanel({
   expanded = true,
   onCollapse = jest.fn(),
   onExpand = jest.fn(),
   initialPanel = DEFAULT_PANEL,
+  initialPath = '/c/new',
+  mailAvailable = false,
   initializeState,
 }: {
   expanded?: boolean;
   onCollapse?: jest.Mock;
   onExpand?: jest.Mock;
   initialPanel?: string;
+  initialPath?: string;
+  mailAvailable?: boolean;
   initializeState?: (snapshot: MutableSnapshot) => void;
 } = {}) {
   if (initialPanel !== DEFAULT_PANEL) {
@@ -93,14 +118,16 @@ function renderPanel({
   const result = render(
     <QueryClientProvider client={createQueryClient()}>
       <RecoilRoot initializeState={initializeState}>
-        <ActivePanelProvider>
-          <ExpandedPanel
-            links={createLinks()}
-            expanded={expanded}
-            onCollapse={onCollapse}
-            onExpand={onExpand}
-          />
-        </ActivePanelProvider>
+        <MemoryRouter initialEntries={[initialPath]}>
+          <ActivePanelProvider>
+            <PanelHarness
+              mailAvailable={mailAvailable}
+              expanded={expanded}
+              onCollapse={onCollapse}
+              onExpand={onExpand}
+            />
+          </ActivePanelProvider>
+        </MemoryRouter>
       </RecoilRoot>
     </QueryClientProvider>,
   );
@@ -176,6 +203,44 @@ describe('ExpandedPanel', () => {
     const { onCollapse } = renderPanel();
     fireEvent.click(screen.getByTestId('close-sidebar-button'));
     expect(onCollapse).toHaveBeenCalledTimes(1);
+  });
+
+  describe('mail workspace navigation', () => {
+    it('shows mail as a primary action without opening the tools menu', () => {
+      renderPanel({ mailAvailable: true });
+      expect(screen.getByRole('button', { name: 'com_ui_mail_workspace' })).toBeVisible();
+      expect(screen.queryByTestId('nav-panel-prompts')).not.toBeInTheDocument();
+      expect(screen.getByTestId('nav-panel-mail')).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByTestId('nav-panel-conversations')).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('does not invent a mail action when the available links omit it', () => {
+      renderPanel();
+      expect(screen.queryByTestId('nav-panel-mail')).not.toBeInTheDocument();
+    });
+
+    it('marks only mail active on a directly opened mail route', () => {
+      renderPanel({ mailAvailable: true, initialPath: '/mail', initialPanel: 'prompts' });
+      expect(screen.getByTestId('nav-panel-mail')).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByTestId('nav-panel-conversations')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'com_ui_nav_tools' }));
+      expect(screen.getByTestId('nav-panel-prompts')).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('navigates to mail and updates the active action without changing the saved panel', () => {
+      renderPanel({ mailAvailable: true, initialPanel: 'prompts' });
+      fireEvent.click(screen.getByTestId('nav-panel-mail'));
+      expect(screen.getByTestId('current-route')).toHaveTextContent('/mail');
+      expect(screen.getByTestId('nav-panel-mail')).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByTestId('nav-panel-conversations')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+      expect(localStorage.getItem('side:active-panel')).toBe('prompts');
+    });
   });
 
   describe('NewChatButton panel switch', () => {
