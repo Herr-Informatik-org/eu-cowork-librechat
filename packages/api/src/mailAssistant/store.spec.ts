@@ -218,6 +218,18 @@ describe('personal mail durable lease and retention', () => {
     expect(await s.results('bob')).toEqual([]);
     expect(await s.result('alice', result.id)).toEqual(result);
   });
+  test('retention leaves older-consent jobs without results byte-for-byte unchanged', async () => {
+    const s = store();
+    await s.saveSettings('alice', { ...settings, consentVersion: '2026-10-25' }, new Date());
+    const before = await db.collection('jobs').findOne({ ownerId: 'alice' });
+    expect(before).not.toHaveProperty('results');
+
+    await s.prune(new Date());
+
+    const after = await db.collection('jobs').findOne({ ownerId: 'alice' });
+    expect(JSON.stringify(after)).toBe(JSON.stringify(before));
+    expect(after).not.toHaveProperty('results');
+  });
   test('expired results are deleted even for a paused user, settings remain', async () => {
     const s = store();
     await s.saveSettings('alice', settings, new Date());

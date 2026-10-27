@@ -19,6 +19,8 @@
 - Die Webliste lädt alle innerhalb von 30 Tagen erhaltenen Ergebnisse seitenweise.
   Statt der früheren stillen 200-Ergebnis-Verdrängung hält ein Speicherlimit die
   Verarbeitung sichtbar an. Freigabe weiterhin ausschliesslich intern für CW01.
+- Die Aufbewahrungsprüfung lässt Mailaufträge ohne Ergebnisse unverändert;
+  dadurch bleibt die Zustandsprüfung beim CW01-Update zuverlässig.
 
 ## 2026-10-26 — Mail-Vorgang persönlich zur Überarbeitung öffnen
 

@@ -170,7 +170,7 @@ export function createMongoMailStore({
       return rows.map((row) => row.ownerId);
     },
     async prune(now) {
-      await collection().updateMany({}, [
+      await collection().updateMany({ results: { $type: 'object' } }, [
         {
           $set: {
             results: {
