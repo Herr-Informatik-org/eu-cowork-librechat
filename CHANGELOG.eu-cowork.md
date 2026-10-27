@@ -1,7 +1,9 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
-## 2026-10-27 — Lange Odoo-Mailvorschauen innerhalb des Werkzeuglimits
+## 2026-10-27 — Isolierte Mailreleases und begrenzte Odoo-Vorschauen
 
+- Manuelle Image-Builds anderer Branches veröffentlichen nur ihren Commit-Tag.
+  Der allgemeine `eu-latest`-Tag bleibt dem Branch `eu-cowork` vorbehalten.
 - Die bestätigte Aufgabenbeschreibung hält das Limit von 20 000 Zeichen auch
   einschliesslich Absender, Betreff und Kürzungshinweis ein. Lange Mails werden vor
   der Bestätigung sichtbar gekürzt und nicht erst vom sicheren Odoo-Werkzeug abgelehnt.
