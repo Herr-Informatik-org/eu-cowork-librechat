@@ -61,6 +61,20 @@ export type BrainRecall = {
   hasMore: boolean;
   stopReason: string;
   createdAt: string;
+  diagnostics?: {
+    semantic: { status: 'available' | 'degraded' | 'disabled'; repaired: number; pending: boolean };
+  };
+};
+
+export type BrainLearningStatus = {
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'interrupted' | 'disabled' | 'skipped';
+  saved: number;
+  startedAt?: string;
+  updatedAt?: string;
+  conversationId?: string;
+  messageId?: string;
+  errorCode?: string;
+  incidentId?: string;
 };
 
 export type BrainNodeInput = Pick<BrainNode, 'title' | 'text' | 'kind'> &

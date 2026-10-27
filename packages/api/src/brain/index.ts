@@ -12,3 +12,6 @@ export * from './history';
 export * from './historyStore';
 export * from './historyRuntime';
 export * from './diagnostics';
+export * from './query';
+export * from './mail';
+export * from './status';

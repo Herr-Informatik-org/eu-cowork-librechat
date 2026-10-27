@@ -1,5 +1,11 @@
 const mongoose = require('mongoose');
-const { createBrainFailureReporter } = require('@librechat/api');
+const { createBrainFailureReporter, createMongoBrainLearningStore } = require('@librechat/api');
+
+const brainLearningStore = createMongoBrainLearningStore(
+  () => mongoose.connection.collection('eucowork_brain_learning'),
+  undefined,
+  () => mongoose.connection.collection('eucowork_brain_tombstones'),
+);
 
 let indexes;
 const reportBrainFailure = createBrainFailureReporter(async (entry) => {
@@ -24,4 +30,4 @@ const reportBrainFailure = createBrainFailureReporter(async (entry) => {
   await collection.insertOne(entry);
 });
 
-module.exports = { reportBrainFailure };
+module.exports = { reportBrainFailure, brainLearningStore };

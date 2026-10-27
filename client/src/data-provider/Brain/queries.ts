@@ -5,6 +5,19 @@ import { useGetUserQuery } from '../Auth';
 
 const freshness = { staleTime: 15_000, refetchOnWindowFocus: false, retry: 1 };
 
+export function useBrainLearningQuery(conversationId?: string) {
+  const { data: user } = useGetUserQuery();
+  return useQuery(
+    [QueryKeys.brain, user?.id, 'learning', conversationId],
+    ({ signal }) => dataService.getBrainLearning(conversationId, signal),
+    {
+      ...freshness,
+      enabled: !!user?.id && conversationId !== 'new',
+      refetchInterval: (data) => (data?.status === 'running' ? 5_000 : 20_000),
+    },
+  );
+}
+
 export function useBrainStatusQuery(enabled = true) {
   const { data: user } = useGetUserQuery();
   return useQuery(

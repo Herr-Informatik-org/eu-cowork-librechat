@@ -78,6 +78,7 @@ describe('Personal mail HTTP boundary', () => {
         moveJobs: jest.fn(),
         enqueueMove: jest.fn(),
         editDraft: jest.fn(),
+        rememberRule: jest.fn(),
         status: jest.fn(),
         settings: jest.fn(),
         run: jest.fn(),
@@ -136,6 +137,19 @@ describe('Personal mail HTTP boundary', () => {
     expect(failure.status).toBe(400);
     expect(failure.text).not.toContain('provider-private-token');
     const revision = 'a'.repeat(64);
+    const rule = { text: 'Bitte bei Mailantworten kurz bleiben.', scope: 'global', revision };
+    await request(app)
+      .post('/api/agents/office/mail-assistant/results/result-1/rule?owner=other')
+      .set('authorization', 'Bearer fixture')
+      .send(rule)
+      .expect(204);
+    expect(runtime.engine.rememberRule).toHaveBeenCalledWith(owner, 'result-1', rule);
+    await request(app)
+      .post('/api/agents/office/mail-assistant/results/result-1/rule')
+      .set('authorization', 'Bearer fixture')
+      .send({ ...rule, sender: 'other@example.invalid' })
+      .expect(400);
+    expect(runtime.engine.rememberRule).toHaveBeenCalledTimes(1);
     await request(app)
       .get('/api/agents/office/mail-assistant/folders?parentId=own-folder')
       .set('authorization', 'Bearer fixture')

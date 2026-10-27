@@ -8,6 +8,7 @@ import { useBrainGraphQuery } from '~/data-provider/Brain';
 import { mergeBrainPages } from './layout';
 import { useBrainDialog } from './Dialog';
 import Graph from './Graph';
+import Learning from './Learning';
 import './brain.css';
 
 export default function BrainPanel() {
@@ -61,6 +62,7 @@ export default function BrainPanel() {
       {!graph.isLoading && !graph.isError && nodes.length === 0 && (
         <p className="brain-panel-note">{localize('com_ui_brain_empty_description')}</p>
       )}
+      <Learning />
       <div className="brain-panel-preference">
         <div>
           <strong id="brain-toggle-label">{localize('com_ui_brain_active')}</strong>

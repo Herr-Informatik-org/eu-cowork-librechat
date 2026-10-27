@@ -218,6 +218,25 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
       res.status(204).end();
     }),
   );
+  router.post(
+    '/results/:id/rule',
+    safeRoute(async (req, res) => {
+      const id = z
+        .string()
+        .regex(/^[a-zA-Z0-9_-]{1,128}$/)
+        .parse(req.params.id);
+      const input = z
+        .object({
+          text: z.string().trim().min(12).max(2400),
+          scope: z.enum(['sender', 'global']),
+          revision: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .strict()
+        .parse(req.body);
+      await runtime!.engine.rememberRule(owner(req), id, input);
+      res.status(204).end();
+    }),
+  );
   router.get(
     '/results/:id/content',
     safeRoute(async (req, res) => {

@@ -18,6 +18,7 @@ import type {
   StoredMailMoveJob,
   MailMoveJob,
   MailMoveRequest,
+  MailRuleInput,
 } from './types';
 import { MAIL_CATEGORIES, MAIL_CONSENT_VERSION } from './types';
 import {
@@ -50,6 +51,13 @@ export const mailAnalysisSchema: z.ZodType<MailAnalysis> = z
     reason: z.string().min(1).max(800),
     questions: z.array(z.string().min(1).max(500)).max(10),
     draft: z.string().max(12000),
+    memory: z
+      .object({
+        status: z.enum(['available', 'empty', 'disabled', 'unavailable']),
+        count: z.number().int().min(0),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -238,6 +246,7 @@ export function createMailAssistantEngine({
       reason: analysis.reason,
       action: analysis.action,
       questions: analysis.questions,
+      ...(analysis.memory ? { memory: analysis.memory } : {}),
       draftStatus,
       ...(uncertain && { operationPending: true }),
       ...(existing && { draftId: existing.id, draftUrl: existing.messageUrl }),
@@ -1153,6 +1162,34 @@ export function createMailAssistantEngine({
     });
   }
 
+  async function rememberRule(owner: string, id: string, input: MailRuleInput): Promise<void> {
+    const rule = z
+      .object({
+        text: z.string().trim().min(12).max(2400),
+        scope: z.enum(['sender', 'global']),
+        revision: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .parse(input);
+    await manualOperation(owner, id, async (result, _token, guard) => {
+      if (rule.revision !== resultRevision(result))
+        throw new MailAssistantError(
+          'Die Mail wurde inzwischen geändert. Bitte neu laden und die Regel erneut prüfen.',
+        );
+      if (!adapter.rememberRule)
+        throw new MailAssistantError('Persönliche Mailregeln sind derzeit nicht verfügbar.');
+      await guard();
+      await adapter.audit(owner, 'personal_rule_requested', id);
+      await guard();
+      await adapter.rememberRule(owner, {
+        text: rule.text,
+        scope: rule.scope,
+        sender: result.sender,
+      });
+      await adapter.audit(owner, 'personal_rule_saved', id);
+    });
+  }
+
   async function results(owner: string, query: MailResultQuery): Promise<MailResultPage> {
     await adapter.authorize(owner);
     const parsed = z
@@ -1223,6 +1260,7 @@ export function createMailAssistantEngine({
     folders,
     move,
     editDraft,
+    rememberRule,
     async status(owner: string) {
       await adapter.authorize(owner);
       const availability = await adapter.availability(owner);

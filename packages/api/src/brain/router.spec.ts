@@ -6,6 +6,7 @@ import type { IRole, IUser } from '@librechat/data-schemas';
 import { createBrainRouter } from './router';
 import { requestBrain, BrainServiceError } from './client';
 import type { BrainHistoryService } from './history';
+import type { BrainLearningStore } from './status';
 
 jest.mock('./client', () => ({
   ...jest.requireActual('./client'),
@@ -33,7 +34,10 @@ const ready: BrainRebuildStatus = {
   },
   rollbackAvailable: false,
 };
-function setup(denied: Permissions[] = []) {
+function setup(denied: Permissions[] = [], memories = true) {
+  const learning = {
+    latest: jest.fn(async () => ({ status: 'completed', saved: 2 })),
+  } as unknown as BrainLearningStore;
   const history: jest.Mocked<BrainHistoryService> = {
     status: jest
       .fn<ReturnType<BrainHistoryService['status']>, Parameters<BrainHistoryService['status']>>()
@@ -62,14 +66,15 @@ function setup(denied: Permissions[] = []) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    req.user = { id: 'owner', role: 'USER' } as IUser;
+    req.user = { id: 'owner', role: 'USER', personalization: { memories } } as IUser;
+    (req as unknown as { config: object }).config = { memory: {} };
     next();
   });
   app.use(
     '/api/brain',
-    createBrainRouter({ getRoleByName: async () => role, history, reportFailure }),
+    createBrainRouter({ getRoleByName: async () => role, history, learning, reportFailure }),
   );
-  return { app, history, reportFailure };
+  return { app, history, learning, reportFailure };
 }
 beforeEach(() => proxy.mockReset());
 
@@ -248,5 +253,30 @@ describe('Brain rebuild HTTP orchestration', () => {
     expect(result.status).toBe(409);
     expect(result.body.error).toContain('abgeschlossen');
     expect(proxy).not.toHaveBeenCalled();
+  });
+});
+
+describe('private learning status', () => {
+  it('ignores a forged owner and queries only the authenticated account and selected chat', async () => {
+    const { app, learning } = setup();
+    const response = await request(app).get(
+      '/api/brain/learning?conversationId=chat&ownerId=other',
+    );
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: 'completed', saved: 2 });
+    expect(learning.latest).toHaveBeenCalledWith('owner', 'chat');
+  });
+  it('does not reveal a prior status after personalization is disabled', async () => {
+    const { app, learning } = setup([], false);
+    expect((await request(app).get('/api/brain/learning')).body).toEqual({
+      status: 'disabled',
+      saved: 0,
+    });
+    expect(learning.latest).not.toHaveBeenCalled();
+  });
+  it('requires memory read permission', async () => {
+    const { app, learning } = setup([Permissions.READ]);
+    expect((await request(app).get('/api/brain/learning')).status).toBe(403);
+    expect(learning.latest).not.toHaveBeenCalled();
   });
 });

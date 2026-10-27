@@ -6,7 +6,7 @@ const {
   createBrainHistoryRuntime,
 } = require('@librechat/api');
 const db = require('~/models');
-const { reportBrainFailure } = require('~/server/services/BrainDiagnostics');
+const { reportBrainFailure, brainLearningStore } = require('~/server/services/BrainDiagnostics');
 const { getAppConfig } = require('~/server/services/Config');
 const { getAccessibleMcpServerNames, userCanUseMCPServers } = require('~/server/services/MCP');
 const { requireJwtAuth, configMiddleware } = require('~/server/middleware');
@@ -49,6 +49,7 @@ router.use(
   createBrainRouter({
     getRoleByName: db.getRoleByName,
     history,
+    learning: brainLearningStore,
     reportFailure: reportBrainFailure,
   }),
 );

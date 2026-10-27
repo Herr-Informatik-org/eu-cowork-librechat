@@ -25,6 +25,7 @@ const mockRun = jest.fn();
 const mockPause = jest.fn();
 const mockMove = jest.fn();
 const mockSave = jest.fn();
+const mockRule = jest.fn();
 const mockNext = jest.fn();
 const mockResults = jest.fn();
 const mockMutation = (mutate = jest.fn()) => ({
@@ -43,6 +44,7 @@ const mockActions = () => ({
   move: mockMutation(),
   enqueueMove: mockMutation(mockMove),
   draft: mockMutation(mockSave),
+  rule: mockMutation(mockRule),
   refresh: jest.fn(),
 });
 jest.mock('react-router-dom', () => ({
@@ -517,4 +519,29 @@ it('stops queued operations only when the user requests it', () => {
   expect(mockPause).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Aufträge und Analyse anhalten' }));
   expect(mockPause).toHaveBeenCalledTimes(1);
+});
+
+it('keeps corrections mail-local unless the user writes and selects a reusable personal rule', () => {
+  mount();
+  chooseMail();
+  fireEvent.click(screen.getByText('Aus meiner Korrektur lernen'));
+  expect(screen.getByRole('combobox', { name: 'Geltungsbereich' })).toHaveValue('message');
+  expect(mockRule).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole('textbox', { name: 'Meine persönliche Regel' }),
+  ).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Geltungsbereich' }), {
+    target: { value: 'sender' },
+  });
+  const rule = screen.getByRole('textbox', { name: 'Meine persönliche Regel' });
+  expect(rule).toHaveValue('');
+  fireEvent.change(rule, { target: { value: 'Für diesen Kontakt keine langen Einleitungen.' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Persönliche Regel merken' }));
+  expect(mockRule.mock.calls[0][0]).toEqual({
+    id: 'result',
+    revision: 'result-revision',
+    scope: 'sender',
+    text: 'Für diesen Kontakt keine langen Einleitungen.',
+  });
+  expect(mockSave).not.toHaveBeenCalled();
 });

@@ -10,6 +10,7 @@ import type {
   MailWorkspacePriority,
   MailWorkspaceMoveRequest,
   MailWorkspaceMoveJob,
+  MailWorkspaceRule,
 } from './types/mail';
 import type { TFileConfig } from './file-config';
 import type {
@@ -22,6 +23,7 @@ import type {
   BrainEdge,
   BrainExport,
   BrainHistoryStatus,
+  BrainLearningStatus,
   BrainRebuildStatus,
 } from './types/brain';
 import type * as t from './types';
@@ -97,9 +99,13 @@ export const enqueueMailWorkspaceMove = (
   request.post(endpoints.mailWorkspace('/move-jobs'), input);
 export const saveMailWorkspaceDraft = (id: string, body: string, revision: string): Promise<void> =>
   request.put(endpoints.mailWorkspaceResult(id, 'draft'), { body, revision });
+export const rememberMailWorkspaceRule = (id: string, rule: MailWorkspaceRule): Promise<void> =>
+  request.post(endpoints.mailWorkspaceResult(id, 'rule'), rule);
 
 export const getBrainHistory = (signal?: AbortSignal): Promise<BrainHistoryStatus> =>
   request.get(endpoints.brainHistory(), { signal });
+export const getBrainLearning = (conversationId?: string, signal?: AbortSignal): Promise<BrainLearningStatus> =>
+  request.get(endpoints.brainLearning(conversationId), { signal });
 export const startBrainHistory = (): Promise<BrainHistoryStatus> =>
   request.post(endpoints.brainHistory(), {});
 export const pauseBrainHistory = (): Promise<BrainHistoryStatus> =>

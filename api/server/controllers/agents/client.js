@@ -1,6 +1,6 @@
 require('events').EventEmitter.defaultMaxListeners = 100;
 const { logger } = require('@librechat/data-schemas');
-const { reportBrainFailure } = require('~/server/services/BrainDiagnostics');
+const { reportBrainFailure, brainLearningStore } = require('~/server/services/BrainDiagnostics');
 const { getBufferString, HumanMessage } = require('@librechat/agents/langchain/messages');
 const {
   createRun,
@@ -95,6 +95,7 @@ const {
   attachBrainTools,
   prepareBrainTurn,
   learnConfiguredBrainWithUsage,
+  trackBrainLearning,
   classifyBrainFailure,
 } = require('@librechat/api');
 const {
@@ -1549,6 +1550,7 @@ class AgentClient extends BaseClient {
         conversationId: this.conversationId,
         messageId: this.responseMessageId,
         sourceMessage: messages.at(-1),
+        recallMessages: messages.slice(-5, -1),
         countTokens,
         dependencies: {
           getUserById: db.getUserById,
@@ -2812,51 +2814,49 @@ class AgentClient extends BaseClient {
       this.finalizeSubagentContent();
       await this.settleActivityLabels();
 
-      if (this.brainSession && !abortController?.signal?.aborted) {
+      if (this.brainSession) {
         const session = this.brainSession;
         const { req, agent } = this.options;
         const endpointTokenConfig = this.options.endpointTokenConfig;
-        void learnConfiguredBrainWithUsage({
+        void trackBrainLearning({
           session,
-          modelOptions: {
-            req,
-            agent,
-            ids: { conversationId: this.conversationId, messageId: this.responseMessageId },
-            endpointTokenConfig,
-            db: { getUserKey: db.getUserKey, getUserKeyValues: db.getUserKeyValues },
-          },
-          dependencies: {
-            spendTokens: db.spendTokens,
-            spendStructuredTokens: db.spendStructuredTokens,
-            pricing: {
-              getMultiplier: db.getMultiplier,
-              getCacheMultiplier: db.getCacheMultiplier,
-            },
-            bulkWriteOps: {
-              insertMany: db.bulkInsertTransactions,
-              updateBalance: db.updateBalance,
-            },
-          },
-          balanceDependencies: {
-            getMultiplier: db.getMultiplier,
-            findBalanceByUser: db.findBalanceByUser,
-            createAutoRefillTransaction: db.createAutoRefillTransaction,
-            upsertBalanceFields: db.upsertBalanceFields,
-          },
-          usageConfig: {
-            balance: getBalanceConfig(req.config),
-            transactions: getTransactionsConfig(req.config),
-          },
-        }).catch((error) => {
-          if (session.options.signal?.aborted) return;
-          return reportBrainFailure({
-            failure: classifyBrainFailure(error, 'extract'),
-            userId: session.options.userId,
-            operation: 'learning',
-            stage: 'extract',
-            conversationId: session.options.conversationId,
-            messageId: session.options.source.id,
-          });
+          store: brainLearningStore,
+          reportFailure: reportBrainFailure,
+          action: () =>
+            abortController?.signal?.aborted
+              ? Promise.resolve({ status: 'interrupted', saved: 0 })
+              : learnConfiguredBrainWithUsage({
+                  session,
+                  modelOptions: {
+                    req,
+                    agent,
+                    ids: { conversationId: this.conversationId, messageId: this.responseMessageId },
+                    endpointTokenConfig,
+                    db: { getUserKey: db.getUserKey, getUserKeyValues: db.getUserKeyValues },
+                  },
+                  dependencies: {
+                    spendTokens: db.spendTokens,
+                    spendStructuredTokens: db.spendStructuredTokens,
+                    pricing: {
+                      getMultiplier: db.getMultiplier,
+                      getCacheMultiplier: db.getCacheMultiplier,
+                    },
+                    bulkWriteOps: {
+                      insertMany: db.bulkInsertTransactions,
+                      updateBalance: db.updateBalance,
+                    },
+                  },
+                  balanceDependencies: {
+                    getMultiplier: db.getMultiplier,
+                    findBalanceByUser: db.findBalanceByUser,
+                    createAutoRefillTransaction: db.createAutoRefillTransaction,
+                    upsertBalanceFields: db.upsertBalanceFields,
+                  },
+                  usageConfig: {
+                    balance: getBalanceConfig(req.config),
+                    transactions: getTransactionsConfig(req.config),
+                  },
+                }),
         });
       }
 

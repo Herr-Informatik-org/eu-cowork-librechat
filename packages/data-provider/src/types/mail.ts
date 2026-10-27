@@ -1,4 +1,13 @@
 export type MailWorkspacePriority = 'important' | 'normal' | 'low';
+export type MailWorkspaceRule = {
+  text: string;
+  scope: 'sender' | 'global';
+  revision: string;
+};
+export type MailWorkspaceMemory = {
+  status: 'available' | 'empty' | 'disabled' | 'unavailable';
+  count: number;
+};
 export type MailWorkspaceSettings = {
   enabled: boolean;
   mode: 'manual' | 'scheduled';
@@ -25,6 +34,7 @@ export type MailWorkspaceResult = {
   moveStatus?: 'completed' | 'uncertain';
   doneFolder?: string;
   draftWarnings?: string[];
+  memory?: MailWorkspaceMemory;
 };
 export type MailWorkspaceStatus = {
   available: boolean;

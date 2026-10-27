@@ -167,3 +167,20 @@ describe('contextual ongoing learning', () => {
     expect(review).not.toHaveBeenCalled();
   });
 });
+
+describe('independent learner context budget', () => {
+  it('never reuses the full chat recall and reserves a small retrieval budget for learning', async () => {
+    const current = session(`budget-${sequence}`);
+    Object.defineProperty(current, 'context', {
+      get: () => 'CHAT_CONTEXT_MUST_NOT_REACH_LEARNER'.repeat(10000),
+    });
+    current.learningContext = jest.fn(async (budget) => `Bounded private preference (${budget})`);
+    current.remember = jest.fn(async () => ({ nodes: [], skipped: 0 }));
+    current.options.countTokens = async (text) => Math.ceil(text.length / 4);
+    await learn(current);
+    const options = review.mock.calls[0][0];
+    expect(options.existingContext).not.toContain('CHAT_CONTEXT_MUST_NOT_REACH_LEARNER');
+    expect(options.existingContext).toContain('Bounded private preference');
+    expect(jest.mocked(current.learningContext).mock.calls[0][0]).toBeLessThanOrEqual(3000);
+  });
+});

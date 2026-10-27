@@ -515,6 +515,8 @@ export const mailWorkspaceResult = (id: string, action: string) =>
   mailWorkspace(`/results/${encodeURIComponent(id)}/${encodeURIComponent(action)}`);
 export const brainNodes = () => `${BASE_URL}/api/brain/nodes`;
 export const brainStatus = () => `${BASE_URL}/api/brain/status`;
+export const brainLearning = (conversationId?: string) =>
+  `${BASE_URL}/api/brain/learning${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ''}`;
 export const brainHistory = () => `${BASE_URL}/api/brain/history`;
 export const brainHistoryPause = () => `${brainHistory()}/pause`;
 export const brainRebuild = () => `${BASE_URL}/api/brain/rebuild`;
