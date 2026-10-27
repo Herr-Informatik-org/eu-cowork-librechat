@@ -6,6 +6,10 @@
   gespeicherter Hintergrundauftrag verschoben. Die Oberfläche zeigt den Fortschritt
   und bleibt für andere Mails bedienbar. Die Analyse gibt manuelle Aufträge zwischen
   einzelnen Mails frei; unnötig serielle Ordnerabfragen entfallen.
+- Offene Antwortbearbeitungen bleiben bei automatischer Listenaktualisierung und
+  beim Wechsel zu anderen Mails im Arbeitsspeicher erhalten. Vor dem Verschieben
+  einer gerade bearbeiteten Mail muss ihr Entwurf gespeichert oder die Bearbeitung
+  abgebrochen werden.
 - Aufträge bleiben an Benutzer, persönliche Verbindung und bestätigte
   Auswahlversionen gebunden. Pause und geänderte Freigaben stoppen offene Einträge;
   unklare Schreibausgänge werden nach einem Neustart nicht ungeprüft wiederholt.

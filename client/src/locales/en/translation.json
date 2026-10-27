@@ -2450,6 +2450,7 @@
   "com_ui_mail_copy_error": "Kopieren nicht möglich. Bitte den Text markieren und manuell kopieren.",
   "com_ui_mail_copy": "Kopieren",
   "com_ui_mail_edit_hint": "Hier bearbeitest du nur die Antwort. Mailverlauf und Dateianhänge bleiben im Outlook-Entwurf erhalten.",
+  "com_ui_mail_edit_before_move": "Vor dem Verschieben den Entwurf speichern oder die Bearbeitung abbrechen. Deine Eingaben bleiben während der Hintergrundverarbeitung erhalten.",
   "com_ui_mail_saved": "Entwurf in Outlook gespeichert",
   "com_ui_mail_save_draft": "Entwurf in Outlook speichern",
   "com_ui_mail_empty_body": "Diese Nachricht enthält keinen darstellbaren Text.",

@@ -22,6 +22,7 @@ import type {
   MailWorkspaceStatus,
   MailWorkspaceSettings,
   MailWorkspaceFolder,
+  MailWorkspaceContent,
 } from 'librechat-data-provider';
 import {
   useMailStatus,
@@ -309,18 +310,29 @@ function PersonalSettings({
   );
 }
 
+type DraftEditor = {
+  result: MailWorkspaceResult;
+  content: MailWorkspaceContent;
+  body: string;
+  revision: string;
+};
+
 function Detail({
   result,
   status,
   folder,
   onMove,
   moveUnavailable,
+  editor,
+  onEditorChange,
 }: {
   result: MailWorkspaceResult;
   status: MailWorkspaceStatus;
   folder: MailWorkspaceFolder | null;
   onMove: (items: MailWorkspaceResult[]) => void;
   moveUnavailable: boolean;
+  editor?: DraftEditor;
+  onEditorChange: (editor?: DraftEditor) => void;
 }) {
   const t = useLocalize();
   const { user } = useAuthContext();
@@ -328,15 +340,16 @@ function Detail({
   const navigate = useNavigate();
   const content = useMailContent(result.id, result.revision);
   const actions = useMailActions();
-  const [tab, setTab] = useState<'message' | 'draft'>('message');
-  const [editing, setEditing] = useState(false);
-  const [body, setBody] = useState('');
-  const [revision, setRevision] = useState('');
+  const [tab, setTab] = useState<'message' | 'draft'>(editor ? 'draft' : 'message');
+  const editing = !!editor;
+  const body = editor?.body || '';
+  const revision = editor?.revision || '';
   const [notice, setNotice] = useState('');
+  const displayedContent = editor?.content || content.data;
   const data =
-    content.data?.resultId === result.id &&
-    content.data.mailbox.toLowerCase() === status.connection.mailbox?.toLowerCase()
-      ? content.data
+    displayedContent?.resultId === result.id &&
+    displayedContent.mailbox.toLowerCase() === status.connection.mailbox?.toLowerCase()
+      ? displayedContent
       : undefined;
   const busy = actions.draft.isLoading || actions.priority.isLoading;
   const locked = status.settings.consentVersion !== consentVersion;
@@ -379,7 +392,7 @@ function Detail({
           {t('com_ui_mail_priority')}
           <select
             value={result.priority}
-            disabled={busy || locked}
+            disabled={busy || locked || editing}
             onChange={(event) =>
               actions.priority.mutate({
                 id: result.id,
@@ -400,6 +413,7 @@ function Detail({
             busy ||
             locked ||
             !folder ||
+            editing ||
             moveUnavailable ||
             result.moveStatus === 'completed' ||
             result.moveStatus === 'uncertain'
@@ -410,6 +424,7 @@ function Detail({
           {t('com_ui_mail_mark_done')}
         </button>
       </div>
+      {editing && <p className="mail-notice">{t('com_ui_mail_edit_before_move')}</p>}
       {result.moveStatus === 'uncertain' && (
         <p className="mail-notice">{t('com_ui_mail_move_uncertain')}</p>
       )}
@@ -483,9 +498,13 @@ function Detail({
                 className="mail-button"
                 disabled={!data?.draft?.revision || data.draft.replyText === undefined || locked}
                 onClick={() => {
-                  setBody(data?.draft?.replyText || '');
-                  setRevision(data?.draft?.revision || '');
-                  setEditing(true);
+                  if (!data?.draft?.revision || data.draft.replyText === undefined) return;
+                  onEditorChange({
+                    result,
+                    content: data,
+                    body: data.draft.replyText,
+                    revision: data.draft.revision,
+                  });
                 }}
               >
                 <FileText size={15} />
@@ -512,7 +531,10 @@ function Detail({
                 {t('com_ui_mail_edit_hint')}
                 <textarea
                   value={body}
-                  onChange={(event) => setBody(event.target.value)}
+                  disabled={busy}
+                  onChange={(event) =>
+                    editor && onEditorChange({ ...editor, body: event.target.value })
+                  }
                   rows={18}
                   maxLength={12000}
                 />
@@ -526,7 +548,7 @@ function Detail({
                       { id: result.id, body, revision },
                       {
                         onSuccess: () => {
-                          setEditing(false);
+                          onEditorChange();
                           setNotice(t('com_ui_mail_saved'));
                         },
                       },
@@ -536,7 +558,7 @@ function Detail({
                   <Save size={15} />
                   {t('com_ui_mail_save_draft')}
                 </button>
-                <button className="mail-button" disabled={busy} onClick={() => setEditing(false)}>
+                <button className="mail-button" disabled={busy} onClick={() => onEditorChange()}>
                   {t('com_ui_mail_cancel')}
                 </button>
               </div>
@@ -583,6 +605,12 @@ function MailWorkspace() {
   const [priority, setPriority] = useState<MailWorkspacePriority | ''>('');
   const [state, setState] = useState<'open' | 'done' | 'all'>('open');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editors, setEditors] = useState<Record<string, DraftEditor>>({});
+  const mailbox = status?.connection.connected
+    ? status.connection.mailbox?.toLowerCase()
+    : undefined;
+  const currentEditor = (id: string) =>
+    mailbox && editors[id]?.content.mailbox.toLowerCase() === mailbox ? editors[id] : undefined;
   const [notice, setNotice] = useState('');
   const [checked, setChecked] = useState<Map<string, MailWorkspaceResult>>(new Map());
   const [folderPicker, setFolderPicker] = useState(false);
@@ -599,7 +627,9 @@ function MailWorkspace() {
     () => resultQuery.data?.pages.flatMap((page) => page.results) || [],
     [resultQuery.data],
   );
-  const selected = rows.find((row) => row.id === selectedId);
+  const editor = selectedId ? currentEditor(selectedId) : undefined;
+  const selected = editor?.result || rows.find((row) => row.id === selectedId);
+  const selectionHasEditor = [...checked.keys()].some((id) => !!currentEditor(id));
   const eligible = rows.filter((row) => !row.moveStatus);
   const selectable = eligible.slice(0, 100);
   const allSelected = selectable.length > 0 && selectable.every((row) => checked.has(row.id));
@@ -607,6 +637,7 @@ function MailWorkspace() {
     if (
       !folder ||
       moveUnavailable ||
+      items.some((item) => !!currentEditor(item.id)) ||
       !items.length ||
       items.length > 100 ||
       status?.settings.consentVersion !== consentVersion
@@ -624,6 +655,10 @@ function MailWorkspace() {
   };
   const previousRunning = useRef(false);
   const running = !!status?.activity.running || !!status?.activity.continuing;
+  useEffect(() => {
+    setEditors({});
+    setSelectedId(null);
+  }, [mailbox]);
   useEffect(() => {
     if (search === query) return;
     const timer = setTimeout(() => {
@@ -857,6 +892,7 @@ function MailWorkspace() {
                 !checked.size ||
                 !folder ||
                 moveUnavailable ||
+                selectionHasEditor ||
                 status.settings.consentVersion !== consentVersion
               }
               onClick={() => requestMove(Array.from(checked.values()))}
@@ -865,6 +901,9 @@ function MailWorkspace() {
               {t('com_ui_mail_move_selected')}
             </button>
             {rows.length > 100 && <p className="mail-muted">{t('com_ui_mail_selection_limit')}</p>}
+            {selectionHasEditor && (
+              <p className="mail-notice">{t('com_ui_mail_edit_before_move')}</p>
+            )}
             {jobs.some(isMoveActive) && (
               <p className="mail-muted">{t('com_ui_mail_move_active')}</p>
             )}
@@ -960,12 +999,21 @@ function MailWorkspace() {
                     {t('com_ui_mail_list')}
                   </button>
                   <Detail
-                    key={`${selected.id}:${selected.revision}`}
+                    key={selected.id}
                     result={selected}
                     status={status}
                     folder={folder}
                     onMove={requestMove}
                     moveUnavailable={moveUnavailable}
+                    editor={editor}
+                    onEditorChange={(value) =>
+                      setEditors((previous) => {
+                        const next = { ...previous };
+                        if (value) next[selected.id] = value;
+                        else delete next[selected.id];
+                        return next;
+                      })
+                    }
                   />
                 </>
               ) : (

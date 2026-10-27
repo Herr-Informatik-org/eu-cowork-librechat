@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type {
   MailWorkspaceContent,
@@ -358,6 +358,114 @@ it('restores background progress on mount without blocking draft edits or naviga
   fireEvent.click(screen.getByRole('button', { name: 'Im neuen Chat überarbeiten' }));
   expect(mockNavigate).toHaveBeenCalled();
   expect(mockMove).not.toHaveBeenCalled();
+});
+it('preserves an unsaved reply through queue progress, changed revision and removal from open results', () => {
+  mockJobs = [exampleJob()];
+  const view = mount();
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Antwort bearbeiten' }));
+  fireEvent.change(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ }), {
+    target: { value: 'Meine noch nicht gespeicherte Antwort' },
+  });
+  expect(
+    within(screen.getByRole('article', { name: 'Mail prüfen' })).getByRole('combobox', {
+      name: 'Priorität',
+    }),
+  ).toBeDisabled();
+  mockRows = [{ ...mockRows[0], revision: 'moved-revision', moveStatus: 'completed' }];
+  mockContent = { ...mockContent, draft: undefined };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  expect(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ })).toHaveValue(
+    'Meine noch nicht gespeicherte Antwort',
+  );
+  mockRows = [];
+  mockJobs = [{ ...exampleJob('completed'), completed: 2 }];
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  expect(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ })).toHaveValue(
+    'Meine noch nicht gespeicherte Antwort',
+  );
+  expect(mockSave).not.toHaveBeenCalled();
+  expect(mockMove).not.toHaveBeenCalled();
+  expect(JSON.stringify(localStorage)).not.toContain('Meine noch nicht gespeicherte Antwort');
+  expect(JSON.stringify(sessionStorage)).not.toContain('Meine noch nicht gespeicherte Antwort');
+  fireEvent.click(screen.getByRole('button', { name: 'Entwurf in Outlook speichern' }));
+  expect(mockSave).toHaveBeenCalledWith(
+    { id: 'result', body: 'Meine noch nicht gespeicherte Antwort', revision: 'opaque-revision' },
+    expect.any(Object),
+  );
+});
+it('blocks single and bulk moves containing an open editor while other mails remain usable', () => {
+  mockRows = [mockRows[0], { ...mockRows[0], id: 'second', sender: 'other@example.test' }];
+  mount();
+  chooseFolder();
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Antwort bearbeiten' }));
+  fireEvent.change(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ }), {
+    target: { value: 'Persönliche Überarbeitung' },
+  });
+  fireEvent.click(
+    screen.getByRole('checkbox', { name: 'Alle 2 geladenen offenen Mails auswählen' }),
+  );
+  expect(screen.getByRole('button', { name: 'In Erledigt verschieben' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Auswahl verschieben' })).toBeDisabled();
+  expect(screen.getAllByText(/Vor dem Verschieben den Entwurf speichern/).length).toBeGreaterThan(
+    0,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /other@example.test/ }));
+  expect(screen.getByRole('button', { name: 'In Erledigt verschieben' })).toBeEnabled();
+  chooseMail();
+  expect(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ })).toHaveValue(
+    'Persönliche Überarbeitung',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Abbrechen' }));
+  expect(screen.getByRole('button', { name: 'Auswahl verschieben' })).toBeEnabled();
+  expect(mockSave).not.toHaveBeenCalled();
+  expect(mockMove).not.toHaveBeenCalled();
+});
+it.each(['disconnect', 'mailbox', 'account'])('clears editor snapshots after %s', (change) => {
+  const view = mount();
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Antwort bearbeiten' }));
+  fireEvent.change(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ }), {
+    target: { value: 'Private ungespeicherte Antwort' },
+  });
+  if (change === 'account') mockUser = { id: 'other' };
+  else
+    mockStatus = {
+      ...mockStatus,
+      connection:
+        change === 'disconnect'
+          ? { connected: false }
+          : { connected: true, mailbox: 'other@example.test' },
+    };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  expect(screen.queryByDisplayValue('Private ungespeicherte Antwort')).not.toBeInTheDocument();
+  mockUser = { id: 'owner' };
+  mockStatus = { ...mockStatus, connection: { connected: true, mailbox: 'owner@example.test' } };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
+  expect(screen.queryByDisplayValue('Private ungespeicherte Antwort')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Antwort bearbeiten' })).toBeEnabled();
 });
 it('shows per-message uncertainty and never automatically retries the operation', () => {
   mockJobs = [exampleJob('partial')];
