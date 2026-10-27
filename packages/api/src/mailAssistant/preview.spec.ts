@@ -1,14 +1,8 @@
-import sharp from 'sharp';
 import { createMailGraph } from './graph';
-import { previewRaster, sanitizeMailPreview } from './preview';
+import { sanitizeMailPreview } from './preview';
 
 describe('isolated mail HTML preview', () => {
-  let png: Buffer;
-  beforeAll(async () => {
-    png = await sharp({ create: { width: 2, height: 2, channels: 4, background: '#f00' } })
-      .png()
-      .toBuffer();
-  });
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ', 'base64');
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
   function setup(html = '<p>Mail</p>') {
     const request = jest
@@ -84,31 +78,6 @@ describe('isolated mail HTML preview', () => {
   test('rejects parser complexity rather than exhausting deep DOM work', () => {
     expect(() => sanitizeMailPreview('<p>x</p>'.repeat(20_001))).toThrow();
   });
-  test('raster decoding rejects SVG, XML and fake signature polyglots', async () => {
-    await expect(
-      previewRaster(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>')),
-    ).rejects.toThrow();
-    await expect(
-      previewRaster(Buffer.concat([png.subarray(0, 8), Buffer.from('<svg/>')])),
-    ).rejects.toThrow();
-    await expect(previewRaster(Buffer.alloc(1_000_001))).rejects.toThrow();
-  });
-  test('raster decoding re-encodes pixels and removes input metadata', async () => {
-    const source = await sharp(png).withMetadata().jpeg().toBuffer();
-    const result = await previewRaster(source);
-    const metadata = await sharp(result).metadata();
-    expect(metadata).toMatchObject({ format: 'png', width: 2, height: 2 });
-    expect(metadata.exif).toBeUndefined();
-    expect(metadata.icc).toBeUndefined();
-  });
-  test('rejects decompression-sized raster before rendering', async () => {
-    const large = await sharp({
-      create: { width: 2100, height: 2100, channels: 3, background: '#fff' },
-    })
-      .png()
-      .toBuffer();
-    await expect(previewRaster(large)).rejects.toThrow();
-  });
   test('fetches HTML only on explicit preview and only from own fixed message path', async () => {
     const { graph, request } = setup('<p style="color:blue">Mail</p>');
     const result = await graph.preview('mail');
@@ -140,71 +109,18 @@ describe('isolated mail HTML preview', () => {
     );
     expect(await graph.preview('mail')).toMatchObject({ truncated: true });
   });
-  test('copies only matched bounded raster CID bytes and never sends mailbox token externally', async () => {
-    const { graph, request, guard } = setup();
-    request
-      .mockResolvedValueOnce(
-        json({
-          id: 'mail',
-          body: {
-            contentType: 'html',
-            content: '<img src="cid:logo"><img src="https://tracker.test/pixel">',
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        json({
-          value: [
-            {
-              id: 'image/+==',
-              '@odata.type': '#microsoft.graph.fileAttachment',
-              contentId: 'logo',
-              contentType: 'image/png',
-              size: png.length,
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(new Response(Buffer.from(png)));
-    const result = await graph.preview('mail');
-    expect(result.html).toContain('data:image/png;base64,');
-    expect(result.blockedImages).toBe(1);
-    expect(result.html).not.toContain('tracker.test');
-    expect(request.mock.calls[2][0]).toBe(
-      'https://graph.microsoft.com/v1.0/me/messages/mail/attachments/image%2F%2B%3D%3D/$value',
-    );
-    expect(
-      request.mock.calls.every(
-        ([url, options]) =>
-          String(url).startsWith('https://graph.microsoft.com/v1.0/me/') &&
-          options.method === 'GET',
-      ),
-    ).toBe(true);
-    expect(guard.mock.calls.length).toBeGreaterThanOrEqual(7);
-  });
-  test.each(['reference', 'oversize', 'duplicate', 'svg'])(
-    'blocks unsafe attachment metadata without downloading: %s',
-    async (kind) => {
-      const { graph, request } = setup();
-      const attachment = {
-        id: 'image',
-        '@odata.type': '#microsoft.graph.fileAttachment',
-        contentId: 'logo',
-        contentType: 'image/png',
-        size: png.length,
-      };
-      if (kind === 'reference') attachment['@odata.type'] = '#microsoft.graph.referenceAttachment';
-      if (kind === 'oversize') attachment.size = 1_000_001;
-      if (kind === 'svg') attachment.contentType = 'image/svg+xml';
-      request
-        .mockResolvedValueOnce(
-          json({ id: 'mail', body: { contentType: 'html', content: '<img src="cid:logo">' } }),
-        )
-        .mockResolvedValueOnce(
-          json({ value: kind === 'duplicate' ? [attachment, attachment] : [attachment] }),
-        );
-      expect(await graph.preview('mail')).toMatchObject({ blockedImages: 1 });
-      expect(request).toHaveBeenCalledTimes(2);
+  test.each(['logo', 'a%2Fb', '%3Cinline%3E'])(
+    'never discovers or downloads CID attachment bytes during preview: %s',
+    async (reference) => {
+      const { graph, request } = setup(
+        `<p>Mail</p><img src="cid:${reference}"><img src="https://tracker.test/pixel">`,
+      );
+      const result = await graph.preview('mail');
+      expect(result.html).toContain('<p>Mail</p>');
+      expect(result.html).not.toMatch(/<img|data:|tracker/);
+      expect(result.blockedImages).toBe(2);
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(String(request.mock.calls[0][0])).not.toContain('/attachments');
     },
   );
   test('wrong message identity aborts before attachment discovery', async () => {
@@ -229,54 +145,7 @@ describe('isolated mail HTML preview', () => {
   });
   test('authorization errors do not yield cached HTML success', async () => {
     const { graph, request } = setup();
-    request
-      .mockResolvedValueOnce(
-        json({ id: 'mail', body: { contentType: 'html', content: '<img src="cid:logo">' } }),
-      )
-      .mockResolvedValueOnce(json({}, 403));
+    request.mockResolvedValueOnce(json({}, 403));
     await expect(graph.preview('mail')).rejects.toMatchObject({ status: 403 });
-  });
-  test('damaged image bytes leave a blocked placeholder without exposing diagnostics', async () => {
-    const { graph, request } = setup();
-    request
-      .mockResolvedValueOnce(
-        json({ id: 'mail', body: { contentType: 'html', content: '<img src="cid:logo">' } }),
-      )
-      .mockResolvedValueOnce(
-        json({
-          value: [
-            {
-              id: 'image',
-              '@odata.type': '#microsoft.graph.fileAttachment',
-              contentId: 'logo',
-              contentType: 'image/png',
-              size: 3,
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(new Response('bad'));
-    const result = await graph.preview('mail');
-    expect(result).toMatchObject({ blockedImages: 1 });
-    expect(JSON.stringify(result)).not.toMatch(/private-fixture-token|https:|libvips|bad/);
-  });
-  test('the shared preview time budget prevents a slow mail from starting more image requests', async () => {
-    const { graph, request } = setup();
-    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
-    request.mockImplementationOnce(async () => {
-      clock.mockReturnValue(27_000);
-      return json({
-        id: 'mail',
-        body: { contentType: 'html', content: '<p>Mail</p><img src="cid:logo">' },
-      });
-    });
-    try {
-      const result = await graph.preview('mail');
-      expect(result).toMatchObject({ blockedImages: 1 });
-      expect(result.warnings).toHaveLength(1);
-      expect(request).toHaveBeenCalledTimes(1);
-    } finally {
-      clock.mockRestore();
-    }
   });
 });

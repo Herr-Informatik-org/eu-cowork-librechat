@@ -106,8 +106,33 @@ export interface MailResultContent {
     revision?: string;
     replyText?: string;
     preview?: MailHtmlPreview;
+    url?: string;
   };
   draftUnavailable?: boolean;
+}
+
+export interface MailAttachment {
+  id: string;
+  name: string;
+  contentType: string;
+  size: number;
+  isInline: boolean;
+}
+
+export interface MailAttachments {
+  attachments: MailAttachment[];
+  hasMore: boolean;
+}
+
+export interface MailDraftRequest {
+  revision: string;
+  instructions: string;
+  requestId: string;
+}
+
+export interface MailDraftResponse {
+  status: 'created' | 'existing' | 'uncertain';
+  draftUrl?: string;
 }
 
 export interface MailHtmlPreview {
@@ -257,6 +282,7 @@ export interface MailGraph {
   ): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }>;
   message(id: string): Promise<MailMessage>;
   preview(id: string): Promise<MailHtmlPreview>;
+  attachments(id: string): Promise<MailAttachments>;
   thread(id: string): Promise<{ messages: MailMessage[]; complete: boolean }>;
   categorize(id: string, categories: string[], etag?: string): Promise<void>;
   createReply(
@@ -287,6 +313,12 @@ export interface MailRuntimeAdapter {
     messages: MailMessage[],
     beforeRequest: () => Promise<void>,
   ): Promise<MailAnalysis>;
+  analyzeDraft?(
+    ownerId: string,
+    messages: MailMessage[],
+    instructions: string,
+    beforeRequest: () => Promise<void>,
+  ): Promise<string>;
   audit(ownerId: string, event: string, resultId?: string): Promise<void>;
   rememberRule?(
     ownerId: string,
@@ -335,6 +367,8 @@ export interface MailAssistantEngine {
   move(owner: string, id: string, folderId: string, revision: string): Promise<MailResult>;
   enqueueMove(owner: string, input: MailMoveRequest): Promise<MailMoveJob>;
   moveJobs(owner: string): Promise<MailMoveJob[]>;
+  requestDraft(owner: string, id: string, input: MailDraftRequest): Promise<MailDraftResponse>;
+  attachments(owner: string, id: string): Promise<MailAttachments>;
   editDraft(owner: string, id: string, body: string, revision: string): Promise<void>;
   rememberRule(owner: string, id: string, input: MailRuleInput): Promise<void>;
   tick(): Promise<void>;

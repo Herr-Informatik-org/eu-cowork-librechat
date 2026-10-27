@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 it('does not retrieve or write when personal memory is off', async () => {
   const request = req();
-  request.user.personalization!.memories = false;
+  request.user!.personalization!.memories = false;
   expect(
     await readPersonalMailContext(request, roles, { query: 'Mail', sender: 'test@example.com' }),
   ).toEqual({ context: '', status: 'disabled', count: 0 });

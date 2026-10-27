@@ -279,6 +279,12 @@ export async function learnBrainTurn({
         signal,
       },
     );
+    if (
+      session.options.signal?.aborted ||
+      (session.options.canPersist && !(await session.options.canPersist()))
+    ) {
+      return { status: 'interrupted', saved: 0 };
+    }
     const candidates = captured.filter((candidate) => !containsBrainCredential(candidate.quote));
     if (!candidates.length) return { status: 'completed', saved: 0 };
     const stored = await session.remember(candidates, true);

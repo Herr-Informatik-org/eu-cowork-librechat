@@ -15,6 +15,7 @@ import {
   FolderCheck,
   FileText,
   Loader2,
+  Keyboard,
 } from 'lucide-react';
 import type {
   MailWorkspaceResult,
@@ -35,6 +36,10 @@ import {
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import { useAuthContext, useLocalize, useNewConvo } from '~/hooks';
 import { prepareMailChat } from './handoff';
+import { mailShortcutKey, ShortcutHelp } from './Shortcuts';
+import { MailFollowupSettings, MailFollowupAction } from './Followup';
+import { MailDraftRequest } from './DraftRequest';
+import { MailAttachments } from './Attachments';
 import { FolderPicker, useDoneFolder } from './Folders';
 import SafeMailPreview from './SafeMailPreview';
 import PersonalRule from './PersonalRule';
@@ -117,7 +122,11 @@ function PersonalSettings({
     }
   };
   return (
-    <aside className="mail-settings" aria-label={t('com_ui_mail_settings')}>
+    <aside
+      className="mail-settings"
+      data-mail-shortcuts="off"
+      aria-label={t('com_ui_mail_settings')}
+    >
       <div className="mail-settings-heading">
         <h2>{t('com_ui_mail_settings')}</h2>
         <button className="mail-button" onClick={onClose}>
@@ -315,6 +324,7 @@ function PersonalSettings({
           </p>
         )}
       </form>
+      <MailFollowupSettings />
     </aside>
   );
 }
@@ -438,6 +448,8 @@ function Detail({
           <FolderCheck size={16} />
           {t('com_ui_mail_mark_done')}
         </button>
+        <MailDraftRequest result={result} content={data} editing={editing} />
+        <MailFollowupAction result={result} />
       </div>
       {editing && <p className="mail-notice">{t('com_ui_mail_edit_before_move')}</p>}
       {result.moveStatus === 'uncertain' && (
@@ -609,6 +621,7 @@ function Detail({
           )}
         </p>
       )}
+      <MailAttachments result={result} />
       <footer className="mail-detail-footer">{t('com_ui_mail_never_send')}</footer>
     </article>
   );
@@ -621,6 +634,9 @@ function MailWorkspace() {
   const status = statusQuery.data;
   const actions = useMailActions();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const rowButtons = useRef(new Map<string, HTMLButtonElement>());
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
   const [priority, setPriority] = useState<MailWorkspacePriority | ''>('');
@@ -658,7 +674,7 @@ function MailWorkspace() {
     if (
       !folder ||
       moveUnavailable ||
-      items.some((item) => !!currentEditor(item.id)) ||
+      items.some((item) => !!item.moveStatus || !!currentEditor(item.id)) ||
       !items.length ||
       items.length > 100 ||
       status?.settings.consentVersion !== consentVersion
@@ -710,7 +726,70 @@ function MailWorkspace() {
     });
   }, [rows]);
   return (
-    <main className="mail-workspace">
+    <main
+      className="mail-workspace"
+      tabIndex={0}
+      aria-label={t('com_ui_mail_workspace')}
+      onKeyDown={(event) => {
+        if (
+          !status?.available ||
+          !status.connection.connected ||
+          settingsOpen ||
+          folderPicker ||
+          moveSelection ||
+          shortcutsOpen
+        )
+          return;
+        const key = mailShortcutKey(event);
+        if (!key) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (key === '/') {
+          searchInput.current?.focus();
+          return;
+        }
+        if (key === '?') {
+          setShortcutsOpen(true);
+          return;
+        }
+        if (key === 'Escape') {
+          const details = event.currentTarget.querySelector<HTMLDetailsElement>(
+            '.mail-activity-details[open]',
+          );
+          if (details) {
+            details.open = false;
+            details.querySelector('summary')?.focus();
+            return;
+          }
+          setChecked(new Map());
+          setNotice('');
+          return;
+        }
+        if (key === 'e') {
+          if (checked.size) requestMove(Array.from(checked.values()));
+          else if (selected) requestMove([selected]);
+          return;
+        }
+        if (key === 'x') {
+          if (!selected || selected.moveStatus) return;
+          setChecked((previous) => {
+            const next = new Map(previous);
+            if (next.has(selected.id)) next.delete(selected.id);
+            else if (next.size < 100) next.set(selected.id, selected);
+            return next;
+          });
+          return;
+        }
+        if (!rows.length) return;
+        const index = rows.findIndex((row) => row.id === selectedId);
+        const offset = key === 'j' || key === 'ArrowDown' ? 1 : -1;
+        const next = rows[index < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, index + offset))];
+        setSelectedId(next.id);
+        const button = rowButtons.current.get(next.id);
+        button?.focus({ preventScroll: true });
+        button?.scrollIntoView?.({ block: 'nearest' });
+      }}
+    >
       <header className="mail-workspace-heading">
         <div className="mail-heading-title">
           <div className="mail-heading-icon">
@@ -722,6 +801,14 @@ function MailWorkspace() {
           </div>
         </div>
         <div className="mail-heading-actions">
+          <button
+            className="mail-button"
+            onClick={() => setShortcutsOpen(true)}
+            aria-label={t('com_ui_mail_shortcuts')}
+            title={t('com_ui_mail_shortcuts')}
+          >
+            <Keyboard size={16} />
+          </button>
           <button
             className="mail-button"
             onClick={() => void actions.refresh()}
@@ -764,35 +851,32 @@ function MailWorkspace() {
           )}
         </div>
       </header>
-      {status?.connection.connected && <MoveProgress jobs={jobs} />}
+
       {status?.connection.connected && jobsQuery.isError && (
         <p className="mail-banner mail-error" role="alert">
           {t('com_ui_mail_job_loading_error')}
         </p>
       )}
-      <div className="mail-progress" role="status">
-        <span className={`mail-status-dot ${running ? 'running' : ''}`} />
-        {running ? t('com_ui_mail_running') : t('com_ui_mail_ready')}
-        {running && (
-          <progress
-            className="mail-analysis-progress"
-            aria-label={t('com_ui_mail_analysis_progress')}
-          />
-        )}
-        <span className="mail-progress-detail">
-          {status?.activity.history.mode !== 'off' &&
-          status?.activity.history.processed !== undefined
-            ? t('com_ui_mail_processed', { count: status.activity.history.processed })
-            : ''}
-        </span>
-        <span className="mail-progress-detail">
-          {status?.activity.lastRunAt
-            ? t('com_ui_mail_last_check', {
-                time: date(status.activity.lastRunAt, status.settings.timeZone),
-              })
-            : ''}
-        </span>
-      </div>
+      <MoveProgress
+        jobs={status?.connection.connected ? jobs : []}
+        running={running}
+        details={
+          <>
+            {status?.activity.history.mode !== 'off' &&
+              status?.activity.history.processed !== undefined && (
+                <p>{t('com_ui_mail_processed', { count: status.activity.history.processed })}</p>
+              )}
+            {status?.activity.lastRunAt && (
+              <p>
+                {t('com_ui_mail_last_check', {
+                  time: date(status.activity.lastRunAt, status.settings.timeZone),
+                })}
+              </p>
+            )}
+            {running && <p>{t('com_ui_mail_running')}</p>}
+          </>
+        }
+      />
       {status?.connection.connected && status.settings.consentVersion !== consentVersion && (
         <p className="mail-banner">
           <span>{t('com_ui_mail_consent_update')}</span>
@@ -843,6 +927,7 @@ function MailWorkspace() {
             <label className="mail-search">
               <Search size={17} />
               <input
+                ref={searchInput}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={t('com_ui_mail_search')}
@@ -916,6 +1001,7 @@ function MailWorkspace() {
                 selectionHasEditor ||
                 status.settings.consentVersion !== consentVersion
               }
+              title={jobs.some(isMoveActive) ? t('com_ui_mail_move_active') : undefined}
               onClick={() => requestMove(Array.from(checked.values()))}
             >
               <FolderCheck size={15} />
@@ -924,9 +1010,6 @@ function MailWorkspace() {
             {rows.length > 100 && <p className="mail-muted">{t('com_ui_mail_selection_limit')}</p>}
             {selectionHasEditor && (
               <p className="mail-notice">{t('com_ui_mail_edit_before_move')}</p>
-            )}
-            {jobs.some(isMoveActive) && (
-              <p className="mail-muted">{t('com_ui_mail_move_active')}</p>
             )}
           </div>
           <div className={`mail-columns ${selected ? 'has-selection' : ''}`}>
@@ -966,6 +1049,10 @@ function MailWorkspace() {
                       />
                     </label>
                     <button
+                      ref={(element) => {
+                        if (element) rowButtons.current.set(row.id, element);
+                        else rowButtons.current.delete(row.id);
+                      }}
                       className={`mail-row ${row.id === selectedId ? 'selected' : ''}`}
                       onClick={() => setSelectedId(row.id)}
                       aria-pressed={row.id === selectedId}
@@ -1051,6 +1138,7 @@ function MailWorkspace() {
           </div>
         </>
       )}
+      {shortcutsOpen && <ShortcutHelp onClose={() => setShortcutsOpen(false)} />}
       {folderPicker && status?.connection.connected && (
         <div className="mail-move-overlay">
           <div className="mail-move-dialog">
@@ -1075,7 +1163,6 @@ function MailWorkspace() {
               return next;
             });
             setMoveSelection(null);
-            setNotice(t('com_ui_mail_bulk_queued'));
           }}
         />
       )}

@@ -16,7 +16,7 @@ export default function PersonalRule({
   const [text, setText] = useState('');
   const [saved, setSaved] = useState(false);
   return (
-    <details className="mail-summary">
+    <details className="mail-summary" data-mail-shortcuts="off">
       <summary>{t('com_ui_mail_rule_title')}</summary>
       <p className="mail-muted">{t('com_ui_mail_rule_hint')}</p>
       <label className="mail-edit-label">

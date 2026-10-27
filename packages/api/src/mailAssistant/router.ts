@@ -1,3 +1,4 @@
+import { followupCommitSchema, followupPrepareSchema, followupSettingsSchema } from './followup';
 import { Router, json } from 'express';
 import { z } from 'zod';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
@@ -84,6 +85,63 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
     }),
   );
   router.get(
+    '/followup/settings',
+    safeRoute(async (req, res) => {
+      if (!runtime!.followup)
+        throw new MailAssistantError('Die Aufgabenablage ist nicht verfügbar.');
+      res.json(await runtime!.followup.settings(owner(req)));
+    }),
+  );
+  router.put(
+    '/followup/settings',
+    safeRoute(async (req, res) => {
+      if (!runtime!.followup)
+        throw new MailAssistantError('Die Aufgabenablage ist nicht verfügbar.');
+      res.json(
+        await runtime!.followup.saveSettings(owner(req), followupSettingsSchema.parse(req.body)),
+      );
+    }),
+  );
+  router.get(
+    '/followup/projects',
+    safeRoute(async (req, res) => {
+      if (!runtime!.followup)
+        throw new MailAssistantError('Die Aufgabenablage ist nicht verfügbar.');
+      const query = z
+        .object({ profile: z.string().max(40), search: z.string().max(100).optional() })
+        .strict()
+        .parse(req.query);
+      res.json({
+        projects: await runtime!.followup.projects(owner(req), query.profile, query.search),
+      });
+    }),
+  );
+  router.post(
+    '/results/:id/followup/prepare',
+    safeRoute(async (req, res) => {
+      if (!runtime!.followup)
+        throw new MailAssistantError('Die Aufgabenablage ist nicht verfügbar.');
+      res.json(
+        await runtime!.followup.prepare(
+          owner(req),
+          z
+            .string()
+            .regex(/^[a-zA-Z0-9_-]{1,128}$/)
+            .parse(req.params.id),
+          followupPrepareSchema.parse(req.body),
+        ),
+      );
+    }),
+  );
+  router.post(
+    '/followup/commit',
+    safeRoute(async (req, res) => {
+      if (!runtime!.followup)
+        throw new MailAssistantError('Die Aufgabenablage ist nicht verfügbar.');
+      res.json(await runtime!.followup.commit(owner(req), followupCommitSchema.parse(req.body)));
+    }),
+  );
+  router.get(
     '/move-jobs',
     safeRoute(async (req, res) => {
       res.json({ jobs: await runtime!.engine.moveJobs(owner(req)) });
@@ -134,6 +192,7 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
     safeRoute(async (req, res) => {
       const id = owner(req);
       await runtime!.engine.pause(id);
+      await runtime!.followup?.clearPreviews(id);
       await runtime!.oauth.disconnect(id);
       await runtime!.engine.disconnect(id);
       res.json(await runtime!.engine.status(id));
@@ -235,6 +294,34 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
         .parse(req.body);
       await runtime!.engine.rememberRule(owner(req), id, input);
       res.status(204).end();
+    }),
+  );
+  router.post(
+    '/results/:id/draft-request',
+    safeRoute(async (req, res) => {
+      const id = z
+        .string()
+        .regex(/^[a-zA-Z0-9_-]{1,128}$/)
+        .parse(req.params.id);
+      const body = z
+        .object({
+          revision: z.string().regex(/^[a-f0-9]{64}$/),
+          instructions: z.string().max(4000).default(''),
+          requestId: z.string().uuid(),
+        })
+        .strict()
+        .parse(req.body);
+      res.json(await runtime!.engine.requestDraft(owner(req), id, body));
+    }),
+  );
+  router.get(
+    '/results/:id/attachments',
+    safeRoute(async (req, res) => {
+      const id = z
+        .string()
+        .regex(/^[a-zA-Z0-9_-]{1,128}$/)
+        .parse(req.params.id);
+      res.json(await runtime!.engine.attachments(owner(req), id));
     }),
   );
   router.get(

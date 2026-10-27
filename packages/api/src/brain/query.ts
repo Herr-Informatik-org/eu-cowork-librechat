@@ -16,7 +16,7 @@ export function brainAuthoredText(text: string): string {
     if (start === undefined) continue;
     // Legacy raw mail can contain forged closing markers. Keep the whole region foreign.
     const closings = [...authored.matchAll(new RegExp(`(?:^|\\n)\\[/${kind}\\]`, 'gu'))];
-    const last = closings.at(-1);
+    const last = closings[closings.length - 1];
     authored =
       authored.slice(0, start) +
       (last && last.index >= start ? authored.slice(last.index + last[0].length) : '');
@@ -57,7 +57,8 @@ function userRequest(text: string): string {
     .replace(/\[PERSÖNLICHE STILVORGABEN[^\]]*\][\s\S]*?\[\/PERSÖNLICHE STILVORGABEN\]/gu, '')
     .trim();
   if (text.startsWith('Du bist der KI-Assistent im Outlook-Seitenbereich.')) {
-    authored = authored.split(/\n\s*\n/u).at(-1) ?? authored;
+    const paragraphs = authored.split(/\n\s*\n/u);
+    authored = paragraphs[paragraphs.length - 1] ?? authored;
   }
   return authored;
 }

@@ -46,7 +46,15 @@ describe('Personal mail HTTP boundary', () => {
   it('requires Cowork auth for status and every initiating operation', async () => {
     const app = setup();
     expect((await request(app).get('/api/agents/office/mail-assistant/status')).status).toBe(401);
-    for (const path of ['/connect', '/run', '/pause', '/move-jobs'])
+    for (const path of [
+      '/connect',
+      '/run',
+      '/pause',
+      '/move-jobs',
+      '/followup/commit',
+      '/results/result-1/followup/prepare',
+      '/results/result-1/draft-request',
+    ])
       expect((await request(app).post(`/api/agents/office/mail-assistant${path}`)).status).toBe(
         401,
       );
@@ -79,6 +87,8 @@ describe('Personal mail HTTP boundary', () => {
         enqueueMove: jest.fn(),
         editDraft: jest.fn(),
         rememberRule: jest.fn(),
+        requestDraft: jest.fn(),
+        attachments: jest.fn(),
         status: jest.fn(),
         settings: jest.fn(),
         run: jest.fn(),
@@ -95,6 +105,14 @@ describe('Personal mail HTTP boundary', () => {
         status: jest.fn(),
         disconnect: jest.fn(),
         token: jest.fn(),
+      },
+      followup: {
+        settings: jest.fn(),
+        saveSettings: jest.fn(),
+        projects: jest.fn(),
+        prepare: jest.fn(),
+        commit: jest.fn(),
+        clearPreviews: jest.fn(),
       },
       adapter: {
         authorize: jest.fn(),
@@ -200,6 +218,59 @@ describe('Personal mail HTTP boundary', () => {
       'Explicit edited reply',
       revision,
     );
+    const draftRequest = {
+      revision,
+      instructions: 'Termin am Freitag bestätigen.',
+      requestId: '00000000-0000-4000-8000-000000000002',
+    };
+    await request(app)
+      .post('/api/agents/office/mail-assistant/results/result-1/draft-request')
+      .set('authorization', 'Bearer fixture')
+      .send(draftRequest)
+      .expect(200);
+    expect(runtime.engine.requestDraft).toHaveBeenCalledWith(owner, 'result-1', draftRequest);
+    await request(app)
+      .get('/api/agents/office/mail-assistant/results/result-1/attachments?owner=someone-else')
+      .set('authorization', 'Bearer fixture')
+      .expect(200);
+    expect(runtime.engine.attachments).toHaveBeenCalledWith(owner, 'result-1');
+    await request(app)
+      .post('/api/agents/office/mail-assistant/results/result-1/draft-request')
+      .set('authorization', 'Bearer fixture')
+      .send({ ...draftRequest, send: true })
+      .expect(400);
+    await request(app)
+      .post('/api/agents/office/mail-assistant/results/result-1/draft-request')
+      .set('authorization', 'Bearer fixture')
+      .send({ ...draftRequest, instructions: 'x'.repeat(4001) })
+      .expect(400);
+    expect(runtime.engine.requestDraft).toHaveBeenCalledTimes(1);
+    await request(app)
+      .post('/api/agents/office/mail-assistant/results/result-1/followup/prepare')
+      .set('authorization', 'Bearer fixture')
+      .send({ revision })
+      .expect(200);
+    expect(runtime.followup!.prepare).toHaveBeenCalledWith(owner, 'result-1', { revision });
+    const commit = { token: '00000000-0000-4000-8000-000000000003', taskId: 99 };
+    await request(app)
+      .post('/api/agents/office/mail-assistant/followup/commit')
+      .set('authorization', 'Bearer fixture')
+      .send(commit)
+      .expect(200);
+    expect(runtime.followup!.commit).toHaveBeenCalledWith(owner, commit);
+    for (const extra of [
+      { ownerId: 'other' },
+      { tool: 'call_model_method' },
+      { model: 'mail.mail' },
+      { values: { body: 'injected' } },
+    ]) {
+      await request(app)
+        .post('/api/agents/office/mail-assistant/followup/commit')
+        .set('authorization', 'Bearer fixture')
+        .send({ ...commit, ...extra })
+        .expect(400);
+    }
+    expect(runtime.followup!.commit).toHaveBeenCalledTimes(1);
     for (const extra of [
       { ownerId: 'someone-else' },
       { messageId: 'arbitrary-graph-id' },

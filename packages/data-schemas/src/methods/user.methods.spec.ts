@@ -621,6 +621,9 @@ describe('User Methods - Database Tests', () => {
       await mongoose.connection
         .collection('eucowork_mail_operations')
         .insertMany([{ ownerId }, { ownerId: otherId }]);
+      await mongoose.connection
+        .collection('eucowork_mail_followups')
+        .insertMany([{ ownerId }, { ownerId: otherId }]);
       const states = mongoose.connection.collection('eucowork_mail_oauth_states');
       await states.insertMany([{ ownerId }, { ownerId: otherId }]);
       await methods.deleteUserById(ownerId);
@@ -629,6 +632,7 @@ describe('User Methods - Database Tests', () => {
         'eucowork_mail_assistant',
         'eucowork_mail_oauth_states',
         'eucowork_mail_operations',
+        'eucowork_mail_followups',
       ]) {
         const collection = mongoose.connection.collection(name);
         expect(await collection.countDocuments({ ownerId })).toBe(0);

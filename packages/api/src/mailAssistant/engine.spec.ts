@@ -187,6 +187,7 @@ function fixture() {
   };
   let guard = async () => {};
   const graph = {
+    attachments: jest.fn(async (_id: string) => ({ attachments: [], hasMore: false })),
     preview: jest.fn(async (_id: string) => ({
       html: '<p>Safe preview</p>',
       blockedImages: 0,
@@ -276,6 +277,7 @@ function fixture() {
         draft: 'Guten Tag\n\nGerne unterstützen wir Sie.',
       }),
     ),
+    analyzeDraft: jest.fn(async () => 'Guten Tag\n\nGerne unterstützen wir Sie.'),
     audit: jest.fn(async () => {}),
   };
   const engine = createMailAssistantEngine({ store, adapter, now: () => instant });
@@ -294,6 +296,15 @@ function fixture() {
       instant = new Date(value);
     },
   };
+}
+
+async function requestDraft(f: ReturnType<typeof fixture>, instructions = '') {
+  const result = (await f.engine.results(f.owner, {})).results[0];
+  return f.engine.requestDraft(f.owner, result.id, {
+    revision: result.revision!,
+    instructions,
+    requestId: '17dc3b0d-0788-4a74-9c47-a7954e5ae28f',
+  });
 }
 
 describe('mail assistant deterministic safety boundary', () => {
@@ -398,7 +409,7 @@ describe('mail assistant deterministic safety boundary', () => {
     });
     return f;
   }
-  test('a partial created draft is retained but provider failure stops automatic continuation', async () => {
+  test('an explicitly requested partial draft is retained with warnings and never automatically repeated', async () => {
     const f = fixture();
     f.graph.createReply.mockResolvedValue({
       id: 'draft-id',
@@ -406,6 +417,7 @@ describe('mail assistant deterministic safety boundary', () => {
       stop: true,
     });
     await f.engine.run(f.owner);
+    await requestDraft(f);
     const saved = [...f.results.values()][0];
     expect(saved).toMatchObject({
       draftStatus: 'created',
@@ -414,7 +426,7 @@ describe('mail assistant deterministic safety boundary', () => {
       draftWarnings: ['Anhang noch unvollständig'],
     });
     expect(f.jobs.get(f.owner)!.continuation).toBeNull();
-    expect(f.jobs.get(f.owner)!.lastError).toContain('unvollständigen Entwurf');
+    expect(f.jobs.get(f.owner)!.lastError).toBe('');
     await f.engine.run(f.owner);
     expect(f.graph.createReply).toHaveBeenCalledTimes(1);
   });
@@ -571,10 +583,10 @@ describe('mail assistant deterministic safety boundary', () => {
     });
     expect(status.results).toHaveLength(1);
     expect(f.graph.historyPage).toHaveBeenCalledWith(undefined, '2026-10-26T07:00:00Z', undefined);
-    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
     await f.engine.run(f.owner);
     expect(f.graph.historyPage).toHaveBeenCalledTimes(1);
-    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
     expect(f.jobs.get(f.owner)!.checkpoint?.url).toBe('live-cursor');
   });
   test('empty historical pages still report more work and resume at their own cursor', async () => {
@@ -680,6 +692,7 @@ describe('mail assistant deterministic safety boundary', () => {
   test('historical range changes can rescan without duplicating completed draft operations', async () => {
     const f = historyFixture();
     await f.engine.run(f.owner);
+    await requestDraft(f);
     f.results.clear();
     f.jobs.get(f.owner)!.history = {
       until: f.jobs.get(f.owner)!.enabledAt!,
@@ -691,9 +704,12 @@ describe('mail assistant deterministic safety boundary', () => {
     await f.engine.run(f.owner);
     expect(f.graph.createReply).toHaveBeenCalledTimes(1);
   });
-  test('creates a reply draft and keeps existing categories, questions only in overview', async () => {
+  test('creates a reply draft only after a separate user request and keeps existing categories, questions only in overview', async () => {
     const f = fixture();
     await f.engine.run(f.owner);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    expect(f.adapter.analyzeDraft).not.toHaveBeenCalled();
+    await requestDraft(f, 'Bitte kurz und freundlich antworten.');
     expect(f.graph.categorize).toHaveBeenCalledWith('mail', ['Kunde', 'KI: Normal'], 'W/"version"');
     expect(f.graph.createReply).toHaveBeenCalledTimes(1);
     expect(f.graph.createReply.mock.calls[0][1]).not.toContain('Welche Version');
@@ -713,7 +729,7 @@ describe('mail assistant deterministic safety boundary', () => {
     await f.engine.run(f.owner);
     await f.engine.run(f.owner);
     expect(f.adapter.analyze).toHaveBeenCalledTimes(1);
-    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
   });
   test('records manual Outlook category changes without reclassification', async () => {
     const f = fixture();
@@ -784,6 +800,8 @@ describe('mail assistant deterministic safety boundary', () => {
     const f = fixture();
     f.graph.createReply.mockRejectedValue(new MailGraphError(0, true));
     await f.engine.run(f.owner);
+    expect(await requestDraft(f)).toEqual({ status: 'uncertain' });
+    expect(await requestDraft(f)).toEqual({ status: 'uncertain' });
     await f.engine.run(f.owner);
     expect(f.graph.createReply).toHaveBeenCalledTimes(1);
     expect((await f.engine.status(f.owner)).results[0].draftStatus).toBe('uncertain');
@@ -792,6 +810,7 @@ describe('mail assistant deterministic safety boundary', () => {
     const f = fixture();
     f.graph.createReply.mockRejectedValue(new MailGraphError(0, true));
     await f.engine.run(f.owner);
+    await requestDraft(f);
     f.results.clear();
     f.message.id = 'new-message';
     f.message.receivedAt = '2026-10-26T07:45:00Z';
@@ -813,7 +832,7 @@ describe('mail assistant deterministic safety boundary', () => {
     expect(status.settings.consentVersion).toBe('2026-10-27');
     await f.engine.run(f.owner);
     expect(f.adapter.analyze).toHaveBeenCalledTimes(1);
-    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
     expect(f.store.pause).not.toHaveBeenCalled();
     await expect(
       f.engine.settings(f.owner, { ...f.jobs.get(f.owner)!.settings, enabled: true }),
@@ -890,7 +909,8 @@ describe('mail assistant deterministic safety boundary', () => {
   });
   test('lease prevents concurrent manual requests from duplicating drafts', async () => {
     const f = fixture();
-    await Promise.allSettled([f.engine.run(f.owner), f.engine.run(f.owner)]);
+    await f.engine.run(f.owner);
+    await Promise.allSettled([requestDraft(f), requestDraft(f)]);
     expect(f.graph.createReply).toHaveBeenCalledTimes(1);
   });
   test('scheduled collision leaves the active worker and personal opt-in intact', async () => {
@@ -934,7 +954,204 @@ describe('mail assistant deterministic safety boundary', () => {
     await f.engine.disconnect(f.owner);
     expect(f.jobs.has(f.owner)).toBe(false);
     expect(f.results.size).toBe(0);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+  });
+});
+
+describe('explicit manual drafts and attachment metadata', () => {
+  async function prepared() {
+    const f = fixture();
+    await f.engine.run(f.owner);
+    const result = (await f.engine.results(f.owner, {})).results[0];
+    return { ...f, result };
+  }
+  test.each([false, true])(
+    'analysis never generates drafts or reads attachment bytes (scheduled=%s)',
+    async (scheduled) => {
+      const f = fixture();
+      await f.engine.run(f.owner, scheduled);
+      expect(f.adapter.analyze).toHaveBeenCalledTimes(1);
+      expect(f.adapter.analyzeDraft).not.toHaveBeenCalled();
+      expect(f.graph.createReply).not.toHaveBeenCalled();
+      expect(f.graph.attachments).not.toHaveBeenCalled();
+      expect(f.graph.preview).not.toHaveBeenCalled();
+      expect(f.operations.size).toBe(0);
+    },
+  );
+  test('user instructions stay separate from hostile mail and only the explicit request creates a draft', async () => {
+    const f = await prepared();
+    const instructions = 'Bitte Termin am Freitag vorschlagen.';
+    await expect(requestDraft(f, instructions)).resolves.toEqual({
+      status: 'created',
+      draftUrl: 'https://outlook.office.com/mail/draft',
+    });
+    expect(f.adapter.analyzeDraft).toHaveBeenCalledWith(
+      f.owner,
+      [expect.objectContaining({ id: 'mail' })],
+      instructions,
+      expect.any(Function),
+    );
     expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).toHaveBeenCalledWith(
+      'mail',
+      'Guten Tag\n\nGerne unterstützen wir Sie.',
+    );
+    expect(JSON.stringify([...f.results.values()])).not.toContain(instructions);
+    expect(JSON.stringify([...f.operations.values()])).not.toContain(instructions);
+    await expect(requestDraft(f, 'Andere Bitte')).resolves.toMatchObject({ status: 'existing' });
+    expect(f.adapter.analyzeDraft).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+  });
+  test('an existing human draft is linked and persisted but never rewritten or duplicated', async () => {
+    const f = await prepared();
+    f.graph.thread.mockResolvedValue({
+      complete: true,
+      messages: [
+        f.message,
+        {
+          ...f.message,
+          id: 'human',
+          isDraft: true,
+          messageUrl: 'https://outlook.office.com/mail/human',
+        },
+      ],
+    });
+    await expect(requestDraft(f)).resolves.toEqual({
+      status: 'existing',
+      draftUrl: 'https://outlook.office.com/mail/human',
+    });
+    expect(f.adapter.analyzeDraft).not.toHaveBeenCalled();
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    expect(f.graph.editDraft).not.toHaveBeenCalled();
+    expect((await f.engine.results(f.owner, {})).results[0]).toMatchObject({
+      draftStatus: 'existing',
+      draftUrl: 'https://outlook.office.com/mail/human',
+    });
+  });
+  test.each(['draft', 'reply', 'message'])(
+    'a %s appearing while drafting blocks creation',
+    async (change) => {
+      const f = await prepared();
+      (f.adapter.analyzeDraft as jest.Mock).mockImplementation(async () => {
+        f.graph.thread.mockResolvedValue({
+          complete: true,
+          messages: [
+            f.message,
+            {
+              ...f.message,
+              id: 'raced',
+              isDraft: change === 'draft',
+              sentByUser: change === 'reply',
+              receivedAt: '2026-10-26T07:59:00Z',
+              sentAt: '2026-10-26T07:59:00Z',
+            },
+          ],
+        });
+        return 'Proposed reply';
+      });
+      if (change === 'draft')
+        await expect(requestDraft(f)).resolves.toMatchObject({ status: 'existing' });
+      else await expect(requestDraft(f)).rejects.toThrow('inzwischen geändert');
+      expect(f.graph.createReply).not.toHaveBeenCalled();
+      expect(f.operations.size).toBe(0);
+    },
+  );
+  test.each(['body', 'revision', 'owner'])(
+    'stale or foreign selection %s cannot create a draft',
+    async (change) => {
+      const f = await prepared();
+      if (change === 'body') f.message.body += ' changed';
+      await expect(
+        f.engine.requestDraft(change === 'owner' ? 'other-user' : f.owner, f.result.id, {
+          revision: change === 'revision' ? '0'.repeat(64) : f.result.revision!,
+          instructions: '',
+          requestId: '17dc3b0d-0788-4a74-9c47-a7954e5ae28f',
+        }),
+      ).rejects.toThrow();
+      expect(f.adapter.analyzeDraft).not.toHaveBeenCalled();
+      expect(f.graph.createReply).not.toHaveBeenCalled();
+    },
+  );
+  test.each(['instructions', 'uuid', 'extra'])(
+    'unbounded or unexpected request %s is rejected before lease',
+    async (change) => {
+      const f = await prepared();
+      const calls = (f.store.claim as jest.Mock).mock.calls.length;
+      await expect(
+        f.engine.requestDraft(f.owner, f.result.id, {
+          revision: f.result.revision!,
+          instructions: change === 'instructions' ? 'x'.repeat(4001) : '',
+          requestId: change === 'uuid' ? 'invalid' : '17dc3b0d-0788-4a74-9c47-a7954e5ae28f',
+          ...(change === 'extra' && { send: true }),
+        }),
+      ).rejects.toThrow();
+      expect(f.store.claim).toHaveBeenCalledTimes(calls);
+      expect(f.graph.createReply).not.toHaveBeenCalled();
+    },
+  );
+  test.each(['pause', 'reconnect', 'audit'])(
+    'revocation or failed audit %s blocks draft writes',
+    async (change) => {
+      const f = await prepared();
+      if (change === 'audit')
+        (f.adapter.audit as jest.Mock).mockImplementation(async (_owner, event) => {
+          if (event === 'manual_draft_requested') throw Error('audit unavailable');
+        });
+      else
+        (f.adapter.analyzeDraft as jest.Mock).mockImplementation(async () => {
+          if (change === 'pause') await f.engine.pause(f.owner);
+          else
+            (f.adapter.connection as jest.Mock).mockResolvedValue({
+              connected: true,
+              mailbox: 'other@example.invalid',
+              generation: 'changed',
+            });
+          return 'Reply';
+        });
+      await expect(requestDraft(f)).rejects.toThrow();
+      expect(f.graph.createReply).not.toHaveBeenCalled();
+      expect(f.operations.size).toBe(0);
+    },
+  );
+  test.each(['', 'x'.repeat(12001), { tool_calls: [{ name: 'sendMail' }] }])(
+    'invalid model output cannot authorize a Graph write',
+    async (value) => {
+      const f = await prepared();
+      (f.adapter.analyzeDraft as jest.Mock).mockResolvedValue(value);
+      await expect(requestDraft(f)).rejects.toThrow();
+      expect(f.graph.createReply).not.toHaveBeenCalled();
+      expect(f.operations.size).toBe(0);
+    },
+  );
+  test('attachment discovery is explicit, bounded to the selected owner result and never invokes model or writes', async () => {
+    const f = await prepared();
+    expect(f.graph.attachments).not.toHaveBeenCalled();
+    await expect(f.engine.attachments(f.owner, f.result.id)).resolves.toEqual({
+      attachments: [],
+      hasMore: false,
+    });
+    expect(f.graph.attachments).toHaveBeenCalledWith('mail');
+    expect(f.adapter.analyzeDraft).not.toHaveBeenCalled();
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    await expect(f.engine.attachments('other-user', f.result.id)).rejects.toThrow();
+    expect(f.graph.attachments).toHaveBeenCalledTimes(1);
+  });
+  test('changed connection during attachment metadata retrieval withholds its response', async () => {
+    const f = await prepared();
+    f.graph.attachments.mockImplementation(async () => {
+      (f.adapter.connection as jest.Mock).mockResolvedValue({ connected: false });
+      return { attachments: [], hasMore: false };
+    });
+    await expect(f.engine.attachments(f.owner, f.result.id)).rejects.toThrow('Postfachverbindung');
+  });
+  test('unsafe returned draft URLs never reach response or result storage', async () => {
+    const f = await prepared();
+    f.graph.createReply.mockResolvedValue({
+      id: 'draft-id',
+      url: 'https://outlook.office.com.attacker.test/private',
+    });
+    await expect(requestDraft(f)).resolves.toEqual({ status: 'created' });
+    expect((await f.engine.results(f.owner, {})).results[0].draftUrl).toBeUndefined();
   });
 });
 
@@ -1030,7 +1247,7 @@ describe('mail result content boundary', () => {
       expect(f.graph.message).not.toHaveBeenCalled();
     },
   );
-  it.each(['none', 'existing', 'stale', 'uncertain', 'error'] as const)(
+  it.each(['none', 'uncertain', 'error'] as const)(
     'does not treat stored draft state %s as editable',
     async (state) => {
       const f = preview();
@@ -1150,6 +1367,24 @@ describe('mail result content boundary', () => {
     expect(content.draft?.bodyTruncated).toBe(true);
     expect(content).not.toHaveProperty('message.id');
   });
+  test.each(['existing', 'stale'] as const)(
+    'owned %s draft exposes only a safe URL and read-only preview',
+    async (state) => {
+      const f = preview();
+      const saved = f.results.get(`${f.owner}:${f.id}`)!;
+      saved.draftStatus = state;
+      const read = f.graph.message.getMockImplementation()!;
+      f.graph.message.mockImplementation(async (id) => ({
+        ...(await read(id)),
+        ...(id === 'draft-id' && { messageUrl: 'https://outlook.office.com/mail/draft-id' }),
+      }));
+      const content = await f.engine.content(f.owner, f.id);
+      expect(content.draft?.url).toBe('https://outlook.office.com/mail/draft-id');
+      expect(content.draft?.replyText).toBeUndefined();
+      expect(content.draft?.revision).toBeUndefined();
+      expect(f.graph.editableReply).not.toHaveBeenCalled();
+    },
+  );
   it('does not issue a Graph request if reauthorization races token acquisition', async () => {
     const f = preview();
     const fetch = jest.fn();
@@ -1178,6 +1413,7 @@ describe('personal mail workspace mutations', () => {
   async function processed() {
     const f = fixture();
     await f.engine.run(f.owner);
+    await requestDraft(f);
     const result = [...f.results.values()][0];
     const revision = (await f.engine.results(f.owner, {})).results[0].revision!;
     return { ...f, result, revision };

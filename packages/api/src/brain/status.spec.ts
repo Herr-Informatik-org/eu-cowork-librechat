@@ -101,9 +101,12 @@ it('marks superseded learning interrupted instead of accepting a late success', 
       return { status: 'completed', saved: 7 };
     },
   });
-  expect(
-    collection.updateOne.mock.calls.every((call) => (call[1] as any).$set.status === 'interrupted'),
-  ).toBe(true);
+  for (const call of collection.updateOne.mock.calls) {
+    expect(call).toEqual([
+      expect.anything(),
+      { $set: expect.objectContaining({ status: 'interrupted' }) },
+    ]);
+  }
 });
 
 it('removes a status inserted after its source was deleted during startup', async () => {

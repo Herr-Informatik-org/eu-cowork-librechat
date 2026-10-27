@@ -114,6 +114,7 @@ beforeEach(() => {
   jest.mocked(learnBrainTurn).mockImplementation(async ({ session, onUsage }) => {
     await session.remember([{ quote: source.text, kind: 'project' }], true);
     await onUsage([]);
+    return { status: 'completed', saved: 1 };
   });
 });
 
@@ -269,6 +270,7 @@ describe('historical learning through the configured runtime', () => {
         ],
         true,
       );
+      return { status: 'completed', saved: 0 };
     });
     const onFacts = jest.fn();
     await processor.extract({

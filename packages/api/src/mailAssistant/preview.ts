@@ -1,4 +1,3 @@
-import sharp from 'sharp';
 import sanitizeHtml from 'sanitize-html';
 import type { MailHtmlPreview } from './types';
 import { MailGraphError } from './errors';
@@ -6,8 +5,6 @@ import { MailGraphError } from './errors';
 const maxHtml = 1_000_000;
 const maxNodes = 20_000;
 const maxImages = 8;
-const maxImageBytes = 1_000_000;
-const maxTotalImageBytes = 2_000_000;
 const color = /^(?:#[a-f0-9]{3,8}|[a-z]{1,24}|rgba?\([0-9.,% ]{1,48}\))$/i;
 const length = '(?:0|[0-9]{1,2}(?:\\.[0-9]{1,2})?(?:px|pt)|[0-4](?:\\.[0-9]{1,2})?em)';
 const spacing = new RegExp(`^${length}(?: ${length}){0,3}$`);
@@ -221,79 +218,12 @@ type GraphCall = (
   timeout?: number,
 ) => Promise<Record<string, unknown>>;
 
-async function boundedImage(response: Response): Promise<Buffer> {
-  const length = Number(response.headers.get('content-length'));
-  if (!response.body) throw new MailGraphError(413);
-  if (length > maxImageBytes) {
-    await response.body.cancel().catch(() => undefined);
-    throw new MailGraphError(413);
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const part = await Promise.race([
-        reader.read(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new MailGraphError(0)), 10_000);
-        }),
-      ]).finally(() => clearTimeout(timer));
-      if (part.done) break;
-      total += part.value.byteLength;
-      if (total > maxImageBytes) throw new MailGraphError(413);
-      chunks.push(part.value);
-    }
-    return Buffer.concat(chunks);
-  } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
-}
-
-/** Decode only bounded raster formats; discard metadata and animation on re-encoding. */
-export async function previewRaster(input: Buffer): Promise<Buffer> {
-  if (!input.length || input.length > maxImageBytes) throw new MailGraphError(413);
-  const signature = input.subarray(0, 12);
-  const raster =
-    signature.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
-    (signature[0] === 255 && signature[1] === 216 && signature[2] === 255) ||
-    /^GIF8[79]a/.test(signature.toString('ascii')) ||
-    (signature.subarray(0, 4).toString('ascii') === 'RIFF' &&
-      signature.subarray(8, 12).toString('ascii') === 'WEBP');
-  if (!raster) throw new MailGraphError(415);
-  try {
-    const image = sharp(input, { limitInputPixels: 4_000_000, animated: false, failOn: 'error' });
-    const metadata = await image.metadata();
-    if (
-      !['png', 'jpeg', 'gif', 'webp'].includes(metadata.format || '') ||
-      !metadata.width ||
-      !metadata.height ||
-      metadata.width * metadata.height > 4_000_000
-    )
-      throw new MailGraphError(415);
-    const output = await image
-      .rotate()
-      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-      .png({ compressionLevel: 6 })
-      .timeout({ seconds: 5 })
-      .toBuffer();
-    if (output.length > maxImageBytes) throw new MailGraphError(413);
-    return output;
-  } catch {
-    throw new MailGraphError(415);
-  }
-}
-
 export function createPreviewOperation({
   call,
-  raw,
   id,
   beforeRequest,
 }: {
   call: GraphCall;
-  raw: (path: string, timeout: number) => Promise<Response>;
   id: (value: string) => string;
   beforeRequest: () => Promise<void>;
 }) {
@@ -330,71 +260,7 @@ export function createPreviewOperation({
         '<p>Diese Mail ist zu komplex für die sichere Vorschau. Bitte öffne sie in Outlook.</p>';
       first = sanitizeMailPreview(html);
     }
-    const images = new Map<string, string>();
-    if (first.references.size) {
-      try {
-        const list = await call(
-          `${path}/attachments?$select=id,contentType,size,isInline,microsoft.graph.fileAttachment/contentId&$top=100`,
-          'GET',
-          undefined,
-          undefined,
-          'text',
-          remaining(),
-        );
-        if (!Array.isArray(list.value) || list.value.length > 100) throw new MailGraphError(502);
-        const candidates = list.value.filter(
-          (row: Record<string, unknown>) =>
-            ['#microsoft.graph.fileAttachment', 'microsoft.graph.fileAttachment'].includes(
-              String(row['@odata.type']),
-            ) &&
-            typeof row.contentId === 'string' &&
-            first.references.has(row.contentId),
-        );
-        let bytes = 0;
-        for (const reference of first.references) {
-          const matches = candidates.filter(
-            (row: Record<string, unknown>) => row.contentId === reference,
-          );
-          if (matches.length !== 1) continue;
-          const image = matches[0];
-          if (
-            typeof image.id !== 'string' ||
-            !Number.isSafeInteger(image.size) ||
-            image.size <= 0 ||
-            image.size > maxImageBytes ||
-            bytes + image.size > maxTotalImageBytes ||
-            !/^image\/(?:png|jpeg|gif|webp)$/i.test(String(image.contentType))
-          )
-            continue;
-          const input = await boundedImage(
-            await raw(`${path}/attachments/${id(image.id)}/$value`, remaining()),
-          );
-          bytes += input.length;
-          if (input.length !== image.size || bytes > maxTotalImageBytes) continue;
-          try {
-            const encoded = await previewRaster(input);
-            await beforeRequest();
-            if (
-              [...images.values()].reduce((size, value) => size + value.length, 0) +
-                (encoded.length * 4) / 3 >
-              3_000_000
-            )
-              continue;
-            images.set(reference, `data:image/png;base64,${encoded.toString('base64')}`);
-          } catch (error) {
-            if (!(error instanceof MailGraphError) || [401, 403].includes(error.status))
-              throw error;
-          }
-        }
-        if (list['@odata.nextLink'])
-          warnings.push('Weitere eingebettete Bilder wurden aus Grössengründen nicht geladen.');
-      } catch (error) {
-        if (!(error instanceof MailGraphError) || [401, 403].includes(error.status)) throw error;
-        warnings.push('Einige eingebettete Bilder konnten nicht sicher geladen werden.');
-      }
-    }
     await beforeRequest();
-    const result = sanitizeMailPreview(html, images);
-    return { html: result.html, blockedImages: result.blockedImages, truncated, warnings };
+    return { html: first.html, blockedImages: first.blockedImages, truncated, warnings };
   };
 }
