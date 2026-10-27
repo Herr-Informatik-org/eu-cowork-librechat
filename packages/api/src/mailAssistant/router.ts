@@ -83,6 +83,18 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
       res.json(await runtime!.engine.status(owner(req)));
     }),
   );
+  router.get(
+    '/move-jobs',
+    safeRoute(async (req, res) => {
+      res.json({ jobs: await runtime!.engine.moveJobs(owner(req)) });
+    }),
+  );
+  router.post(
+    '/move-jobs',
+    safeRoute(async (req, res) => {
+      res.status(202).json({ job: await runtime!.engine.enqueueMove(owner(req), req.body) });
+    }),
+  );
   router.post(
     '/connect',
     safeRoute(async (req, res) => {

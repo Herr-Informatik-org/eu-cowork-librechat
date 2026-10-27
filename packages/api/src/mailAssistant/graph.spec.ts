@@ -42,6 +42,7 @@ describe('fixed personal Graph adapter', () => {
       'message',
       'move',
       'page',
+      'preview',
       'thread',
     ]);
   });

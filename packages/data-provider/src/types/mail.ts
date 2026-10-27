@@ -53,6 +53,12 @@ export type MailWorkspaceStatus = {
   };
   results: MailWorkspaceResult[];
 };
+export type MailWorkspacePreview = {
+  html: string;
+  blockedImages: number;
+  truncated: boolean;
+  warnings: string[];
+};
 export type MailWorkspaceContent = {
   resultId: string;
   mailbox: string;
@@ -62,11 +68,13 @@ export type MailWorkspaceContent = {
     receivedAt: string;
     body: string;
     bodyTruncated: boolean;
+    preview?: MailWorkspacePreview;
   };
   draft?: {
     subject: string;
     body: string;
     bodyTruncated: boolean;
+    preview?: MailWorkspacePreview;
     revision?: string;
     replyText?: string;
   };
@@ -87,3 +95,25 @@ export type MailWorkspaceParams = {
   state?: 'open' | 'done' | 'all';
 };
 export type MailWorkspacePage = { results: MailWorkspaceResult[]; nextCursor?: string };
+
+export type MailWorkspaceMoveRequest = {
+  requestId: string;
+  folderId: string;
+  items: { id: string; revision: string }[];
+};
+export type MailWorkspaceMoveJob = {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled';
+  folderName: string;
+  total: number;
+  completed: number;
+  failed: number;
+  items: {
+    id: string;
+    subject: string;
+    status: 'queued' | 'running' | 'completed' | 'failed' | 'uncertain' | 'cancelled';
+    error?: string;
+  }[];
+  createdAt: string;
+  updatedAt: string;
+};

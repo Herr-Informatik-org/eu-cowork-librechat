@@ -85,6 +85,7 @@ export interface MailResultContent {
     receivedAt: string;
     body: string;
     bodyTruncated: boolean;
+    preview?: MailHtmlPreview;
   };
   draft?: {
     subject: string;
@@ -92,8 +93,47 @@ export interface MailResultContent {
     bodyTruncated: boolean;
     revision?: string;
     replyText?: string;
+    preview?: MailHtmlPreview;
   };
   draftUnavailable?: boolean;
+}
+
+export interface MailHtmlPreview {
+  html: string;
+  blockedImages: number;
+  truncated: boolean;
+  warnings: string[];
+}
+
+export interface MailMoveRequest {
+  requestId: string;
+  folderId: string;
+  items: { id: string; revision: string }[];
+}
+export interface MailMoveItem {
+  id: string;
+  subject: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'uncertain' | 'cancelled';
+  error?: string;
+}
+export interface MailMoveJob {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled';
+  folderName: string;
+  total: number;
+  completed: number;
+  failed: number;
+  items: MailMoveItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+export interface StoredMailMoveJob extends Omit<MailMoveJob, 'items'> {
+  items: (MailMoveItem & { revision: string })[];
+  folderId: string;
+  connectionGeneration: string;
+  mailbox: string;
+  settingsRevision: number;
+  requestHash: string;
 }
 
 export interface MailCheckpoint {
@@ -124,6 +164,7 @@ export interface MailJob {
   continuation?: { mode: 'manual' | 'scheduled'; revision: number; liveComplete: boolean } | null;
   checkpoint?: MailCheckpoint;
   history?: MailHistoryCheckpoint;
+  movePending?: boolean;
 }
 
 export interface MailStore {
@@ -133,6 +174,14 @@ export interface MailStore {
   purge(ownerId: string): Promise<void>;
   due(now: Date): Promise<string[]>;
   prune(now: Date): Promise<void>;
+  moveJobs(ownerId: string): Promise<StoredMailMoveJob[]>;
+  enqueueMove(
+    ownerId: string,
+    job: StoredMailMoveJob,
+  ): Promise<'accepted' | 'duplicate' | 'busy' | 'revoked'>;
+  updateMove(ownerId: string, token: string, job: StoredMailMoveJob): Promise<boolean>;
+  cancelStaleMoves(ownerId: string, now: Date, jobId?: string): Promise<void>;
+  movesDue(now: Date): Promise<string[]>;
   claim(
     ownerId: string,
     token: string,
@@ -195,6 +244,7 @@ export interface MailGraph {
     url?: string,
   ): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }>;
   message(id: string): Promise<MailMessage>;
+  preview(id: string): Promise<MailHtmlPreview>;
   thread(id: string): Promise<{ messages: MailMessage[]; complete: boolean }>;
   categorize(id: string, categories: string[], etag?: string): Promise<void>;
   createReply(
@@ -267,6 +317,8 @@ export interface MailAssistantEngine {
   results(owner: string, query: MailResultQuery): Promise<MailResultPage>;
   folders(owner: string, parentId?: string): Promise<MailFolder[]>;
   move(owner: string, id: string, folderId: string, revision: string): Promise<MailResult>;
+  enqueueMove(owner: string, input: MailMoveRequest): Promise<MailMoveJob>;
+  moveJobs(owner: string): Promise<MailMoveJob[]>;
   editDraft(owner: string, id: string, body: string, revision: string): Promise<void>;
   tick(): Promise<void>;
   start(): void;

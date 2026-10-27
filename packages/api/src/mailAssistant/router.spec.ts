@@ -46,10 +46,13 @@ describe('Personal mail HTTP boundary', () => {
   it('requires Cowork auth for status and every initiating operation', async () => {
     const app = setup();
     expect((await request(app).get('/api/agents/office/mail-assistant/status')).status).toBe(401);
-    for (const path of ['/connect', '/run', '/pause'])
+    for (const path of ['/connect', '/run', '/pause', '/move-jobs'])
       expect((await request(app).post(`/api/agents/office/mail-assistant${path}`)).status).toBe(
         401,
       );
+    expect((await request(app).get('/api/agents/office/mail-assistant/move-jobs')).status).toBe(
+      401,
+    );
     expect(
       (await request(app).get('/api/agents/office/mail-assistant/results/result-1/content')).status,
     ).toBe(401);
@@ -72,6 +75,8 @@ describe('Personal mail HTTP boundary', () => {
         results: jest.fn(),
         folders: jest.fn(),
         move: jest.fn(),
+        moveJobs: jest.fn(),
+        enqueueMove: jest.fn(),
         editDraft: jest.fn(),
         status: jest.fn(),
         settings: jest.fn(),
@@ -142,6 +147,34 @@ describe('Personal mail HTTP boundary', () => {
       .send({ folderId: 'own-folder', revision })
       .expect(200);
     expect(runtime.engine.move).toHaveBeenCalledWith(owner, 'result-1', 'own-folder', revision);
+    const moveRequest = {
+      requestId: '00000000-0000-4000-8000-000000000001',
+      folderId: 'own-folder',
+      items: [{ id: 'a'.repeat(64), revision }],
+    };
+    jest.mocked(runtime.engine.enqueueMove).mockResolvedValue({
+      id: moveRequest.requestId,
+      status: 'queued',
+      total: 1,
+      completed: 0,
+      failed: 0,
+      folderName: '',
+      items: [],
+      createdAt: '2026-10-27T08:00:00Z',
+      updatedAt: '2026-10-27T08:00:00Z',
+    });
+    const accepted = await request(app)
+      .post('/api/agents/office/mail-assistant/move-jobs?owner=other-user')
+      .set('authorization', 'Bearer fixture')
+      .send(moveRequest)
+      .expect(202);
+    expect(accepted.body.job.status).toBe('queued');
+    expect(runtime.engine.enqueueMove).toHaveBeenCalledWith(owner, moveRequest);
+    await request(app)
+      .get('/api/agents/office/mail-assistant/move-jobs?owner=other-user')
+      .set('authorization', 'Bearer fixture')
+      .expect(200);
+    expect(runtime.engine.moveJobs).toHaveBeenCalledWith(owner);
     await request(app)
       .put('/api/agents/office/mail-assistant/results/result-1/draft')
       .set('authorization', 'Bearer fixture')

@@ -15,6 +15,9 @@ import type {
   MailRuntimeAdapter,
   MailStore,
   StoredMailResult,
+  StoredMailMoveJob,
+  MailMoveJob,
+  MailMoveRequest,
 } from './types';
 import { MAIL_CATEGORIES, MAIL_CONSENT_VERSION } from './types';
 import {
@@ -25,8 +28,11 @@ import {
   mailHistoryStart,
 } from './schedule';
 import { MailGraphError } from './graph';
+import { activeMoveJob, publicMoveJob, summarizeMove } from './moves';
 
 export class MailAssistantError extends Error {}
+class ManualMovePending extends Error {}
+class ManualLeaseBusy extends MailAssistantError {}
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const resultRevision = (result: StoredMailResult) =>
   hash([result.messageId, result.conversationId, result.sourceHash]);
@@ -79,6 +85,16 @@ export function createMailAssistantEngine({
   let timer: ReturnType<typeof setInterval> | undefined;
   let ticking = false;
   let lastPruned = 0;
+  const moveWakeups = new Map<string, ReturnType<typeof setTimeout>>();
+  const wakeMoves = (owner: string) => {
+    if (!timer || moveWakeups.has(owner)) return;
+    const timeout = setTimeout(() => {
+      moveWakeups.delete(owner);
+      void processMove(owner).catch(() => {});
+    }, 1000);
+    timeout.unref();
+    moveWakeups.set(owner, timeout);
+  };
   async function available(owner: string) {
     await adapter.authorize(owner);
     const state = await adapter.availability(owner);
@@ -205,6 +221,9 @@ export function createMailAssistantEngine({
       previous?.manualPriority ||
       (existingPriority && (!previous || existingPriority !== previous.priority));
     const priority = manuallyChanged ? (existingPriority ?? previous!.priority) : analysis.priority;
+    let draftStatus: StoredMailResult['draftStatus'] = 'none';
+    if (existing) draftStatus = previous?.draftId === existing.id ? 'stale' : 'existing';
+    if (uncertain) draftStatus = 'uncertain';
     const result: StoredMailResult = {
       id: resultId,
       messageId: mail.id,
@@ -219,13 +238,7 @@ export function createMailAssistantEngine({
       reason: analysis.reason,
       action: analysis.action,
       questions: analysis.questions,
-      draftStatus: uncertain
-        ? 'uncertain'
-        : existing
-          ? previous?.draftId === existing.id
-            ? 'stale'
-            : 'existing'
-          : 'none',
+      draftStatus,
       ...(uncertain && { operationPending: true }),
       ...(existing && { draftId: existing.id, draftUrl: existing.messageUrl }),
       ...(manuallyChanged && { manualPriority: true }),
@@ -321,6 +334,10 @@ export function createMailAssistantEngine({
         initial.continuation?.mode !== 'manual')
     )
       return;
+    if (initial.movePending) {
+      wakeMoves(owner);
+      return;
+    }
     const token = randomUUID();
     const job = await store.claim(owner, token, now(), false, initial.revision);
     if (!job) {
@@ -384,6 +401,7 @@ export function createMailAssistantEngine({
         }
         while (checkpoint.pending.length && processed < limit && now().getTime() < deadline) {
           await guard();
+          if ((await store.read(owner))?.movePending) throw new ManualMovePending();
           await process(owner, job, token, checkpoint.pending[0], guard);
           processed++;
           checkpoint.pending.shift();
@@ -446,6 +464,7 @@ export function createMailAssistantEngine({
         }
         while (history.pending.length && processed < limit && now().getTime() < deadline) {
           await guard();
+          if ((await store.read(owner))?.movePending) throw new ManualMovePending();
           await process(owner, job, token, history.pending[0], guard, history);
           processed++;
           history.processed++;
@@ -478,12 +497,16 @@ export function createMailAssistantEngine({
       } else await live(20);
       await adapter.audit(owner, 'run_completed');
     } catch (error) {
-      errorMessage =
-        error instanceof MailGraphError || error instanceof MailAssistantError
-          ? error.message
-          : 'Die Mailprüfung wurde angehalten. Bitte prüfe Verbindung, Modellfreigabe und Guthaben. Es wird nichts automatisch versendet.';
+      if (error instanceof ManualMovePending) errorMessage = '';
+      else if (error instanceof MailGraphError || error instanceof MailAssistantError)
+        errorMessage = error.message;
+      else
+        errorMessage =
+          'Die Mailprüfung wurde angehalten. Bitte prüfe Verbindung, Modellfreigabe und Guthaben. Es wird nichts automatisch versendet.';
       // No source data or provider error strings may reach logs, status, or audit metadata.
-      await adapter.audit(owner, 'run_stopped').catch(() => {});
+      await adapter
+        .audit(owner, error instanceof ManualMovePending ? 'run_yielded_for_move' : 'run_stopped')
+        .catch(() => {});
     } finally {
       const latest = await store.read(owner);
       const continuation =
@@ -496,21 +519,25 @@ export function createMailAssistantEngine({
           (latest.settings.history?.mode !== 'off' && latest.history && !latest.history.completed))
           ? latest.continuation
           : null;
+      let nextRunAt = '';
+      if (latest)
+        nextRunAt =
+          nextMailRun(
+            latest.settings,
+            new Date(now().getTime() + latest.settings.intervalMinutes * 60_000),
+          ) ?? '';
+      if (
+        continuation &&
+        (continuation.mode === 'manual' || insideMailWindow(latest!.settings, now()))
+      )
+        nextRunAt = new Date(now().getTime() + 1000).toISOString();
       await store.release(owner, token, {
         lastRunAt: now().toISOString(),
         lastError: errorMessage,
         continuation,
-        nextRunAt:
-          continuation &&
-          (continuation.mode === 'manual' || insideMailWindow(latest!.settings, now()))
-            ? new Date(now().getTime() + 1000).toISOString()
-            : latest
-              ? (nextMailRun(
-                  latest.settings,
-                  new Date(now().getTime() + latest.settings.intervalMinutes * 60_000),
-                ) ?? '')
-              : '',
+        nextRunAt,
       });
+      if (latest?.movePending) wakeMoves(owner);
     }
   }
   async function tick() {
@@ -521,6 +548,7 @@ export function createMailAssistantEngine({
         await store.prune(now());
         lastPruned = now().getTime();
       }
+      for (const owner of await store.movesDue(now())) await processMove(owner).catch(() => {});
       for (const owner of await store.due(now())) {
         const job = await store.read(owner);
         await run(
@@ -601,8 +629,10 @@ export function createMailAssistantEngine({
           receivedAt: message.receivedAt,
           body: message.body,
           bodyTruncated: message.bodyTruncated === true,
+          preview: await graph.preview(result.messageId),
         },
       };
+      await guard();
       if (result.draftId || result.draftStatus !== 'none') response.draftUnavailable = true;
       if (result.draftId && result.draftStatus === 'created' && !result.operationPending) {
         try {
@@ -617,7 +647,9 @@ export function createMailAssistantEngine({
               subject: draft.subject,
               body: draft.body,
               bodyTruncated: draft.bodyTruncated === true,
+              preview: await graph.preview(result.draftId),
             };
+            await guard();
             if (!result.editPending) {
               try {
                 const editable = await graph.editableReply(result.draftId);
@@ -682,19 +714,21 @@ export function createMailAssistantEngine({
     return selected;
   }
 
-  async function manualOperation<T>(
+  async function manualLease<T>(
     owner: string,
-    id: string,
-    action: (result: StoredMailResult, token: string, guard: () => Promise<void>) => Promise<T>,
+    action: (
+      token: string,
+      guard: () => Promise<void>,
+      job: MailJob,
+      connection: { mailbox: string; generation: string },
+    ) => Promise<T>,
   ): Promise<T> {
     await adapter.authorize(owner);
-    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id))
-      throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
     const token = randomUUID();
     const job = await store.claim(owner, token, now(), true);
     if (!job)
-      throw new MailAssistantError(
-        'Bitte bestätige die persönliche Freigabe oder warte auf das Ende der laufenden Mail-Tranche.',
+      throw new ManualLeaseBusy(
+        'Eine Mail wird gerade bearbeitet. Bitte kurz warten und erneut versuchen.',
       );
     try {
       const connection = await adapter.connection(owner);
@@ -723,11 +757,99 @@ export function createMailAssistantEngine({
           throw new MailAssistantError('Die Bearbeitung wurde angehalten.');
       };
       await guard();
-      const result = await store.result(owner, id);
-      if (!result) throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
-      return await action(result, token, guard);
+      return await action(token, guard, job, {
+        mailbox: connection.mailbox,
+        generation: connection.generation,
+      });
     } finally {
       await store.release(owner, token, {});
+    }
+  }
+
+  async function manualOperation<T>(
+    owner: string,
+    id: string,
+    action: (result: StoredMailResult, token: string, guard: () => Promise<void>) => Promise<T>,
+  ): Promise<T> {
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id))
+      throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
+    return manualLease(owner, async (token, guard) => {
+      const result = await store.result(owner, id);
+      if (!result) throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
+      return action(result, token, guard);
+    });
+  }
+
+  async function moveWithLease(
+    owner: string,
+    id: string,
+    folderId: string,
+    revision: string,
+    result: StoredMailResult,
+    token: string,
+    guard: () => Promise<void>,
+  ): Promise<MailResult> {
+    if (revision !== resultRevision(result))
+      throw new MailAssistantError(
+        'Der Mail-Vorgang wurde inzwischen verändert. Bitte neu laden und die angezeigte Mail erneut auswählen.',
+      );
+    if (result.moveStatus === 'completed') return publicResult(result);
+    const operationKey = hash([owner, id, result.messageId, 'manual-move']);
+    if (
+      result.moveStatus === 'uncertain' ||
+      (await store.draftState(owner, operationKey))?.state === 'pending'
+    )
+      throw new MailAssistantError(
+        'Der Ausgang einer früheren Verschiebung ist unklar. Bitte in Outlook kontrollieren; es wird nicht erneut verschoben.',
+      );
+    const graph = await adapter.graph(owner, guard);
+    const folder = await graph.folder(folderId);
+    if (!folder.canMoveTo) throw new MailAssistantError('Bitte einen eigenen Ablageordner wählen.');
+    const mail = await graph.message(result.messageId);
+    if (
+      mail.id !== result.messageId ||
+      mail.conversationId !== result.conversationId ||
+      mail.isDraft
+    )
+      throw new MailAssistantError('Die Originalmail passt nicht mehr zum Mail-Vorgang.');
+    await guard();
+    await adapter.audit(owner, 'manual_move_requested', id);
+    const operationHash = hash([result.messageId, folder.id, mail.changeKey]);
+    if (!(await store.reserveDraft(owner, token, operationKey, operationHash, true)))
+      throw new MailAssistantError(
+        'Diese Verschiebung wurde bereits angefordert. Bitte den Status prüfen.',
+      );
+    const pending = { ...result, moveStatus: 'uncertain' as const, moveDestination: folder.id };
+    await store.putResult(owner, token, pending);
+    try {
+      const moved = await graph.move(result.messageId, folder.id, mail.etag);
+      if (
+        !moved.id ||
+        moved.isDraft ||
+        moved.conversationId !== result.conversationId ||
+        moved.parentFolderId !== folder.id
+      )
+        throw new MailGraphError(0, true);
+      await store.finishDraft(owner, operationKey, operationHash, 'completed');
+      await guard();
+      const completed: StoredMailResult = {
+        ...result,
+        messageId: moved.id,
+        messageUrl: moved.messageUrl,
+        sourceHash: sourceHash({ ...mail, id: moved.id }),
+        moveStatus: 'completed',
+        doneFolder: folder.displayName,
+        moveDestination: folder.id,
+      };
+      await store.putResult(owner, token, completed);
+      await adapter.audit(owner, 'manual_move_completed', id);
+      return publicResult(completed);
+    } catch (error) {
+      if (error instanceof MailGraphError && !error.uncertain) {
+        await store.finishDraft(owner, operationKey, operationHash, 'failed');
+        await store.putResult(owner, token, result);
+      }
+      throw error;
     }
   }
 
@@ -737,70 +859,239 @@ export function createMailAssistantEngine({
     folderId: string,
     revision: string,
   ): Promise<MailResult> {
-    return manualOperation(owner, id, async (result, token, guard) => {
-      if (revision !== resultRevision(result))
+    return manualOperation(owner, id, (result, token, guard) =>
+      moveWithLease(owner, id, folderId, revision, result, token, guard),
+    );
+  }
+
+  async function moveJobs(owner: string): Promise<MailMoveJob[]> {
+    await adapter.authorize(owner);
+    await store.cancelStaleMoves(owner, now());
+    return (await store.moveJobs(owner)).map(publicMoveJob).reverse();
+  }
+
+  async function enqueueMove(owner: string, input: MailMoveRequest): Promise<MailMoveJob> {
+    await adapter.authorize(owner);
+    const request = z
+      .object({
+        requestId: z.string().uuid(),
+        folderId: z
+          .string()
+          .min(1)
+          .max(2048)
+          .regex(/^[A-Za-z0-9_+=/-]+$/),
+        items: z
+          .array(
+            z
+              .object({
+                id: z.string().regex(/^[a-f0-9]{64}$/),
+                revision: z.string().regex(/^[a-f0-9]{64}$/),
+              })
+              .strict(),
+          )
+          .min(1)
+          .max(100),
+      })
+      .strict()
+      .parse(input);
+    if (new Set(request.items.map((item) => item.id)).size !== request.items.length)
+      throw new MailAssistantError('Jede Mail darf nur einmal ausgewählt werden.');
+    const [job, connection] = await Promise.all([store.read(owner), adapter.connection(owner)]);
+    if (
+      !job ||
+      job.settings.consentVersion !== MAIL_CONSENT_VERSION ||
+      !connection.connected ||
+      !connection.generation ||
+      !connection.mailbox
+    )
+      throw new MailAssistantError(
+        'Bitte bestätige die persönliche Freigabe und verbinde dein Postfach.',
+      );
+    await store.cancelStaleMoves(owner, now());
+    const requestHash = hash(request);
+    const existing = (await store.moveJobs(owner)).find((item) => item.id === request.requestId);
+    if (existing) {
+      if (existing.requestHash !== requestHash)
         throw new MailAssistantError(
-          'Der Mail-Vorgang wurde inzwischen verändert. Bitte neu laden und die angezeigte Mail erneut auswählen.',
+          'Die Auftragskennung gehört zu einer anderen Auswahl. Bitte neu auswählen.',
         );
-      if (result.moveStatus === 'completed') return publicResult(result);
-      const operationKey = hash([owner, id, result.messageId, 'manual-move']);
-      if (
-        result.moveStatus === 'uncertain' ||
-        (await store.draftState(owner, operationKey))?.state === 'pending'
-      )
-        throw new MailAssistantError(
-          'Der Ausgang einer früheren Verschiebung ist unklar. Bitte in Outlook kontrollieren; es wird nicht erneut verschoben.',
-        );
-      const graph = await adapter.graph(owner, guard);
-      const folder = await graph.folder(folderId);
-      if (!folder.canMoveTo)
-        throw new MailAssistantError('Bitte einen eigenen Ablageordner wählen.');
-      const mail = await graph.message(result.messageId);
-      if (
-        mail.id !== result.messageId ||
-        mail.conversationId !== result.conversationId ||
-        mail.isDraft
-      )
-        throw new MailAssistantError('Die Originalmail passt nicht mehr zum Mail-Vorgang.');
-      await guard();
-      await adapter.audit(owner, 'manual_move_requested', id);
-      const operationHash = hash([result.messageId, folder.id, mail.changeKey]);
-      if (!(await store.reserveDraft(owner, token, operationKey, operationHash, true)))
-        throw new MailAssistantError(
-          'Diese Verschiebung wurde bereits angefordert. Bitte den Status prüfen.',
-        );
-      const pending = { ...result, moveStatus: 'uncertain' as const, moveDestination: folder.id };
-      await store.putResult(owner, token, pending);
-      try {
-        const moved = await graph.move(result.messageId, folder.id, mail.etag);
+      return publicMoveJob(existing);
+    }
+    const selected = await Promise.all(
+      request.items.map(async (item) => {
+        const result = await store.result(owner, item.id);
+        if (!result || resultRevision(result) !== item.revision)
+          throw new MailAssistantError(
+            'Eine ausgewählte Mail wurde verändert. Bitte die Liste neu laden und erneut auswählen.',
+          );
+        if (result.moveStatus)
+          throw new MailAssistantError(
+            'Eine ausgewählte Mail wurde bereits verschoben oder ihr Ablagestatus ist unklar. Bitte prüfen.',
+          );
+        return { ...item, subject: result.subject.slice(0, 500), status: 'queued' as const };
+      }),
+    );
+    const queued: StoredMailMoveJob = {
+      id: request.requestId,
+      requestHash,
+      folderId: request.folderId,
+      folderName: '',
+      settingsRevision: job.revision,
+      connectionGeneration: connection.generation,
+      mailbox: connection.mailbox,
+      items: selected,
+      total: selected.length,
+      completed: 0,
+      failed: 0,
+      status: 'queued',
+      createdAt: now().toISOString(),
+      updatedAt: now().toISOString(),
+    };
+    await adapter.audit(owner, 'manual_move_job_requested', queued.id);
+    const current = await adapter.connection(owner);
+    if (
+      !current.connected ||
+      current.generation !== connection.generation ||
+      current.mailbox !== connection.mailbox
+    )
+      throw new MailAssistantError('Die Verbindung wurde geändert. Bitte erneut auswählen.');
+    const accepted = await store.enqueueMove(owner, queued);
+    if (accepted === 'revoked')
+      throw new MailAssistantError(
+        'Die persönliche Freigabe wurde geändert. Bitte erneut auswählen.',
+      );
+    if (accepted === 'busy')
+      throw new MailAssistantError(
+        'Ein Verschiebeauftrag läuft bereits oder die Auftragskennung ist belegt. Bitte dessen Abschluss abwarten.',
+      );
+    wakeMoves(owner);
+    const saved = (await store.moveJobs(owner)).find((item) => item.id === queued.id);
+    if (!saved) throw new MailAssistantError('Die Verbindung wurde während der Annahme getrennt.');
+    return publicMoveJob(saved);
+  }
+
+  async function processMove(owner: string): Promise<void> {
+    await store.cancelStaleMoves(owner, now());
+    const pending = (await store.moveJobs(owner)).find(activeMoveJob);
+    if (!pending) return;
+    try {
+      await manualLease(owner, async (token, leaseGuard, job, connection) => {
+        let queue = (await store.moveJobs(owner)).find((item) => item.id === pending.id);
+        if (!queue || !activeMoveJob(queue) || job.revision !== queue.settingsRevision) return;
         if (
-          !moved.id ||
-          moved.isDraft ||
-          moved.conversationId !== result.conversationId ||
-          moved.parentFolderId !== folder.id
+          connection.mailbox !== queue.mailbox ||
+          connection.generation !== queue.connectionGeneration
         )
-          throw new MailGraphError(0, true);
-        await store.finishDraft(owner, operationKey, operationHash, 'completed');
-        await guard();
-        const completed: StoredMailResult = {
-          ...result,
-          messageId: moved.id,
-          messageUrl: moved.messageUrl,
-          sourceHash: sourceHash({ ...mail, id: moved.id }),
-          moveStatus: 'completed',
-          doneFolder: folder.displayName,
+          throw new MailAssistantError('Die Verbindung des Verschiebeauftrags wurde geändert.');
+        const queueId = queue.id;
+        const guard = async () => {
+          await leaseGuard();
+          const current = (await store.moveJobs(owner)).find((item) => item.id === queueId);
+          if (!current || !activeMoveJob(current))
+            throw new MailAssistantError('Der Verschiebeauftrag wurde angehalten.');
         };
-        await store.putResult(owner, token, completed);
-        await adapter.audit(owner, 'manual_move_completed', id);
-        return publicResult(completed);
-      } catch (error) {
-        if (error instanceof MailGraphError && !error.uncertain) {
-          await store.finishDraft(owner, operationKey, operationHash, 'failed');
-          await store.putResult(owner, token, result);
+        const save = async () => {
+          queue = summarizeMove(queue!, now());
+          if (!(await store.updateMove(owner, token, queue)))
+            throw new MailAssistantError('Der Verschiebeauftrag wurde angehalten.');
+        };
+        const interrupted = queue.items.find((item) => item.status === 'running');
+        if (interrupted) {
+          const stored = await store.result(owner, interrupted.id);
+          if (stored?.moveStatus === 'completed' && stored.moveDestination === queue.folderId) {
+            interrupted.status = 'completed';
+          } else {
+            interrupted.status = 'uncertain';
+            interrupted.error =
+              'Die vorige Bearbeitung wurde unterbrochen. Bitte in Outlook prüfen; keine automatische Wiederholung.';
+          }
+          await save();
+          return;
         }
-        throw error;
+        const item = queue.items.find((entry) => entry.status === 'queued');
+        if (!item) return;
+        if (!queue.folderName) {
+          try {
+            const graph = await adapter.graph(owner, guard);
+            const folder = await graph.folder(queue.folderId);
+            await guard();
+            if (!folder.canMoveTo || folder.id !== queue.folderId)
+              throw new MailAssistantError('Bitte einen eigenen gültigen Ablageordner wählen.');
+            queue.folderName = folder.displayName;
+          } catch {
+            queue.items = queue.items.map((entry) =>
+              entry.status === 'queued'
+                ? {
+                    ...entry,
+                    status: 'failed',
+                    error:
+                      'Der Zielordner konnte nicht bestätigt werden. Bitte Verbindung und Ordnerauswahl prüfen.',
+                  }
+                : entry,
+            );
+            await save();
+            return;
+          }
+        }
+        await adapter.audit(owner, 'manual_move_item_started', item.id);
+        await guard();
+        item.status = 'running';
+        await save();
+        try {
+          const result = await store.result(owner, item.id);
+          if (!result) throw new MailAssistantError('Mail-Vorgang nicht mehr vorhanden.');
+          const moved = await moveWithLease(
+            owner,
+            item.id,
+            queue.folderId,
+            item.revision,
+            result,
+            token,
+            guard,
+          );
+          item.status = 'completed';
+          queue.folderName = moved.doneFolder ?? queue.folderName;
+        } catch (error) {
+          const result = await store.result(owner, item.id);
+          const uncertain =
+            result?.moveStatus === 'uncertain' ||
+            (error instanceof MailGraphError && error.uncertain);
+          item.status = uncertain ? 'uncertain' : 'failed';
+          if (uncertain)
+            item.error =
+              'Der Ausgang der Verschiebung ist unklar. Bitte in Outlook prüfen; keine automatische Wiederholung.';
+          else if (error instanceof MailAssistantError || error instanceof MailGraphError)
+            item.error = error.message;
+          else
+            item.error =
+              'Die Mail konnte nicht verschoben werden. Bitte prüfen und bei Bedarf neu auswählen.';
+          if (
+            uncertain ||
+            !(error instanceof MailAssistantError) ||
+            (error instanceof MailGraphError && [401, 403, 429].includes(error.status))
+          ) {
+            queue.items = queue.items.map((entry) =>
+              entry.status === 'queued'
+                ? {
+                    ...entry,
+                    status: 'cancelled',
+                    error:
+                      'Nach einem Verbindungs- oder Schreibfehler angehalten. Bitte neu auswählen.',
+                  }
+                : entry,
+            );
+          }
+        }
+        await save();
+      });
+    } catch (error) {
+      if (!(error instanceof ManualLeaseBusy)) {
+        await store.cancelStaleMoves(owner, now(), pending.id);
+        await adapter.audit(owner, 'manual_move_job_stopped', pending.id).catch(() => {});
       }
-    });
+    } finally {
+      if ((await store.read(owner))?.movePending) wakeMoves(owner);
+    }
   }
 
   async function editDraft(
@@ -926,6 +1217,8 @@ export function createMailAssistantEngine({
   }
   return {
     content,
+    enqueueMove,
+    moveJobs,
     results,
     folders,
     move,
@@ -994,11 +1287,13 @@ export function createMailAssistantEngine({
       }
       await adapter.audit(owner, parsed.data.enabled ? 'settings_enabled' : 'settings_disabled');
       await store.saveSettings(owner, parsed.data, now());
+      await store.cancelStaleMoves(owner, now());
     },
     run,
     async pause(owner: string) {
       await adapter.authorize(owner);
       await store.pause(owner);
+      await store.cancelStaleMoves(owner, now());
       await adapter.audit(owner, 'paused');
     },
     async disconnect(owner: string) {
@@ -1070,6 +1365,8 @@ export function createMailAssistantEngine({
     stop() {
       if (timer) clearInterval(timer);
       timer = undefined;
+      for (const timeout of moveWakeups.values()) clearTimeout(timeout);
+      moveWakeups.clear();
     },
   };
 }

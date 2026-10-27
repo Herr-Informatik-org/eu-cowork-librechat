@@ -1,5 +1,6 @@
 import type { MailFetch, MailGraph, MailMessage, MailFolder } from './types';
 import { createDraftOperations } from './drafts';
+import { createPreviewOperation } from './preview';
 import { MailGraphError } from './errors';
 export { MailGraphError } from './errors';
 
@@ -95,6 +96,7 @@ export function createMailGraph({
     body?: unknown,
     etag?: string,
     format: 'text' | 'html' = 'text',
+    timeout?: number,
   ): Promise<Response> {
     await beforeRequest();
     const accessToken = await token();
@@ -104,7 +106,7 @@ export function createMailGraph({
       response = await request(origin + path, {
         method,
         redirect: 'error',
-        signal: AbortSignal.timeout(path.endsWith('/$value') ? 300_000 : 25_000),
+        signal: AbortSignal.timeout(timeout ?? (path.endsWith('/$value') ? 300_000 : 25_000)),
         headers: {
           Authorization: `Bearer ${accessToken}`,
           Accept: path.endsWith('/$value') ? '*/*' : 'application/json',
@@ -127,8 +129,9 @@ export function createMailGraph({
     body?: unknown,
     etag?: string,
     format: 'text' | 'html' = 'text',
+    timeout?: number,
   ): Promise<Record<string, unknown>> {
-    const response = await raw(path, method, body, etag, format);
+    const response = await raw(path, method, body, etag, format, timeout);
     if (response.status === 204) return {};
     try {
       if (!response.body) throw Error();
@@ -175,6 +178,7 @@ export function createMailGraph({
   }
   function historyPath(value: string): string {
     try {
+      // eslint-disable-next-line no-control-regex -- Reject control bytes before URL normalization.
       if (/[\\\u0000-\u0020\u007f]/.test(value)) throw new MailHistoryLinkError();
       const raw = /^https:\/\/graph\.microsoft\.com(?::443)?(\/[^?#]*)(\?[^#]*)?$/i.exec(value);
       const url = new URL(value);
@@ -207,6 +211,7 @@ export function createMailGraph({
       value.length > 2048 ||
       value === '.' ||
       value === '..' ||
+      // eslint-disable-next-line no-control-regex -- Opaque IDs must not contain control bytes.
       /[\r\n\\\u0000-\u001f]/.test(value)
     )
       throw new MailGraphError(400);
@@ -227,11 +232,17 @@ export function createMailGraph({
     if (!reservedFolders) {
       reservedFolders = (async () => {
         const values = new Set<string>();
-        for (const alias of reservedFolderAliases) {
-          const folder = await call(`/v1.0/me/mailFolders/${alias}?$select=id`);
-          if (typeof folder.id !== 'string' || !folder.id) throw new MailGraphError(502);
-          values.add(folder.id);
-          systemFolderIdentities.set(alias, folder.id);
+        // The OAuth layer coalesces refreshes; every read still runs its own owner guard.
+        for (let offset = 0; offset < reservedFolderAliases.length; offset += 3) {
+          const group = reservedFolderAliases.slice(offset, offset + 3);
+          const folders = await Promise.all(
+            group.map((alias) => call(`/v1.0/me/mailFolders/${alias}?$select=id`)),
+          );
+          for (const [index, folder] of folders.entries()) {
+            if (typeof folder.id !== 'string' || !folder.id) throw new MailGraphError(502);
+            values.add(folder.id);
+            systemFolderIdentities.set(group[index], folder.id);
+          }
         }
         return values;
       })();
@@ -306,6 +317,7 @@ export function createMailGraph({
   }
   function folderPagePath(link: string, path: string): string {
     try {
+      // eslint-disable-next-line no-control-regex -- Reject control bytes before URL normalization.
       if (/[\\\u0000-\u0020\u007f]/.test(link)) throw Error();
       const raw = /^https:\/\/graph\.microsoft\.com(\/[^?#]*)(\?[^#]*)?$/.exec(link);
       const url = new URL(link);
@@ -319,7 +331,7 @@ export function createMailGraph({
       )
         throw Error();
       const normalize = (value: string) =>
-        decodeURIComponent(value).replace(/\/mailfolders\('([^'\/]+)'\)/i, '/mailFolders/$1');
+        decodeURIComponent(value).replace(/\/mailfolders\('([^'/]+)'\)/i, '/mailFolders/$1');
       if (normalize(url.pathname) !== normalize(path)) throw Error();
       return url.pathname + url.search;
     } catch {
@@ -327,6 +339,12 @@ export function createMailGraph({
     }
   }
   return {
+    preview: createPreviewOperation({
+      call,
+      raw: (path, timeout) => raw(path, 'GET', undefined, undefined, 'text', timeout),
+      id,
+      beforeRequest,
+    }),
     async folders(parentId) {
       const path = parentId
         ? `/v1.0/me/mailFolders/${id(parentId)}/childFolders`

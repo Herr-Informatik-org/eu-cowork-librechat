@@ -1,5 +1,20 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-27 — Mailaufträge und abgesicherte HTML-Vorschau für CW01
+
+- Einzelne oder bis zu 100 ausdrücklich ausgewählte Originalmails werden als
+  gespeicherter Hintergrundauftrag verschoben. Die Oberfläche zeigt den Fortschritt
+  und bleibt für andere Mails bedienbar. Die Analyse gibt manuelle Aufträge zwischen
+  einzelnen Mails frei; unnötig serielle Ordnerabfragen entfallen.
+- Aufträge bleiben an Benutzer, persönliche Verbindung und bestätigte
+  Auswahlversionen gebunden. Pause und geänderte Freigaben stoppen offene Einträge;
+  unklare Schreibausgänge werden nach einem Neustart nicht ungeprüft wiederholt.
+- HTML-Mails erscheinen mit erlaubter Formatierung in einer doppelt bereinigten,
+  isolierten Vorschau. Skripte, Formulare, aktive Links und externe Bilder bleiben
+  gesperrt. Unterstützte eingebettete Rasterbilder werden begrenzt und neu kodiert.
+- Manipulierte Modellantworten dürfen keine Werkzeuge oder Postfachaktionen
+  vorgeben. Versand bleibt ausschliesslich beim Mitarbeiter in Outlook.
+
 ## 2026-10-27 — Persönlicher Mailbereich für CW01
 
 - Neue Webansicht mit Suche, Prioritäts- und Erledigt-Filtern, eigener Ordnerauswahl,

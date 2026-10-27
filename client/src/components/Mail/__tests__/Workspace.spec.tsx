@@ -4,6 +4,7 @@ import type {
   MailWorkspaceContent,
   MailWorkspaceResult,
   MailWorkspaceStatus,
+  MailWorkspaceMoveJob,
 } from 'librechat-data-provider';
 import mockTranslations from '~/locales/en/translation.json';
 import Workspace from '../Workspace';
@@ -13,12 +14,15 @@ let mockUser = { id: 'owner' };
 let mockRows: MailWorkspaceResult[];
 let mockStatus: MailWorkspaceStatus;
 let mockContent: MailWorkspaceContent;
+let mockJobs: MailWorkspaceMoveJob[];
+let mockJobsError = false;
 const mockFolders = [
   { id: 'done', displayName: '00_erledigt', childFolderCount: 0, canMoveTo: true },
 ];
 const mockNavigate = jest.fn();
 const mockNewConversation = jest.fn();
 const mockRun = jest.fn();
+const mockPause = jest.fn();
 const mockMove = jest.fn();
 const mockSave = jest.fn();
 const mockNext = jest.fn();
@@ -33,10 +37,11 @@ const mockActions = () => ({
   connect: mockMutation(),
   settings: mockMutation(),
   run: mockMutation(mockRun),
-  pause: mockMutation(),
+  pause: mockMutation(mockPause),
   disconnect: mockMutation(),
   priority: mockMutation(),
-  move: mockMutation(mockMove),
+  move: mockMutation(),
+  enqueueMove: mockMutation(mockMove),
   draft: mockMutation(mockSave),
   refresh: jest.fn(),
 });
@@ -57,6 +62,7 @@ jest.mock('~/hooks', () => ({
 }));
 jest.mock('~/data-provider/Mail', () => ({
   useMailStatus: () => ({ data: mockStatus }),
+  useMailMoveJobs: () => ({ data: { jobs: mockJobs }, isError: mockJobsError }),
   useMailResults: (params: object) => {
     mockResults(params);
     return {
@@ -75,6 +81,9 @@ beforeEach(() => {
   jest.clearAllMocks();
   localStorage.clear();
   mockUser = { id: 'owner' };
+  mockJobs = [];
+  mockJobsError = false;
+  mockMove.mockReset();
   Object.defineProperty(global.crypto, 'randomUUID', {
     value: () => '00000000-0000-4000-8000-000000000001',
     configurable: true,
@@ -164,7 +173,11 @@ it('requires a folder selection and explicit confirmation before moving', () => 
   expect(mockMove).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
   expect(mockMove).toHaveBeenCalledWith(
-    { id: 'result', folderId: 'done', revision: 'result-revision' },
+    {
+      requestId: '00000000-0000-4000-8000-000000000001',
+      folderId: 'done',
+      items: [{ id: 'result', revision: 'result-revision' }],
+    },
     expect.any(Object),
   );
 });
@@ -233,4 +246,167 @@ it('searches on the server instead of filtering only the loaded page', async () 
   await waitFor(() =>
     expect(mockResults).toHaveBeenCalledWith(expect.objectContaining({ search: 'Kunde 315' })),
   );
+});
+
+const chooseFolder = () => {
+  fireEvent.click(screen.getByRole('button', { name: 'Erledigt-Ordner wählen' }));
+  fireEvent.click(screen.getByRole('button', { name: '00_erledigt' }));
+};
+const exampleJob = (status: MailWorkspaceMoveJob['status'] = 'running'): MailWorkspaceMoveJob => ({
+  id: 'move-job',
+  status,
+  folderName: '00_erledigt',
+  total: 2,
+  completed: 1,
+  failed: status === 'partial' ? 1 : 0,
+  createdAt: '2026-10-27T09:00:00Z',
+  updatedAt: '2026-10-27T09:01:00Z',
+  items: [
+    { id: 'first', subject: 'Bereits erledigte Mail', status: 'completed' },
+    {
+      id: 'second',
+      subject: 'Weitere Mail',
+      status: status === 'partial' ? 'uncertain' : 'queued',
+      error: status === 'partial' ? 'Ausgang konnte nicht bestätigt werden.' : undefined,
+    },
+  ],
+});
+it('selects only loaded open messages and confirms exact snapshots and folder', () => {
+  mockRows = [
+    mockRows[0],
+    { ...mockRows[0], id: 'second', revision: 'second-revision', subject: 'Zweite Mail' },
+    { ...mockRows[0], id: 'done', subject: 'Schon erledigt', moveStatus: 'completed' },
+  ];
+  mount();
+  fireEvent.click(
+    screen.getByRole('checkbox', { name: 'Alle 2 geladenen offenen Mails auswählen' }),
+  );
+  chooseFolder();
+  fireEvent.click(screen.getByRole('button', { name: 'Auswahl verschieben' }));
+  expect(screen.getByRole('alertdialog')).toHaveTextContent(
+    '2 ausgewählte Originalmails in «00_erledigt»',
+  );
+  expect(mockMove).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
+  expect(mockMove).toHaveBeenCalledWith(
+    {
+      requestId: expect.any(String),
+      folderId: 'done',
+      items: [
+        { id: 'result', revision: 'result-revision' },
+        { id: 'second', revision: 'second-revision' },
+      ],
+    },
+    expect.any(Object),
+  );
+  expect(mockNext).not.toHaveBeenCalled();
+});
+it('limits select-all to 100 loaded messages and does not select unseen pages', () => {
+  mockRows = Array.from({ length: 101 }, (_, index) => ({
+    ...mockRows[0],
+    id: `mail-${index}`,
+    subject: `Mail ${index}`,
+  }));
+  mount();
+  fireEvent.click(
+    screen.getByRole('checkbox', { name: 'Erste 100 geladene offene Mails auswählen' }),
+  );
+  expect(screen.getByText('100 ausgewählt')).toBeInTheDocument();
+  expect(
+    screen.getByRole('checkbox', { name: '«Mail 100» zum Verschieben auswählen' }),
+  ).not.toBeChecked();
+  expect(
+    screen.getByRole('checkbox', { name: '«Mail 100» zum Verschieben auswählen' }),
+  ).toBeDisabled();
+  expect(mockNext).not.toHaveBeenCalled();
+});
+it('releases the confirmation after acceptance without claiming the mails have moved', () => {
+  mockMove.mockImplementation((_request, options: { onSuccess: () => void }) =>
+    options.onSuccess(),
+  );
+  mount();
+  fireEvent.click(
+    screen.getByRole('checkbox', { name: 'Alle 1 geladenen offenen Mails auswählen' }),
+  );
+  chooseFolder();
+  fireEvent.click(screen.getByRole('button', { name: 'Auswahl verschieben' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  expect(
+    screen.getByText('Verschiebeauftrag angenommen. Der Fortschritt wird oben angezeigt.'),
+  ).toBeInTheDocument();
+  expect(screen.getByText('0 ausgewählt')).toBeInTheDocument();
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
+  expect(screen.getByRole('button', { name: 'Antwort bearbeiten' })).toBeEnabled();
+});
+it('restores background progress on mount without blocking draft edits or navigation', () => {
+  mockJobs = [exampleJob()];
+  mount();
+  expect(screen.getByRole('progressbar', { name: 'Verschiebeaufträge' })).toHaveAttribute(
+    'value',
+    '1',
+  );
+  expect(screen.getByRole('progressbar', { name: 'Verschiebeaufträge' })).toHaveAttribute(
+    'max',
+    '2',
+  );
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Antwort bearbeiten' }));
+  expect(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Im neuen Chat überarbeiten' }));
+  expect(mockNavigate).toHaveBeenCalled();
+  expect(mockMove).not.toHaveBeenCalled();
+});
+it('shows per-message uncertainty and never automatically retries the operation', () => {
+  mockJobs = [exampleJob('partial')];
+  mount();
+  fireEvent.click(screen.getByText(/Verschiebeauftrag mit Hinweisen beendet ·/));
+  fireEvent.click(screen.getByText('Hinweise zu 1 Mails anzeigen'));
+  expect(screen.getByText(/Ausgang konnte nicht bestätigt werden/)).toBeVisible();
+  expect(screen.getByText(/Für diese Mail wird kein zweiter Versuch/)).toBeVisible();
+  expect(mockMove).not.toHaveBeenCalled();
+});
+it('keeps confirmation snapshots unchanged when a newer revision arrives', () => {
+  const view = mount();
+  chooseMail();
+  chooseFolder();
+  fireEvent.click(screen.getByRole('button', { name: 'In Erledigt verschieben' }));
+  mockRows = [{ ...mockRows[0], revision: 'new-revision' }];
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
+  expect(mockMove.mock.calls[0][0].items).toEqual([{ id: 'result', revision: 'result-revision' }]);
+});
+it('clears selection when the result filter changes', () => {
+  mount();
+  fireEvent.click(
+    screen.getByRole('checkbox', { name: 'Alle 1 geladenen offenen Mails auswählen' }),
+  );
+  fireEvent.change(screen.getByRole('combobox', { name: 'Bearbeitungsstand' }), {
+    target: { value: 'done' },
+  });
+  expect(screen.getByText('0 ausgewählt')).toBeInTheDocument();
+});
+it('keeps reading available if the background status request fails', () => {
+  mockJobsError = true;
+  mount();
+  expect(
+    screen.getByText(/Bereits angenommene Aufträge können weiterhin laufen/),
+  ).toBeInTheDocument();
+  chooseMail();
+  expect(screen.getByText('Bitte um Terminbestätigung.')).toBeInTheDocument();
+  expect(mockMove).not.toHaveBeenCalled();
+});
+
+it('stops queued operations only when the user requests it', () => {
+  mockJobs = [exampleJob()];
+  mount();
+  expect(mockPause).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Aufträge und Analyse anhalten' }));
+  expect(mockPause).toHaveBeenCalledTimes(1);
 });

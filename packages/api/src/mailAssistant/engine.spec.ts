@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { createMailAssistantEngine } from './engine';
 import { createMailGraph, MailGraphError } from './graph';
 import { defaultMailSettings } from './schedule';
+import { activeMoveJob, summarizeMove } from './moves';
 import type {
   MailJob,
   MailStore,
@@ -9,6 +10,7 @@ import type {
   MailMessage,
   MailRuntimeAdapter,
   MailAnalysis,
+  StoredMailMoveJob,
 } from './types';
 
 function fixture() {
@@ -31,6 +33,7 @@ function fixture() {
     ],
   ]);
   const results = new Map<string, StoredMailResult>();
+  const moves = new Map<string, StoredMailMoveJob[]>();
   const operations = new Map<
     string,
     { sourceHash: string; state: 'pending' | 'completed' | 'failed' }
@@ -49,6 +52,57 @@ function fixture() {
   };
   const copy = <T>(value: T): T => structuredClone(value);
   const store: MailStore = {
+    moveJobs: jest.fn(async (id) => copy(moves.get(id) ?? [])),
+    enqueueMove: jest.fn(async (id, queue) => {
+      const job = jobs.get(id);
+      if (!job || job.revision !== queue.settingsRevision) return 'revoked';
+      const existing = moves.get(id) ?? [];
+      const same = existing.find((item) => item.id === queue.id);
+      if (same) return same.requestHash === queue.requestHash ? 'duplicate' : 'busy';
+      if (existing.some(activeMoveJob)) return 'busy';
+      moves.set(id, [...existing, copy(queue)]);
+      job.movePending = true;
+      return 'accepted';
+    }),
+    updateMove: jest.fn(async (id, token, queue) => {
+      const job = jobs.get(id);
+      if (!job || job.leaseToken !== token || job.revision !== queue.settingsRevision) return false;
+      const existing = moves.get(id) ?? [];
+      if (!existing.some((item) => item.id === queue.id && activeMoveJob(item))) return false;
+      const updated = existing.map((item) => (item.id === queue.id ? copy(queue) : item));
+      moves.set(id, updated);
+      job.movePending = updated.some(activeMoveJob);
+      return true;
+    }),
+    cancelStaleMoves: jest.fn(async (id, now, queueId) => {
+      const job = jobs.get(id);
+      if (!job) return;
+      const updated = (moves.get(id) ?? []).map((queue) =>
+        !activeMoveJob(queue) ||
+        (queue.id !== queueId &&
+          queue.settingsRevision === job.revision &&
+          job.settings.consentVersion === '2026-10-27')
+          ? queue
+          : summarizeMove(
+              {
+                ...queue,
+                items: queue.items.map((item) => {
+                  if (item.status === 'queued') return { ...item, status: 'cancelled' as const };
+                  if (item.status === 'running') return { ...item, status: 'uncertain' as const };
+                  return item;
+                }),
+              },
+              now,
+            ),
+      );
+      moves.set(id, updated);
+      job.movePending = updated.some(activeMoveJob);
+    }),
+    movesDue: jest.fn(async (now) =>
+      [...jobs]
+        .filter(([, job]) => job.movePending && (!job.leaseUntil || job.leaseUntil < now))
+        .map(([id]) => id),
+    ),
     draftState: async (id, key) => operations.get(id + ':' + key) ?? null,
     reserveDraft: async (id, _token, key, sourceHash, retryFailed = false) => {
       const old = operations.get(id + ':' + key);
@@ -81,6 +135,7 @@ function fixture() {
     }),
     purge: jest.fn(async (id) => {
       jobs.delete(id);
+      moves.delete(id);
       for (const key of results.keys()) if (key.startsWith(id + ':')) results.delete(key);
     }),
     due: jest.fn(async () =>
@@ -96,7 +151,11 @@ function fixture() {
     prune: jest.fn(async () => {}),
     claim: jest.fn(async (id, token, now, manual = false, revision) => {
       const job = jobs.get(id);
-      if (!job || (!manual && !job.settings.enabled) || (job.leaseUntil && job.leaseUntil > now))
+      if (
+        !job ||
+        (!manual && (!job.settings.enabled || job.movePending)) ||
+        (job.leaseUntil && job.leaseUntil > now)
+      )
         return null;
       if (revision !== undefined && job.revision !== revision) return null;
       job.leaseToken = token;
@@ -128,6 +187,12 @@ function fixture() {
   };
   let guard = async () => {};
   const graph = {
+    preview: jest.fn(async (_id: string) => ({
+      html: '<p>Safe preview</p>',
+      blockedImages: 0,
+      truncated: false,
+      warnings: [] as string[],
+    })),
     folders: jest.fn(async () => [
       { id: 'folder', displayName: '00_erledigt', childFolderCount: 0, canMoveTo: true },
     ]),
@@ -220,6 +285,7 @@ function fixture() {
     jobs,
     results,
     operations,
+    moves,
     store,
     graph,
     adapter,
@@ -868,7 +934,7 @@ describe('mail result content boundary', () => {
     const f = preview();
     f.jobs.get(f.owner)!.settings.enabled = false;
     const content = await f.engine.content(f.owner, f.id);
-    expect(content).toEqual({
+    expect(content).toMatchObject({
       resultId: f.id,
       mailbox: 'alice@example.invalid',
       message: {
@@ -1029,6 +1095,8 @@ describe('mail result content boundary', () => {
     const content = await f.engine.content(f.owner, f.id);
     expect(calls).toEqual([
       { url: 'https://graph.microsoft.com/v1.0/me/messages/mail', method: 'GET' },
+      { url: 'https://graph.microsoft.com/v1.0/me/messages/mail', method: 'GET' },
+      { url: 'https://graph.microsoft.com/v1.0/me/messages/draft-id', method: 'GET' },
       { url: 'https://graph.microsoft.com/v1.0/me/messages/draft-id', method: 'GET' },
       { url: 'https://graph.microsoft.com/v1.0/me/messages/draft-id', method: 'GET' },
     ]);
@@ -1071,6 +1139,257 @@ describe('personal mail workspace mutations', () => {
     const revision = (await f.engine.results(f.owner, {})).results[0].revision!;
     return { ...f, result, revision };
   }
+  async function moveFixture(count = 2) {
+    const f = await processed();
+    f.results.clear();
+    const messages = Array.from({ length: count }, (_, index) => ({
+      ...f.message,
+      id: `mail-${index}`,
+      conversationId: `conversation-${index}`,
+    }));
+    for (const [index, message] of messages.entries()) {
+      const id = createHash('sha256').update(`result-${index}`).digest('hex');
+      f.results.set(`${f.owner}:${id}`, {
+        ...f.result,
+        id,
+        messageId: message.id,
+        conversationId: message.conversationId,
+        sourceHash: `source-${index}`,
+      });
+    }
+    f.graph.message.mockImplementation(async (id) =>
+      structuredClone(messages.find((message) => message.id === id)!),
+    );
+    f.graph.move.mockImplementation(async (id, folderId) => ({
+      ...messages.find((message) => message.id === id)!,
+      id: `moved-${id}`,
+      parentFolderId: folderId,
+    }));
+    const items = (await f.engine.results(f.owner, {})).results.map((result) => ({
+      id: result.id,
+      revision: result.revision!,
+    }));
+    const request = {
+      requestId: '00000000-0000-4000-8000-000000000001',
+      folderId: 'folder',
+      items,
+    };
+    return { ...f, messages, request };
+  }
+  test('accepts one bound job immediately during analysis, with no Graph or model work and idempotent retries', async () => {
+    const f = await moveFixture();
+    f.graph.folder.mockClear();
+    f.graph.message.mockClear();
+    jest.mocked(f.adapter.analyze).mockClear();
+    f.jobs.get(f.owner)!.leaseToken = 'analysing';
+    f.jobs.get(f.owner)!.leaseUntil = new Date('2026-10-26T08:01:00Z');
+    const job = await f.engine.enqueueMove(f.owner, f.request);
+    expect(job).toMatchObject({ status: 'queued', total: 2, completed: 0 });
+    expect(f.graph.folder).not.toHaveBeenCalled();
+    expect(f.graph.message).not.toHaveBeenCalled();
+    expect(f.graph.move).not.toHaveBeenCalled();
+    expect(f.adapter.analyze).not.toHaveBeenCalled();
+    expect(await f.engine.enqueueMove(f.owner, f.request)).toEqual(job);
+    expect(f.moves.get(f.owner)).toHaveLength(1);
+    await expect(
+      f.engine.enqueueMove(f.owner, { ...f.request, folderId: 'other' }),
+    ).rejects.toThrow('anderen Auswahl');
+    await expect(
+      f.engine.enqueueMove(f.owner, {
+        ...f.request,
+        requestId: '00000000-0000-4000-8000-000000000002',
+      }),
+    ).rejects.toThrow('läuft bereits');
+  });
+  test('persists progress across restart and releases the lease after each mail', async () => {
+    const f = await moveFixture();
+    await f.engine.enqueueMove(f.owner, f.request);
+    const restarted = createMailAssistantEngine({
+      store: f.store,
+      adapter: f.adapter,
+      now: () => new Date('2026-10-26T08:00:00Z'),
+    });
+    await restarted.tick();
+    expect((await restarted.moveJobs(f.owner))[0]).toMatchObject({
+      total: 2,
+      completed: 1,
+      status: 'queued',
+    });
+    expect(f.jobs.get(f.owner)?.leaseToken).toBeUndefined();
+    expect(f.graph.move).toHaveBeenCalledTimes(1);
+    await restarted.tick();
+    const completed = (await restarted.moveJobs(f.owner))[0];
+    expect(completed).toMatchObject({
+      completed: 2,
+      failed: 0,
+      status: 'completed',
+      folderName: '00_erledigt',
+    });
+    expect(completed).not.toHaveProperty('mailbox');
+    expect(completed).not.toHaveProperty('connectionGeneration');
+    expect(completed.items[0]).not.toHaveProperty('revision');
+    expect(f.graph.move).toHaveBeenCalledTimes(2);
+    await restarted.tick();
+    expect(f.graph.move).toHaveBeenCalledTimes(2);
+  });
+  test.each(['released', 'paused'] as const)(
+    'a coalesced wakeup retries a busy manual lease until it is %s',
+    async (outcome) => {
+      const f = await moveFixture(1);
+      jest.useFakeTimers();
+      try {
+        f.engine.start();
+        f.jobs.get(f.owner)!.leaseToken = 'manual-editor';
+        f.jobs.get(f.owner)!.leaseUntil = new Date('2026-10-26T08:01:00Z');
+        await f.engine.enqueueMove(f.owner, f.request);
+        await jest.advanceTimersByTimeAsync(1000);
+        expect(f.graph.move).not.toHaveBeenCalled();
+        expect(jest.getTimerCount()).toBe(2);
+        if (outcome === 'released') {
+          await f.store.release(f.owner, 'manual-editor', {});
+        } else {
+          await f.engine.pause(f.owner);
+        }
+        await jest.advanceTimersByTimeAsync(1000);
+        expect(f.graph.move).toHaveBeenCalledTimes(outcome === 'released' ? 1 : 0);
+        expect((await f.engine.moveJobs(f.owner))[0].status).toBe(
+          outcome === 'released' ? 'completed' : 'cancelled',
+        );
+        expect(jest.getTimerCount()).toBe(1);
+      } finally {
+        f.engine.stop();
+        jest.useRealTimers();
+      }
+    },
+  );
+  test('a stale queued selection fails individually while unchanged selected mails can complete', async () => {
+    const f = await moveFixture();
+    await f.engine.enqueueMove(f.owner, f.request);
+    f.results.get(`${f.owner}:${f.request.items[0].id}`)!.messageId = 'new-mail';
+    await f.engine.tick();
+    expect(f.graph.move).not.toHaveBeenCalled();
+    await f.engine.tick();
+    expect((await f.engine.moveJobs(f.owner))[0]).toMatchObject({
+      status: 'partial',
+      completed: 1,
+      failed: 1,
+    });
+    expect(f.graph.move).toHaveBeenCalledTimes(1);
+  });
+  test.each(['pause', 'settings', 'connection'] as const)(
+    'revoking %s cancels queued work without a Graph mutation',
+    async (change) => {
+      const f = await moveFixture();
+      await f.engine.enqueueMove(f.owner, f.request);
+      if (change === 'pause') await f.engine.pause(f.owner);
+      if (change === 'settings') await f.engine.settings(f.owner, f.jobs.get(f.owner)!.settings);
+      if (change === 'connection')
+        jest.spyOn(f.adapter, 'connection').mockResolvedValue({
+          connected: true,
+          mailbox: 'alice@example.invalid',
+          generation: 'replacement',
+        });
+      await f.engine.tick();
+      expect(f.graph.move).not.toHaveBeenCalled();
+      expect((await f.engine.moveJobs(f.owner))[0].status).toBe('cancelled');
+    },
+  );
+  test('an explicit new job works while analysis is paused without resuming it', async () => {
+    const f = await moveFixture(1);
+    await f.engine.pause(f.owner);
+    await f.engine.enqueueMove(f.owner, f.request);
+    await f.engine.tick();
+    expect((await f.engine.moveJobs(f.owner))[0].status).toBe('completed');
+    expect(f.jobs.get(f.owner)!.settings.enabled).toBe(false);
+  });
+  test('uncertain moves stop the remaining job and are never replayed after restart', async () => {
+    const f = await moveFixture();
+    await f.engine.enqueueMove(f.owner, f.request);
+    f.graph.move.mockRejectedValueOnce(new MailGraphError(0, true));
+    await f.engine.tick();
+    const status = (await f.engine.moveJobs(f.owner))[0];
+    expect(status.items.map((item) => item.status)).toEqual(['uncertain', 'cancelled']);
+    const restarted = createMailAssistantEngine({
+      store: f.store,
+      adapter: f.adapter,
+      now: () => new Date('2026-10-26T08:00:00Z'),
+    });
+    await restarted.tick();
+    expect(f.graph.move).toHaveBeenCalledTimes(1);
+  });
+  test('a crashed in-flight item is reconciled conservatively without repeating its move', async () => {
+    const f = await moveFixture(1);
+    await f.engine.enqueueMove(f.owner, f.request);
+    f.moves.get(f.owner)![0].status = 'running';
+    f.moves.get(f.owner)![0].items[0].status = 'running';
+    await f.engine.tick();
+    expect(f.graph.move).not.toHaveBeenCalled();
+    expect((await f.engine.moveJobs(f.owner))[0].items[0].status).toBe('uncertain');
+  });
+  test('a pause during the Graph write leaves an uncertain outcome without replay', async () => {
+    const f = await moveFixture();
+    await f.engine.enqueueMove(f.owner, f.request);
+    const original = f.graph.move.getMockImplementation()!;
+    f.graph.move.mockImplementation(async (id, folder) => {
+      const value = await original(id, folder);
+      await f.engine.pause(f.owner);
+      return value;
+    });
+    await f.engine.tick();
+    expect((await f.engine.moveJobs(f.owner))[0].items.map((item) => item.status)).toEqual([
+      'uncertain',
+      'cancelled',
+    ]);
+    await f.engine.tick();
+    expect(f.graph.move).toHaveBeenCalledTimes(1);
+  });
+  test('queue snapshots cannot access another owner, forged IDs, duplicate selections or unbounded batches', async () => {
+    const f = await moveFixture(1);
+    f.jobs.set('bob', { ...f.jobs.get(f.owner)!, ownerId: 'bob' });
+    expect(await f.engine.moveJobs('bob')).toEqual([]);
+    await expect(f.engine.enqueueMove('bob', f.request)).rejects.toThrow('verändert');
+    for (const items of [
+      [...f.request.items, ...f.request.items],
+      Array.from({ length: 101 }, () => f.request.items[0]),
+      [{ id: 'https://graph.microsoft.com/me/messages/x', revision: f.request.items[0].revision }],
+    ])
+      await expect(f.engine.enqueueMove(f.owner, { ...f.request, items })).rejects.toThrow();
+    expect(f.graph.move).not.toHaveBeenCalled();
+  });
+  test('analysis yields after the current mail rather than completing the remaining batch', async () => {
+    const f = await moveFixture(1);
+    const backlog = Array.from({ length: 20 }, (_, index) => ({
+      ...f.message,
+      id: `new-${index}`,
+      conversationId: `new-conversation-${index}`,
+    }));
+    f.graph.page.mockResolvedValue({ messages: backlog, nextUrl: 'cursor', hasMore: false });
+    f.jobs.get(f.owner)!.checkpoint = { pending: backlog.map((item) => item.id) };
+    const originalRead = f.graph.message.getMockImplementation()!;
+    f.graph.message.mockImplementation(async (id) =>
+      structuredClone(backlog.find((item) => item.id === id) ?? (await originalRead(id))),
+    );
+    f.graph.thread.mockImplementation(async () => ({ messages: [], complete: true }));
+    jest.spyOn(f.adapter, 'analyze').mockImplementationOnce(async () => {
+      await f.engine.enqueueMove(f.owner, f.request);
+      return {
+        priority: 'normal',
+        action: 'information',
+        summary: 'S',
+        reason: 'R',
+        questions: [],
+        draft: '',
+      };
+    });
+    jest.mocked(f.adapter.analyze).mockClear();
+    await f.engine.run(f.owner);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(1);
+    expect(f.jobs.get(f.owner)?.checkpoint?.pending).toHaveLength(19);
+    expect(f.jobs.get(f.owner)?.continuation).toBeTruthy();
+    expect(f.jobs.get(f.owner)?.leaseToken).toBeUndefined();
+    await f.engine.tick();
+    expect(f.graph.move).toHaveBeenCalledTimes(1);
+  });
   test('manually moves only a saved own original, persists new Graph id, and is idempotent', async () => {
     const f = await processed();
     const result = await f.engine.move(f.owner, f.result.id, 'folder', f.revision);

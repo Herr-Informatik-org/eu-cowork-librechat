@@ -9,7 +9,6 @@ import {
   Pause,
   Check,
   ArrowLeft,
-  ChevronRight,
   MessageSquare,
   Copy,
   Save,
@@ -28,12 +27,16 @@ import {
   useMailStatus,
   useMailResults,
   useMailContent,
-  useMailFolders,
   useMailActions,
+  useMailMoveJobs,
 } from '~/data-provider/Mail';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import { useAuthContext, useLocalize, useNewConvo } from '~/hooks';
 import { prepareMailChat } from './handoff';
+import { FolderPicker, useDoneFolder } from './Folders';
+import SafeMailPreview from './SafeMailPreview';
+import { MoveDialog, MoveProgress, isMoveActive } from './Operations';
+import type { MoveSelection } from './Operations';
 import './workspace.css';
 
 const consentVersion = '2026-10-27';
@@ -306,92 +309,18 @@ function PersonalSettings({
   );
 }
 
-function FolderPicker({
-  active,
-  chosen,
-  onChoose,
-  onClose,
-}: {
-  active: boolean;
-  chosen: MailWorkspaceFolder | null;
-  onChoose: (folder: MailWorkspaceFolder) => void;
-  onClose: () => void;
-}) {
-  const t = useLocalize();
-  const [parents, setParents] = useState<MailWorkspaceFolder[]>([]);
-  const folders = useMailFolders(active, parents.at(-1)?.id);
-  return (
-    <div className="mail-folder-picker" role="dialog" aria-label={t('com_ui_mail_choose_folder')}>
-      <div className="mail-settings-heading">
-        <h3>{t('com_ui_mail_choose_folder')}</h3>
-        <button className="mail-button" onClick={onClose}>
-          {t('com_ui_mail_close')}
-        </button>
-      </div>
-      <p className="mail-muted">{t('com_ui_mail_folder_hint')}</p>
-      <div className="mail-folder-path">
-        <button
-          className="mail-button"
-          disabled={!parents.length}
-          onClick={() => setParents((old) => old.slice(0, -1))}
-        >
-          <ArrowLeft size={15} />
-          {t('com_ui_mail_back')}
-        </button>
-        <span>{parents.map((p) => p.displayName).join(' / ') || t('com_ui_mail_mailbox')}</span>
-      </div>
-      {folders.isLoading ? (
-        <p role="status">{t('com_ui_mail_loading')}</p>
-      ) : (
-        <ul>
-          {folders.data?.folders.map((folder) => (
-            <li key={folder.id}>
-              <button
-                className="mail-folder-name"
-                disabled={!folder.canMoveTo}
-                onClick={() => {
-                  onChoose({
-                    ...folder,
-                    path: [...parents.map((p) => p.displayName), folder.displayName].join(' / '),
-                  });
-                  onClose();
-                }}
-              >
-                <FolderCheck size={16} />
-                {folder.displayName}
-                {chosen?.id === folder.id && <Check size={15} />}
-              </button>
-              {!!folder.childFolderCount && (
-                <button
-                  className="mail-button"
-                  title={t('com_ui_mail_subfolders')}
-                  aria-label={`${folder.displayName}: ${t('com_ui_mail_subfolders')}`}
-                  onClick={() => setParents((old) => [...old, folder])}
-                >
-                  <ChevronRight size={16} />
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {folders.isError && (
-        <p className="mail-error" role="alert">
-          {failure(folders.error as Error, t('com_ui_mail_error'))}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function Detail({
   result,
   status,
-  onMoved,
+  folder,
+  onMove,
+  moveUnavailable,
 }: {
   result: MailWorkspaceResult;
   status: MailWorkspaceStatus;
-  onMoved: () => void;
+  folder: MailWorkspaceFolder | null;
+  onMove: (items: MailWorkspaceResult[]) => void;
+  moveUnavailable: boolean;
 }) {
   const t = useLocalize();
   const { user } = useAuthContext();
@@ -404,31 +333,14 @@ function Detail({
   const [body, setBody] = useState('');
   const [revision, setRevision] = useState('');
   const [notice, setNotice] = useState('');
-  const [folderPicker, setFolderPicker] = useState(false);
-  const [confirmMove, setConfirmMove] = useState(false);
-  const folderKey = `mail:done-folder:${user?.id}:${status.connection.mailbox}`;
-  const [folder, setFolder] = useState<MailWorkspaceFolder | null>(() => {
-    try {
-      const stored = JSON.parse(
-        localStorage.getItem(folderKey) || 'null',
-      ) as MailWorkspaceFolder | null;
-      return stored?.id && stored.displayName ? stored : null;
-    } catch {
-      return null;
-    }
-  });
   const data =
     content.data?.resultId === result.id &&
     content.data.mailbox.toLowerCase() === status.connection.mailbox?.toLowerCase()
       ? content.data
       : undefined;
-  const busy = actions.move.isLoading || actions.draft.isLoading || actions.priority.isLoading;
+  const busy = actions.draft.isLoading || actions.priority.isLoading;
   const locked = status.settings.consentVersion !== consentVersion;
   const selectedBody = tab === 'draft' ? data?.draft : data?.message;
-  const chooseFolder = (next: MailWorkspaceFolder) => {
-    setFolder(next);
-    localStorage.setItem(folderKey, JSON.stringify(next));
-  };
   const startChat = () => {
     if (!data || !user?.id) return;
     const draft = editing ? body : data.draft?.replyText || data.draft?.body || '';
@@ -482,63 +394,22 @@ function Detail({
             ))}
           </select>
         </label>
-        <button className="mail-button" onClick={() => setFolderPicker(true)}>
-          {folder?.displayName || t('com_ui_mail_choose_folder')}
-        </button>
         <button
           className="mail-button"
           disabled={
             busy ||
             locked ||
             !folder ||
+            moveUnavailable ||
             result.moveStatus === 'completed' ||
             result.moveStatus === 'uncertain'
           }
-          onClick={() => setConfirmMove(true)}
+          onClick={() => onMove([result])}
         >
           <FolderCheck size={16} />
           {t('com_ui_mail_mark_done')}
         </button>
       </div>
-      {folderPicker && (
-        <FolderPicker
-          active={status.connection.connected}
-          chosen={folder}
-          onChoose={chooseFolder}
-          onClose={() => setFolderPicker(false)}
-        />
-      )}
-      {confirmMove && (
-        <div className="mail-notice">
-          <p>
-            {t('com_ui_mail_move_confirm', {
-              folder: folder?.path || folder?.displayName,
-              subject: result.subject,
-            })}
-          </p>
-          <button
-            className="mail-button primary"
-            disabled={busy}
-            onClick={() =>
-              folder &&
-              actions.move.mutate(
-                { id: result.id, folderId: folder.id, revision: result.revision },
-                {
-                  onSuccess: () => {
-                    setConfirmMove(false);
-                    onMoved();
-                  },
-                },
-              )
-            }
-          >
-            {t('com_ui_mail_move_now')}
-          </button>
-          <button className="mail-button" disabled={busy} onClick={() => setConfirmMove(false)}>
-            {t('com_ui_mail_cancel')}
-          </button>
-        </div>
-      )}
       {result.moveStatus === 'uncertain' && (
         <p className="mail-notice">{t('com_ui_mail_move_uncertain')}</p>
       )}
@@ -671,20 +542,26 @@ function Detail({
               </div>
             </>
           ) : (
-            <pre>{selectedBody.body || t('com_ui_mail_empty_body')}</pre>
+            <SafeMailPreview
+              preview={selectedBody.preview}
+              text={selectedBody.body || t('com_ui_mail_empty_body')}
+              title={tab === 'draft' ? t('com_ui_mail_draft') : t('com_ui_mail_original')}
+            />
           )}
           {selectedBody.bodyTruncated && (
-            <p className="mail-notice">{t('com_ui_mail_truncated')}</p>
+            <p className="mail-notice">
+              {t(selectedBody.preview ? 'com_ui_mail_text_truncated' : 'com_ui_mail_truncated')}
+            </p>
           )}
           {tab === 'draft' && !data?.draft?.revision && (
             <p className="mail-muted">{t('com_ui_mail_legacy_draft')}</p>
           )}
         </section>
       )}
-      {(actions.move.isError || actions.draft.isError || actions.priority.isError) && (
+      {(actions.draft.isError || actions.priority.isError) && (
         <p className="mail-error" role="alert">
           {failure(
-            (actions.move.error || actions.draft.error || actions.priority.error) as Error,
+            (actions.draft.error || actions.priority.error) as Error,
             t('com_ui_mail_error'),
           )}
         </p>
@@ -696,6 +573,7 @@ function Detail({
 
 function MailWorkspace() {
   const t = useLocalize();
+  const { user } = useAuthContext();
   const statusQuery = useMailStatus();
   const status = statusQuery.data;
   const actions = useMailActions();
@@ -706,6 +584,13 @@ function MailWorkspace() {
   const [state, setState] = useState<'open' | 'done' | 'all'>('open');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [checked, setChecked] = useState<Map<string, MailWorkspaceResult>>(new Map());
+  const [folderPicker, setFolderPicker] = useState(false);
+  const { folder, chooseFolder } = useDoneFolder(user?.id, status?.connection.mailbox);
+  const [moveSelection, setMoveSelection] = useState<MoveSelection | null>(null);
+  const jobsQuery = useMailMoveJobs(!!status?.available && !!status.connection.connected);
+  const jobs = jobsQuery.data?.jobs || [];
+  const moveUnavailable = !!jobsQuery.isLoading || !!jobsQuery.isError || jobs.some(isMoveActive);
   const resultQuery = useMailResults(
     { search: query, priority: priority || undefined, state },
     !!status?.available && !!status?.connection.connected,
@@ -715,20 +600,59 @@ function MailWorkspace() {
     [resultQuery.data],
   );
   const selected = rows.find((row) => row.id === selectedId);
+  const eligible = rows.filter((row) => !row.moveStatus);
+  const selectable = eligible.slice(0, 100);
+  const allSelected = selectable.length > 0 && selectable.every((row) => checked.has(row.id));
+  const requestMove = (items: MailWorkspaceResult[]) => {
+    if (
+      !folder ||
+      moveUnavailable ||
+      !items.length ||
+      items.length > 100 ||
+      status?.settings.consentVersion !== consentVersion
+    )
+      return;
+    setMoveSelection({
+      request: {
+        requestId: crypto.randomUUID(),
+        folderId: folder.id,
+        items: items.map(({ id, revision }) => ({ id, revision })),
+      },
+      folderName: folder.path || folder.displayName,
+      subjects: items.map((item) => item.subject),
+    });
+  };
   const previousRunning = useRef(false);
   const running = !!status?.activity.running || !!status?.activity.continuing;
   useEffect(() => {
+    if (search === query) return;
     const timer = setTimeout(() => {
       setQuery(search);
       setSelectedId(null);
+      setChecked(new Map());
     }, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, query]);
   const refreshResults = resultQuery.refetch;
   useEffect(() => {
     if (previousRunning.current && !running) void refreshResults();
     previousRunning.current = running;
   }, [running, refreshResults]);
+  const moveProgress = jobs
+    .map((job) => `${job.id}:${job.completed}:${job.failed}:${job.status}`)
+    .join('|');
+  const previousMoveProgress = useRef('');
+  useEffect(() => {
+    if (moveProgress && previousMoveProgress.current !== moveProgress) void refreshResults();
+    previousMoveProgress.current = moveProgress;
+  }, [moveProgress, refreshResults]);
+  useEffect(() => {
+    setChecked((previous) => {
+      const next = new Map(previous);
+      for (const row of rows) if (row.moveStatus) next.delete(row.id);
+      return next.size === previous.size ? previous : next;
+    });
+  }, [rows]);
   return (
     <main className="mail-workspace">
       <header className="mail-workspace-heading">
@@ -784,9 +708,21 @@ function MailWorkspace() {
           )}
         </div>
       </header>
+      {status?.connection.connected && <MoveProgress jobs={jobs} />}
+      {status?.connection.connected && jobsQuery.isError && (
+        <p className="mail-banner mail-error" role="alert">
+          {t('com_ui_mail_job_loading_error')}
+        </p>
+      )}
       <div className="mail-progress" role="status">
         <span className={`mail-status-dot ${running ? 'running' : ''}`} />
         {running ? t('com_ui_mail_running') : t('com_ui_mail_ready')}
+        {running && (
+          <progress
+            className="mail-analysis-progress"
+            aria-label={t('com_ui_mail_analysis_progress')}
+          />
+        )}
         <span className="mail-progress-detail">
           {status?.activity.history.mode !== 'off' &&
           status?.activity.history.processed !== undefined
@@ -863,6 +799,7 @@ function MailWorkspace() {
               onChange={(event) => {
                 setPriority(event.target.value as MailWorkspacePriority | '');
                 setSelectedId(null);
+                setChecked(new Map());
               }}
             >
               <option value="">{t('com_ui_mail_all_priorities')}</option>
@@ -878,6 +815,7 @@ function MailWorkspace() {
               onChange={(event) => {
                 setState(event.target.value as 'open' | 'done' | 'all');
                 setSelectedId(null);
+                setChecked(new Map());
               }}
             >
               <option value="open">{t('com_ui_mail_open')}</option>
@@ -885,6 +823,51 @@ function MailWorkspace() {
               <option value="all">{t('com_ui_mail_all')}</option>
             </select>
             <span className="mail-count">{t('com_ui_mail_loaded', { count: rows.length })}</span>
+          </div>
+          <div className="mail-bulk-selection">
+            <label>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                disabled={!selectable.length}
+                onChange={(event) =>
+                  setChecked(
+                    event.target.checked
+                      ? new Map(selectable.map((row) => [row.id, row]))
+                      : new Map(),
+                  )
+                }
+              />
+              {eligible.length > 100
+                ? t('com_ui_mail_select_loaded_limit')
+                : t('com_ui_mail_select_loaded', { count: selectable.length })}
+            </label>
+            <span>{t('com_ui_mail_selection_count', { count: checked.size })}</span>
+            {checked.size > 0 && (
+              <button className="mail-button" onClick={() => setChecked(new Map())}>
+                {t('com_ui_mail_selection_clear')}
+              </button>
+            )}
+            <button className="mail-button" onClick={() => setFolderPicker(true)}>
+              {folder?.displayName || t('com_ui_mail_choose_folder')}
+            </button>
+            <button
+              className="mail-button primary"
+              disabled={
+                !checked.size ||
+                !folder ||
+                moveUnavailable ||
+                status.settings.consentVersion !== consentVersion
+              }
+              onClick={() => requestMove(Array.from(checked.values()))}
+            >
+              <FolderCheck size={15} />
+              {t('com_ui_mail_move_selected')}
+            </button>
+            {rows.length > 100 && <p className="mail-muted">{t('com_ui_mail_selection_limit')}</p>}
+            {jobs.some(isMoveActive) && (
+              <p className="mail-muted">{t('com_ui_mail_move_active')}</p>
+            )}
           </div>
           <div className={`mail-columns ${selected ? 'has-selection' : ''}`}>
             <section className="mail-list" aria-label={t('com_ui_mail_list')}>
@@ -905,7 +888,23 @@ function MailWorkspace() {
               )}
               <ul>
                 {rows.map((row) => (
-                  <li key={row.id}>
+                  <li key={row.id} className="mail-selectable-row">
+                    <label className="mail-row-check">
+                      <input
+                        type="checkbox"
+                        aria-label={t('com_ui_mail_select_one', { subject: row.subject })}
+                        checked={checked.has(row.id)}
+                        disabled={!!row.moveStatus || (!checked.has(row.id) && checked.size >= 100)}
+                        onChange={(event) =>
+                          setChecked((previous) => {
+                            const next = new Map(previous);
+                            if (event.target.checked) next.set(row.id, row);
+                            else next.delete(row.id);
+                            return next;
+                          })
+                        }
+                      />
+                    </label>
                     <button
                       className={`mail-row ${row.id === selectedId ? 'selected' : ''}`}
                       onClick={() => setSelectedId(row.id)}
@@ -964,10 +963,9 @@ function MailWorkspace() {
                     key={`${selected.id}:${selected.revision}`}
                     result={selected}
                     status={status}
-                    onMoved={() => {
-                      setNotice(t('com_ui_mail_moved'));
-                      setSelectedId(null);
-                    }}
+                    folder={folder}
+                    onMove={requestMove}
+                    moveUnavailable={moveUnavailable}
                   />
                 </>
               ) : (
@@ -983,6 +981,34 @@ function MailWorkspace() {
             </div>
           </div>
         </>
+      )}
+      {folderPicker && status?.connection.connected && (
+        <div className="mail-move-overlay">
+          <div className="mail-move-dialog">
+            <FolderPicker
+              active
+              chosen={folder}
+              onChoose={chooseFolder}
+              onClose={() => setFolderPicker(false)}
+            />
+          </div>
+        </div>
+      )}
+      {moveSelection && (
+        <MoveDialog
+          key={moveSelection.request.requestId}
+          selection={moveSelection}
+          onClose={() => setMoveSelection(null)}
+          onAccepted={() => {
+            setChecked((previous) => {
+              const next = new Map(previous);
+              for (const item of moveSelection.request.items) next.delete(item.id);
+              return next;
+            });
+            setMoveSelection(null);
+            setNotice(t('com_ui_mail_bulk_queued'));
+          }}
+        />
       )}
       {settingsOpen && status && (
         <div className="mail-settings-overlay">

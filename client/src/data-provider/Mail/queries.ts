@@ -4,6 +4,8 @@ import type {
   MailWorkspaceParams,
   MailWorkspacePriority,
   MailWorkspaceSettings,
+  MailWorkspaceMoveRequest,
+  MailWorkspaceMoveJob,
 } from 'librechat-data-provider';
 import { useRecoilValue } from 'recoil';
 import store from '~/store';
@@ -54,6 +56,22 @@ export function useMailFolders(enabled: boolean, parentId?: string) {
     { ...freshness, enabled: enabled && !!user?.id },
   );
 }
+export function useMailMoveJobs(enabled: boolean) {
+  const user = useRecoilValue(store.user);
+  return useQuery(
+    [QueryKeys.mailWorkspace, user?.id, 'move-jobs'],
+    ({ signal }) => dataService.getMailWorkspaceMoveJobs(signal),
+    {
+      ...freshness,
+      enabled: enabled && !!user?.id,
+      refetchOnWindowFocus: true,
+      refetchInterval: (data) =>
+        data?.jobs.some((job) => job.status === 'queued' || job.status === 'running')
+          ? 2000
+          : false,
+    },
+  );
+}
 export function useMailActions() {
   const user = useRecoilValue(store.user);
   const client = useQueryClient();
@@ -100,11 +118,28 @@ export function useMailActions() {
       dataService.moveMailWorkspaceResult(id, folderId, revision),
     options,
   );
+  const enqueueMove = useMutation(
+    [MutationKeys.mailWorkspace, user?.id, 'enqueue-move'],
+    (input: MailWorkspaceMoveRequest) => dataService.enqueueMailWorkspaceMove(input),
+    {
+      onSuccess: ({ job }) => {
+        client.setQueryData<{ jobs: MailWorkspaceMoveJob[] }>(
+          [QueryKeys.mailWorkspace, user?.id, 'move-jobs'],
+          (previous) => ({
+            jobs: [job, ...(previous?.jobs || []).filter((old) => old.id !== job.id)],
+          }),
+        );
+      },
+      onSettled: () => {
+        void client.invalidateQueries([QueryKeys.mailWorkspace, user?.id, 'move-jobs']);
+      },
+    },
+  );
   const draft = useMutation(
     [MutationKeys.mailWorkspace, 'draft'],
     ({ id, body, revision }: { id: string; body: string; revision: string }) =>
       dataService.saveMailWorkspaceDraft(id, body, revision),
     options,
   );
-  return { connect, settings, run, pause, disconnect, priority, move, draft, refresh };
+  return { connect, settings, run, pause, disconnect, priority, move, enqueueMove, draft, refresh };
 }

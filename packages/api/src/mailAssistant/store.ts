@@ -6,16 +6,20 @@ import type {
   MailJob,
   MailStore,
   StoredMailResult,
+  StoredMailMoveJob,
 } from './types';
 import type { MailCodec } from './privateData';
 import { nextMailRun, mailHistoryStart } from './schedule';
 import { MAIL_CONSENT_VERSION } from './types';
+import { activeMoveJob, summarizeMove } from './moves';
 
 interface Row extends Omit<MailJob, 'checkpoint' | 'history'> {
   _id: string;
   checkpointEncrypted?: string;
   historyEncrypted?: string;
   results?: Record<string, { encrypted: string; updatedAt: Date }>;
+  moveJobsEncrypted?: string;
+  moveQueueVersion?: number;
 }
 export interface MailDraftOperation {
   _id: string;
@@ -36,7 +40,15 @@ export function createMongoMailStore({
   codec: MailCodec;
 }): MailStore {
   const decode = (row: Row): MailJob => {
-    const { checkpointEncrypted, historyEncrypted, results: _results, _id: _id, ...job } = row;
+    const {
+      checkpointEncrypted,
+      historyEncrypted,
+      results: _results,
+      _id: _id,
+      moveJobsEncrypted: _moves,
+      moveQueueVersion: _moveVersion,
+      ...job
+    } = row;
     return {
       ...job,
       ...(checkpointEncrypted && {
@@ -72,8 +84,130 @@ export function createMongoMailStore({
     const row = await collection().findOne({ _id: owner, ownerId: owner });
     return row ? decode(row) : null;
   };
+  const decodedMoves = (row: Row): StoredMailMoveJob[] =>
+    row.moveJobsEncrypted
+      ? codec.open<StoredMailMoveJob[]>(row.ownerId, 'move-jobs', row.moveJobsEncrypted)
+      : [];
+  const queueVersion = (row: Row) => row.moveQueueVersion ?? { $exists: false };
+  const queueFields = (owner: string, jobs: StoredMailMoveJob[]) => ({
+    moveJobsEncrypted: codec.seal(owner, 'move-jobs', jobs),
+    movePending: jobs.some(activeMoveJob),
+  });
   return {
     read,
+    async moveJobs(ownerId) {
+      const row = await collection().findOne({ _id: ownerId, ownerId });
+      return row ? decodedMoves(row) : [];
+    },
+    async enqueueMove(ownerId, job) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const row = await collection().findOne({ _id: ownerId, ownerId });
+        if (
+          !row ||
+          row.revision !== job.settingsRevision ||
+          row.settings.consentVersion !== MAIL_CONSENT_VERSION
+        )
+          return 'revoked';
+        const jobs = decodedMoves(row);
+        const previous = jobs.find((item) => item.id === job.id);
+        if (previous) return previous.requestHash === job.requestHash ? 'duplicate' : 'busy';
+        if (jobs.some(activeMoveJob)) return 'busy';
+        const cutoff = Date.parse(job.createdAt) - 30 * 86400_000;
+        const retained = jobs.filter((item) => Date.parse(item.updatedAt) >= cutoff).slice(-4);
+        const fields = queueFields(ownerId, [...retained, job]);
+        if (BSON.calculateObjectSize({ ...row, ...fields }) > 13 * 1024 * 1024) return 'busy';
+        const saved = await collection().updateOne(
+          {
+            _id: ownerId,
+            ownerId,
+            revision: job.settingsRevision,
+            moveQueueVersion: queueVersion(row),
+          },
+          { $set: fields, $inc: { moveQueueVersion: 1 } },
+        );
+        if (saved.matchedCount) return 'accepted';
+      }
+      return 'busy';
+    },
+    async updateMove(ownerId, token, job) {
+      const binding = { _id: ownerId, ownerId, leaseToken: token, revision: job.settingsRevision };
+      const row = await collection().findOne(binding);
+      if (!row) return false;
+      const jobs = decodedMoves(row);
+      if (!jobs.some((item) => item.id === job.id && activeMoveJob(item))) return false;
+      const saved = await collection().updateOne(
+        { ...binding, moveQueueVersion: queueVersion(row) },
+        {
+          $set: queueFields(
+            ownerId,
+            jobs.map((item) => (item.id === job.id ? job : item)),
+          ),
+          $inc: { moveQueueVersion: 1 },
+        },
+      );
+      return saved.matchedCount === 1;
+    },
+    async cancelStaleMoves(ownerId, now, jobId) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const row = await collection().findOne({ _id: ownerId, ownerId });
+        if (!row?.movePending) return;
+        const jobs = decodedMoves(row);
+        let changed = false;
+        const cancelled = jobs.map((job) => {
+          if (
+            !activeMoveJob(job) ||
+            (job.id !== jobId &&
+              job.settingsRevision === row.revision &&
+              row.settings.consentVersion === MAIL_CONSENT_VERSION)
+          )
+            return job;
+          changed = true;
+          return summarizeMove(
+            {
+              ...job,
+              items: job.items.map((item) => {
+                if (item.status === 'queued')
+                  return {
+                    ...item,
+                    status: 'cancelled' as const,
+                    error:
+                      'Durch Pausieren, geänderte Freigabe oder Verbindung abgebrochen. Bitte neu auswählen.',
+                  };
+                if (item.status === 'running')
+                  return {
+                    ...item,
+                    status: 'uncertain' as const,
+                    error:
+                      'Während der Bearbeitung angehalten. Bitte die Ablage in Outlook prüfen; keine automatische Wiederholung.',
+                  };
+                return item;
+              }),
+            },
+            now,
+          );
+        });
+        if (!changed) return;
+        const saved = await collection().updateOne(
+          { _id: ownerId, ownerId, revision: row.revision, moveQueueVersion: queueVersion(row) },
+          { $set: queueFields(ownerId, cancelled), $inc: { moveQueueVersion: 1 } },
+        );
+        if (saved.matchedCount) return;
+      }
+    },
+    async movesDue(now) {
+      const rows = await collection()
+        .find(
+          {
+            movePending: true,
+            $or: [{ leaseToken: { $exists: false } }, { leaseUntil: { $lt: now } }],
+          },
+          { projection: { ownerId: 1 } },
+        )
+        .sort({ _id: 1 })
+        .limit(20)
+        .toArray();
+      return rows.map((row) => row.ownerId);
+    },
     async saveSettings(ownerId, settings, now) {
       let observedExisting = false;
       for (let attempt = 0; attempt < 4; attempt++) {
@@ -185,6 +319,16 @@ export function createMongoMailStore({
           },
         },
       ]);
+      const cutoff = now.getTime() - 30 * 86400_000;
+      for await (const row of collection().find({ moveJobsEncrypted: { $exists: true } })) {
+        const jobs = decodedMoves(row);
+        const retained = jobs.filter((job) => Date.parse(job.updatedAt) >= cutoff);
+        if (retained.length === jobs.length) continue;
+        await collection().updateOne(
+          { _id: row.ownerId, ownerId: row.ownerId, moveQueueVersion: queueVersion(row) },
+          { $set: queueFields(row.ownerId, retained), $inc: { moveQueueVersion: 1 } },
+        );
+      }
     },
     async claim(ownerId, token, now, manual = false, revision) {
       const row = await collection().findOneAndUpdate(
@@ -194,7 +338,7 @@ export function createMongoMailStore({
           ...(revision !== undefined && { revision }),
           ...(manual
             ? { 'settings.consentVersion': MAIL_CONSENT_VERSION }
-            : { 'settings.enabled': true }),
+            : { 'settings.enabled': true, movePending: { $ne: true } }),
           $or: [{ leaseToken: { $exists: false } }, { leaseUntil: { $lt: now } }],
         },
         {

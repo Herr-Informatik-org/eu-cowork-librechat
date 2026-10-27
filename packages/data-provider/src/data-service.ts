@@ -8,6 +8,8 @@ import type {
   MailWorkspacePage,
   MailWorkspaceResult,
   MailWorkspacePriority,
+  MailWorkspaceMoveRequest,
+  MailWorkspaceMoveJob,
 } from './types/mail';
 import type { TFileConfig } from './file-config';
 import type {
@@ -85,6 +87,14 @@ export const moveMailWorkspaceResult = (
   revision: string,
 ): Promise<{ result: MailWorkspaceResult }> =>
   request.post(endpoints.mailWorkspaceResult(id, 'move'), { folderId, revision });
+export const getMailWorkspaceMoveJobs = (
+  signal?: AbortSignal,
+): Promise<{ jobs: MailWorkspaceMoveJob[] }> =>
+  request.get(endpoints.mailWorkspace('/move-jobs'), { signal });
+export const enqueueMailWorkspaceMove = (
+  input: MailWorkspaceMoveRequest,
+): Promise<{ job: MailWorkspaceMoveJob }> =>
+  request.post(endpoints.mailWorkspace('/move-jobs'), input);
 export const saveMailWorkspaceDraft = (id: string, body: string, revision: string): Promise<void> =>
   request.put(endpoints.mailWorkspaceResult(id, 'draft'), { body, revision });
 

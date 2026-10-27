@@ -4,7 +4,8 @@ import type { Db } from 'mongodb';
 import { createMongoMailStore } from './store';
 import { createMailCodec } from './privateData';
 import { defaultMailSettings } from './schedule';
-import type { StoredMailResult } from './types';
+import type { StoredMailResult, StoredMailMoveJob, MailJob } from './types';
+import { summarizeMove } from './moves';
 
 describe('personal mail durable lease and retention', () => {
   let server: MongoMemoryServer;
@@ -51,6 +52,113 @@ describe('personal mail durable lease and retention', () => {
       operations: () => db.collection('operations'),
       codec,
     });
+  async function queuedFixture() {
+    const s = store();
+    await s.saveSettings('alice', settings, new Date());
+    const revision = (await s.read('alice'))!.revision;
+    const queue: StoredMailMoveJob = {
+      id: '00000000-0000-4000-8000-000000000001',
+      requestHash: 'hash',
+      folderId: 'private-folder',
+      folderName: '',
+      mailbox: 'private@example.invalid',
+      connectionGeneration: 'private-connection',
+      settingsRevision: revision,
+      status: 'queued',
+      total: 2,
+      completed: 0,
+      failed: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      items: [
+        {
+          id: 'a'.repeat(64),
+          revision: 'b'.repeat(64),
+          subject: 'Private queue subject',
+          status: 'queued',
+        },
+        {
+          id: 'c'.repeat(64),
+          revision: 'd'.repeat(64),
+          subject: 'Second private subject',
+          status: 'queued',
+        },
+      ],
+    };
+    return { s, queue };
+  }
+  test('durable move queue is encrypted, owner-bound and idempotent after store recreation', async () => {
+    const { s, queue } = await queuedFixture();
+    expect(await s.enqueueMove('alice', queue)).toBe('accepted');
+    expect(await store().moveJobs('alice')).toEqual([queue]);
+    expect(await store().moveJobs('bob')).toEqual([]);
+    const raw = JSON.stringify(await db.collection('jobs').findOne({ ownerId: 'alice' }));
+    expect(raw).not.toMatch(/private|Private/);
+    expect(await store().enqueueMove('alice', queue)).toBe('duplicate');
+    expect(await store().enqueueMove('alice', { ...queue, requestHash: 'changed' })).toBe('busy');
+    expect(await store().moveJobs('alice')).toHaveLength(1);
+  });
+  test('concurrent queue submissions admit only one active request', async () => {
+    const { s, queue } = await queuedFixture();
+    const outcomes = await Promise.all([
+      s.enqueueMove('alice', queue),
+      store().enqueueMove('alice', { ...queue, id: '00000000-0000-4000-8000-000000000002' }),
+    ]);
+    expect(outcomes.sort()).toEqual(['accepted', 'busy']);
+    expect(await s.moveJobs('alice')).toHaveLength(1);
+  });
+  test('queue metadata expires after thirty days without altering jobs that never had a queue', async () => {
+    const { s, queue } = await queuedFixture();
+    await s.saveSettings('bob', settings, new Date());
+    const before = await db.collection('jobs').findOne({ ownerId: 'bob' });
+    await s.enqueueMove('alice', queue);
+    await s.prune(new Date(Date.now() + 31 * 86400_000));
+    expect(await s.moveJobs('alice')).toEqual([]);
+    expect((await s.read('alice'))?.movePending).toBe(false);
+    expect(await db.collection('jobs').findOne({ ownerId: 'bob' })).toEqual(before);
+  });
+  test('manual queue can run while paused, takes priority over new analysis claims, and yields its lease', async () => {
+    const { s, queue } = await queuedFixture();
+    await s.pause('alice');
+    queue.settingsRevision = (await s.read('alice'))!.revision;
+    expect(await s.enqueueMove('alice', queue)).toBe('accepted');
+    expect(await s.movesDue(new Date())).toEqual(['alice']);
+    expect(await s.claim('alice', 'automatic', new Date())).toBeNull();
+    expect(await s.claim('alice', 'manual', new Date(), true)).not.toBeNull();
+    expect(await s.movesDue(new Date())).toEqual([]);
+    queue.items[0].status = 'completed';
+    expect(await s.updateMove('alice', 'manual', summarizeMove(queue, new Date()))).toBe(true);
+    await s.release('alice', 'manual', {});
+    expect(await s.movesDue(new Date())).toEqual(['alice']);
+  });
+  test('pause cancels stale queued items, preserves ambiguous started items and fences old writes', async () => {
+    const { s, queue } = await queuedFixture();
+    await s.enqueueMove('alice', queue);
+    await s.claim('alice', 'worker', new Date(), true);
+    queue.items[0].status = 'running';
+    expect(await s.updateMove('alice', 'worker', summarizeMove(queue, new Date()))).toBe(true);
+    await s.pause('alice');
+    await s.cancelStaleMoves('alice', new Date());
+    expect((await s.moveJobs('alice'))[0].items.map((item) => item.status)).toEqual([
+      'uncertain',
+      'cancelled',
+    ]);
+    expect(await s.updateMove('alice', 'worker', queue)).toBe(false);
+    expect(await s.movesDue(new Date())).toEqual([]);
+  });
+  test('disconnect cannot recreate queue progress and new settings cannot inherit stale requests', async () => {
+    const { s, queue } = await queuedFixture();
+    await s.enqueueMove('alice', queue);
+    await s.claim('alice', 'worker', new Date(), true);
+    await s.saveSettings('alice', settings, new Date());
+    expect(await s.enqueueMove('alice', { ...queue, id: 'other' })).toBe('revoked');
+    await s.cancelStaleMoves('alice', new Date());
+    expect((await s.moveJobs('alice'))[0].status).toBe('cancelled');
+    await s.purge('alice');
+    expect(await s.updateMove('alice', 'worker', queue)).toBe(false);
+    expect(await s.enqueueMove('alice', queue)).toBe('revoked');
+    expect(await s.moveJobs('alice')).toEqual([]);
+  });
   test('history opt-in freezes the old activation boundary and encrypts its separate progress', async () => {
     const s = store();
     const first = new Date('2026-10-24T08:00:00Z');
@@ -123,7 +231,7 @@ describe('personal mail durable lease and retention', () => {
     expect(await s.update('alice', 'worker', { history: first.history })).toBe(false);
   });
   test('settings retry never recreates a historical job removed by a concurrent disconnect', async () => {
-    const jobs = db.collection<any>('jobs');
+    const jobs = db.collection<MailJob & { _id: string }>('jobs');
     const s = createMongoMailStore({
       collection: () => jobs,
       operations: () => db.collection('operations'),
@@ -131,7 +239,7 @@ describe('personal mail durable lease and retention', () => {
     });
     await s.saveSettings('alice', settings, new Date());
     const original = jobs.findOne.bind(jobs);
-    jest.spyOn(jobs, 'findOne').mockImplementationOnce(async (filter: any) => {
+    jest.spyOn(jobs, 'findOne').mockImplementationOnce(async (filter) => {
       const row = await original(filter);
       await s.purge('alice');
       return row;
@@ -272,7 +380,7 @@ describe('personal mail durable lease and retention', () => {
     expect(await s.draftState('alice', result.id)).toBeNull();
   });
   test('disconnect between lease read and draft reservation cannot recreate metadata', async () => {
-    const jobs = db.collection<any>('jobs');
+    const jobs = db.collection<MailJob & { _id: string }>('jobs');
     const s = createMongoMailStore({
       collection: () => jobs,
       operations: () => db.collection('operations'),
@@ -281,7 +389,7 @@ describe('personal mail durable lease and retention', () => {
     await s.saveSettings('alice', settings, new Date());
     await s.claim('alice', 'token', new Date());
     const original = jobs.findOne.bind(jobs);
-    jest.spyOn(jobs, 'findOne').mockImplementationOnce(async (filter: any) => {
+    jest.spyOn(jobs, 'findOne').mockImplementationOnce(async (filter) => {
       const row = await original(filter);
       await s.purge('alice');
       return row;

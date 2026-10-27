@@ -64,6 +64,27 @@ function setup() {
 }
 
 describe('own folder navigation and deliberate move', () => {
+  test('system folder discovery uses at most three concurrent guarded reads and reuses their identities', async () => {
+    const state = setup();
+    let active = 0;
+    let maximum = 0;
+    let discoveries = 0;
+    state.request.mockImplementation(async (url, init) => {
+      if (String(url).endsWith('?$select=id')) {
+        discoveries++;
+        active++;
+        maximum = Math.max(maximum, active);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        active--;
+      }
+      return state.implementation(url, init);
+    });
+    await state.graph.folders();
+    await state.graph.folder('done');
+    expect(maximum).toBe(3);
+    expect(discoveries).toBe(7);
+    expect(state.beforeRequest).toHaveBeenCalledTimes(state.request.mock.calls.length * 2);
+  });
   test('lists own visible folders, keeps inbox navigable but not selectable as destination', async () => {
     const { graph, request } = setup();
     expect(await graph.folders()).toEqual([
