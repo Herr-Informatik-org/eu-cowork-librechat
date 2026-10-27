@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { createMailGraph } from './graph';
 
 const original = {
@@ -66,7 +67,9 @@ function setup(options: { files?: object[]; bytes?: Uint8Array; quote?: string }
       return json(draft());
     }
     if (path === '/v1.0/me/messages/draft/attachments' && method === 'GET')
-      return json({ value: copied });
+      return json({
+        value: copied.map((item, index) => ({ id: `copy-${index + 1}`, size: 4, ...item })),
+      });
     if (path === '/v1.0/me/messages/draft/attachments' && method === 'POST') {
       copied.push(JSON.parse(String(init?.body)));
       return json({ id: `copy-${copied.length}` }, 201);
@@ -100,6 +103,67 @@ function setup(options: { files?: object[]; bytes?: Uint8Array; quote?: string }
 }
 
 describe('complete, own reply drafts', () => {
+  test('attaches an explicitly uploaded signature logo once using a fresh inline CID', async () => {
+    const state = setup();
+    const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: '#123456' } })
+      .png()
+      .toBuffer();
+    const result = await state.graph.createReply('original', 'Guten Tag\n\nDanke.', {
+      enabled: true,
+      html: '<p>Eigener Name</p>',
+      fontFamily: 'Calibri',
+      fontSize: 11,
+      logo: { contentBytes: png.toString('base64') },
+    });
+    expect(result).not.toHaveProperty('warnings');
+    expect(state.copied).toHaveLength(1);
+    expect(state.copied[0]).toMatchObject({
+      name: 'signatur-logo.png',
+      contentType: 'image/png',
+      isInline: true,
+      contentId: expect.stringMatching(/^kisuno-signature-[a-f0-9-]{36}$/),
+    });
+    const logo = state.copied[0] as { contentId: string; contentBytes: string };
+    expect(state.body()).toContain(`src="cid:${logo.contentId}"`);
+    expect(state.body()).not.toContain(logo.contentBytes);
+    await state.graph.editDraft('draft', 'Überarbeitete Antwort', 'W/"patched"');
+    expect(state.copied).toHaveLength(1);
+    expect(state.body()).toContain(`src="cid:${logo.contentId}"`);
+    expect(
+      state.request.mock.calls.every(([url]) =>
+        String(url).startsWith('https://graph.microsoft.com/v1.0/me/'),
+      ),
+    ).toBe(true);
+  });
+  test('rejects invalid signature image data before any mailbox request', async () => {
+    const state = setup();
+    await expect(
+      state.graph.createReply('original', 'Danke', {
+        enabled: true,
+        html: '<p>Eigener Name</p>',
+        fontFamily: 'Calibri',
+        fontSize: 11,
+        logo: { contentBytes: Buffer.from('<svg/>').toString('base64') },
+      }),
+    ).rejects.toThrow();
+    expect(state.request).not.toHaveBeenCalled();
+  });
+  test('keeps the personal reply font after editing even with signature text disabled', async () => {
+    const state = setup();
+    await expect(
+      state.graph.createReply('original', 'Guten Tag\n\nDanke.', {
+        enabled: false,
+        html: '<p>Nicht anhängen</p>',
+        fontFamily: 'Aptos',
+        fontSize: 12,
+      }),
+    ).resolves.not.toHaveProperty('warnings');
+    expect(state.body()).toContain('font-family:Aptos,Arial,sans-serif;font-size:12pt');
+    expect(state.body()).not.toContain('Nicht anhängen');
+    await state.graph.editDraft('draft', 'Überarbeitete Antwort', 'W/"patched"');
+    expect(state.body()).toContain('font-family:Aptos,Arial,sans-serif;font-size:12pt');
+    expect(state.body()).not.toContain('font-size:11pt');
+  });
   test('retains the entire native quoted body, copies categories, escapes reply, never sets recipients or sends', async () => {
     const { graph, request, body } = setup();
     await expect(
@@ -110,7 +174,10 @@ describe('complete, own reply drafts', () => {
     });
     expect(body()).toContain('x'.repeat(20_000));
     expect(body()).toContain('<img src="cid:logo">');
-    expect(body()).toContain('<p>&lt;script&gt;secret&lt;/script&gt;</p><p>Danke<br>Gruss</p>');
+    expect(body()).toContain('&lt;script&gt;secret&lt;/script&gt;</p>');
+    expect(body()).toContain('>Danke<br>Gruss</p>');
+    expect(body()).toContain('font-size:11pt');
+    expect(body()).toContain('margin:0 0 12pt 0');
     const create = request.mock.calls.find(([url]) => String(url).endsWith('/createReply'))!;
     expect(create[1]?.body).toBeUndefined();
     expect((create[1]?.headers as Record<string, string>).Prefer).toContain(
@@ -146,6 +213,51 @@ describe('complete, own reply drafts', () => {
       'microsoft.graph.fileAttachment/contentId',
     );
     expect(new URL(String(listing[0])).searchParams.get('$select')).not.toContain('contentBytes');
+  });
+  test('adds only the explicitly configured signature and preserves it while editing the answer', async () => {
+    const state = setup({ files: [file] });
+    await state.graph.createReply('original', 'Guten Tag\n\nDanke für die Nachricht.', {
+      enabled: true,
+      html: '<p>Freundliche Grüsse<br><b>Eigener Name</b><img src="https://tracker.test/logo"></p>',
+      fontFamily: 'Calibri',
+      fontSize: 12,
+    });
+    expect(state.body()).toContain('font-size:12pt');
+    expect(state.body()).not.toContain('tracker.test');
+    expect((await state.graph.editableReply('draft')).text).toBe(
+      'Guten Tag\n\nDanke für die Nachricht.',
+    );
+    const signature = state.body().slice(state.body().indexOf('<!-- kisuno-mail-signature:v1 -->'));
+    await state.graph.editDraft('draft', 'Geprüfte neue Antwort', 'W/"patched"');
+    expect(state.body().slice(state.body().indexOf('<!-- kisuno-mail-signature:v1 -->'))).toBe(
+      signature,
+    );
+    expect(state.copied).toHaveLength(1);
+  });
+  test('upgrades a legacy reply block without changing the quoted message', async () => {
+    const state = setup();
+    await state.graph.createReply('original', 'Initial');
+    state.alter(
+      '<html><body><!-- kisuno-mail-reply:v1 --><p>Alte Antwort</p><!-- /kisuno-mail-reply:v1 --><hr>Verlauf</body></html>',
+    );
+    expect((await state.graph.editableReply('draft')).text).toBe('Alte Antwort');
+    await state.graph.editDraft('draft', 'Neue Antwort', 'W/"employee"');
+    expect(state.body()).toContain('<!-- kisuno-mail-reply:v2 -->');
+    expect(state.body()).toContain('font-size:11pt');
+    expect(state.body()).toContain('<hr>Verlauf</body></html>');
+  });
+  test('does not overwrite an Outlook-formatted response with unsupported markup', async () => {
+    const state = setup();
+    await state.graph.createReply('original', 'Antwort');
+    state.alter(state.body().replace('font-size:11pt', 'font-size:18pt'));
+    await expect(state.graph.editableReply('draft')).rejects.toThrow('formatiert');
+    const count = state.request.mock.calls.length;
+    await expect(state.graph.editDraft('draft', 'Anderer Text', 'W/"employee"')).rejects.toThrow(
+      'formatiert',
+    );
+    expect(state.request.mock.calls.slice(count).every(([, init]) => init?.method === 'GET')).toBe(
+      true,
+    );
   });
   test('normalizes CRLF and paragraph whitespace consistently without a spurious incomplete warning', async () => {
     const state = setup();

@@ -54,6 +54,7 @@ describe('Personal mail HTTP boundary', () => {
       '/followup/commit',
       '/results/result-1/followup/prepare',
       '/results/result-1/draft-request',
+      '/results/result-1/chat',
     ])
       expect((await request(app).post(`/api/agents/office/mail-assistant${path}`)).status).toBe(
         401,
@@ -64,6 +65,56 @@ describe('Personal mail HTTP boundary', () => {
     expect(
       (await request(app).get('/api/agents/office/mail-assistant/results/result-1/content')).status,
     ).toBe(401);
+  });
+  it('requires authentication for inbox and correspondence pages', async () => {
+    const app = setup();
+    for (const path of ['/inbox', '/results/' + 'a'.repeat(64) + '/correspondence']) {
+      expect((await request(app).get('/api/agents/office/mail-assistant' + path)).status).toBe(401);
+    }
+  });
+  it('binds inbox pages and chat to the authenticated owner and rejects owner overrides', async () => {
+    const inbox = jest.fn(async () => ({ results: [], complete: true }));
+    const correspondence = jest.fn(async () => ({ results: [], complete: true }));
+    const chat = jest.fn(async () => ({ answer: 'Antwort' }));
+    const app = setup({
+      inbox: { inbox, correspondence },
+      chat,
+    } as unknown as MailAssistantRuntime);
+    const path = '/api/agents/office/mail-assistant';
+    const id = 'a'.repeat(64);
+    expect(
+      (
+        await request(app)
+          .get(path + '/inbox')
+          .set('Authorization', 'Bearer fixture')
+      ).status,
+    ).toBe(200);
+    expect(inbox).toHaveBeenCalledWith(owner, undefined);
+    expect(
+      (
+        await request(app)
+          .get(path + '/inbox?owner=foreign')
+          .set('Authorization', 'Bearer fixture')
+      ).status,
+    ).toBe(400);
+    expect(inbox).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        await request(app)
+          .get(path + '/results/' + id + '/correspondence?search=Thema')
+          .set('Authorization', 'Bearer fixture')
+      ).status,
+    ).toBe(200);
+    expect(correspondence).toHaveBeenCalledWith(owner, id, { search: 'Thema' });
+    expect(
+      (
+        await request(app)
+          .post(path + '/results/' + id + '/chat')
+          .set('Authorization', 'Bearer fixture')
+          .send({ message: 'Frage' })
+      ).status,
+    ).toBe(200);
+    expect(chat).toHaveBeenCalledWith(owner, id, { message: 'Frage' });
   });
   it('binds content, folder choices and explicit mutations to the authenticated owner', async () => {
     const content = jest.fn(async () => ({

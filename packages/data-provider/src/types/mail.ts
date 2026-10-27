@@ -1,5 +1,25 @@
+export type MailSignature = {
+  enabled: boolean;
+  html: string;
+  fontFamily: 'Aptos' | 'Calibri' | 'Arial';
+  fontSize: 10 | 11 | 12 | 14;
+  logo?: { contentBytes: string };
+};
+export type MailWorkspaceChatRequest = {
+  revision: string;
+  message: string;
+  history: { role: 'user' | 'assistant'; content: string }[];
+  draft?: string;
+  includeCorrespondence?: boolean;
+};
+export type MailWorkspaceChatResponse = {
+  answer: string;
+  modelLabel?: string;
+  sources?: MailWorkspaceResult[];
+};
 export type MailWorkspacePriority = 'important' | 'normal' | 'low';
 export type MailWorkspaceSettings = {
+  signature?: MailSignature;
   enabled: boolean;
   mode: 'manual' | 'scheduled';
   weekdays: number[];
@@ -11,6 +31,10 @@ export type MailWorkspaceSettings = {
   history?: { mode: 'off' | 'since' | 'all'; from?: string };
 };
 export type MailWorkspaceResult = {
+  mailboxLocation?: 'inbox' | 'sent';
+  analysisStatus?: 'pending' | 'complete';
+  isRead?: boolean;
+  hasAttachments?: boolean;
   id: string;
   revision: string;
   subject: string;
@@ -64,6 +88,7 @@ export type MailWorkspaceContent = {
   resultId: string;
   mailbox: string;
   message: {
+    replyRecipients?: { name: string; address: string }[];
     subject: string;
     sender: string;
     receivedAt: string;
@@ -96,7 +121,11 @@ export type MailWorkspaceParams = {
   priority?: MailWorkspacePriority;
   state?: 'open' | 'done' | 'all';
 };
-export type MailWorkspacePage = { results: MailWorkspaceResult[]; nextCursor?: string };
+export type MailWorkspacePage = {
+  results: MailWorkspaceResult[];
+  nextCursor?: string;
+  complete?: boolean;
+};
 
 export type MailWorkspaceMoveRequest = {
   requestId: string;

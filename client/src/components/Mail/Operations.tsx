@@ -169,10 +169,11 @@ export function MoveProgress({
           {running ? t('com_ui_mail_running_short') : t('com_ui_mail_ready')}
           {running && <progress aria-label={t('com_ui_mail_analysis_progress')} />}
         </span>
-        {(pending.draft > 0 || (odooAvailable && pending.followup > 0)) && (
+        {(pending.chat > 0 || pending.draft > 0 || (odooAvailable && pending.followup > 0)) && (
           <span className="mail-activity-pending" role="status">
             <Loader2 size={13} className="animate-spin" aria-hidden="true" />
             {[
+              pending.chat > 0 ? t('com_ui_mail_chat_inline_thinking') : '',
               pending.draft > 0 ? t('com_ui_mail_draft_running_short') : '',
               odooAvailable && pending.followup > 0 ? t('com_ui_mail_followup_pending') : '',
             ]

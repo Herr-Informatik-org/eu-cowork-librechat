@@ -32,7 +32,7 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
     ...(await runtime!.engine.status(id)),
     odooAvailable: !!runtime?.followup,
   });
-  router.use(json({ limit: '64kb' }));
+  router.use(json({ limit: '96kb' }));
   router.use((_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
@@ -82,6 +82,48 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
     }
     next();
   });
+  router.get(
+    '/inbox',
+    safeRoute(async (req, res) => {
+      if (!runtime!.inbox)
+        throw new MailAssistantError('Die Posteingangsübersicht ist nicht verfügbar.');
+      const query = z
+        .object({ cursor: z.string().max(40000).optional() })
+        .strict()
+        .parse(req.query);
+      res.json(await runtime!.inbox.inbox(owner(req), query.cursor));
+    }),
+  );
+  router.get(
+    '/results/:id/correspondence',
+    safeRoute(async (req, res) => {
+      if (!runtime!.inbox)
+        throw new MailAssistantError('Die Korrespondenzsuche ist nicht verfügbar.');
+      const query = z
+        .object({
+          cursor: z.string().max(40000).optional(),
+          search: z.string().max(160).optional(),
+        })
+        .strict()
+        .parse(req.query);
+      const id = z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .parse(req.params.id);
+      res.json(await runtime!.inbox.correspondence(owner(req), id, query));
+    }),
+  );
+  router.post(
+    '/results/:id/chat',
+    safeRoute(async (req, res) => {
+      if (!runtime!.chat) throw new MailAssistantError('Der Mail-Chat ist nicht verfügbar.');
+      const id = z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .parse(req.params.id);
+      res.json(await runtime!.chat(owner(req), id, req.body));
+    }),
+  );
   router.put(
     '/settings',
     safeRoute(async (req, res) => {

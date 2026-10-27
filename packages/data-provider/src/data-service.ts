@@ -1,5 +1,7 @@
 import type { AxiosResponse } from 'axios';
 import type {
+  MailWorkspaceChatRequest,
+  MailWorkspaceChatResponse,
   MailWorkspaceStatus,
   MailWorkspaceSettings,
   MailWorkspaceContent,
@@ -59,6 +61,33 @@ export const getMailWorkspaceResults = (
   params: MailWorkspaceParams,
   signal?: AbortSignal,
 ): Promise<MailWorkspacePage> => request.get(endpoints.mailWorkspaceResults(params), { signal });
+export const getMailWorkspaceInbox = (
+  params: { cursor?: string } = {},
+  signal?: AbortSignal,
+): Promise<MailWorkspacePage> =>
+  request.get(
+    endpoints.mailWorkspace(
+      `/inbox${params.cursor ? `?${new URLSearchParams({ cursor: params.cursor })}` : ''}`,
+    ),
+    { signal },
+  );
+export const getMailWorkspaceCorrespondence = (
+  id: string,
+  params: { search?: string; cursor?: string } = {},
+  signal?: AbortSignal,
+): Promise<MailWorkspacePage> => {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value) query.set(key, value);
+  return request.get(
+    `${endpoints.mailWorkspaceResult(id, 'correspondence')}${query.size ? `?${query}` : ''}`,
+    { signal },
+  );
+};
+export const chatMailWorkspace = (
+  id: string,
+  input: MailWorkspaceChatRequest,
+): Promise<MailWorkspaceChatResponse> =>
+  request.post(endpoints.mailWorkspaceResult(id, 'chat'), input);
 export const getMailWorkspaceContent = (
   id: string,
   signal?: AbortSignal,

@@ -52,6 +52,63 @@ describe('personal mail durable lease and retention', () => {
       operations: () => db.collection('operations'),
       codec,
     });
+  test('signature is encrypted, owner-bound and preserved for old settings clients', async () => {
+    const s = store();
+    const signature = {
+      enabled: true,
+      html: '<p>Private Signature</p>',
+      fontFamily: 'Calibri' as const,
+      fontSize: 11 as const,
+    };
+    await s.saveSettings('alice', { ...settings, signature }, new Date());
+    const raw = await db.collection('jobs').findOne({ ownerId: 'alice' });
+    expect(raw?.settings).not.toHaveProperty('signature');
+    expect(JSON.stringify(raw)).not.toContain('Private Signature');
+    expect((await s.read('alice'))?.settings.signature).toMatchObject(signature);
+    await s.saveSettings('alice', { ...settings, enabled: false }, new Date());
+    expect((await s.read('alice'))?.settings.signature).toMatchObject(signature);
+    await s.saveSettings('bob', settings, new Date());
+    await db
+      .collection('jobs')
+      .updateOne({ ownerId: 'bob' }, { $set: { signatureEncrypted: raw?.signatureEncrypted } });
+    await expect(s.read('bob')).rejects.toThrow();
+  });
+  test('metadata seeding is encrypted, concurrent insert-only and cannot resurrect a deleted owner', async () => {
+    const s = store();
+    await expect(s.seedResults('alice', [result])).rejects.toThrow('Einstellungen');
+    await s.saveSettings('alice', settings, new Date());
+    const revision = (await s.read('alice'))!.revision;
+    const other = { ...result, id: 'b'.repeat(64), messageId: 'second' };
+    await Promise.all([s.seedResults('alice', [result]), store().seedResults('alice', [other])]);
+    const rows = await s.seedResults('alice', [
+      { ...result, summary: 'must not overwrite' },
+      other,
+    ]);
+    expect(rows).toEqual([result, other]);
+    expect((await s.read('alice'))!.revision).toBe(revision);
+    const raw = JSON.stringify(await db.collection('jobs').findOne({ ownerId: 'alice' }));
+    expect(raw).not.toContain('Confidential');
+    expect(raw).not.toContain('private-message');
+    expect(await s.results('bob')).toEqual([]);
+    await s.purge('alice');
+    await expect(s.seedResults('alice', [result])).rejects.toThrow('Einstellungen');
+    expect(await db.collection('jobs').countDocuments({ ownerId: 'alice' })).toBe(0);
+  });
+  test('metadata seeding never overwrites concurrent analysis and guards document size', async () => {
+    const s = store();
+    await s.saveSettings('alice', settings, new Date());
+    await s.claim('alice', 'lease', new Date(), true);
+    await s.putResult('alice', 'lease', { ...result, summary: 'analysis winner' });
+    const seeded = await s.seedResults('alice', [{ ...result, summary: 'metadata placeholder' }]);
+    expect(seeded[0].summary).toBe('analysis winner');
+    await db
+      .collection('jobs')
+      .updateOne({ ownerId: 'alice' }, { $set: { padding: 'x'.repeat(13 * 1024 * 1024) } });
+    await expect(s.seedResults('alice', [{ ...result, id: 'c'.repeat(64) }])).rejects.toThrow(
+      'voll',
+    );
+    expect(await s.result('alice', 'c'.repeat(64))).toBeNull();
+  });
   async function queuedFixture() {
     const s = store();
     await s.saveSettings('alice', settings, new Date());

@@ -33,6 +33,7 @@ describe('fixed personal Graph adapter', () => {
     expect(Object.keys(graph).sort()).toEqual([
       'attachments',
       'categorize',
+      'correspondencePage',
       'createReply',
       'editDraft',
       'editableReply',
@@ -40,6 +41,7 @@ describe('fixed personal Graph adapter', () => {
       'folders',
       'historyPage',
       'identity',
+      'inboxPage',
       'message',
       'move',
       'page',
@@ -264,5 +266,122 @@ describe('fixed personal Graph adapter', () => {
     expect(safeOutlookUrl('https://outlook.office.com/mail/id')).toBe(
       'https://outlook.office.com/mail/id',
     );
+  });
+});
+
+describe('metadata-only inbox and correspondence pages', () => {
+  const row = (folder = 'immutable-inbox') => ({
+    id: 'mail-1',
+    conversationId: 'thread',
+    changeKey: 'v1',
+    subject: 'Test subject',
+    from: { emailAddress: { address: 'peer@example.invalid', name: 'Peer Name' } },
+    replyTo: [{ emailAddress: { address: 'reply@example.invalid', name: 'Reply Name' } }],
+    receivedDateTime: '2026-10-27T10:00:00Z',
+    parentFolderId: folder,
+    categories: [],
+    isDraft: false,
+    isRead: true,
+    hasAttachments: true,
+    body: { content: 'Unexpected private body must be discarded' },
+  });
+  function fixture(pages: unknown[]) {
+    const request = jest.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/inbox?$select=id')) return Response.json({ id: 'immutable-inbox' });
+      if (url.includes('/sentitems?$select=id')) return Response.json({ id: 'immutable-sent' });
+      return Response.json(pages.shift());
+    });
+    return {
+      request,
+      graph: createMailGraph({
+        fetch: request,
+        token: async () => 'test',
+        beforeRequest: async () => undefined,
+      }),
+    };
+  }
+  test('lists inbox metadata, names and flags, and follows only its exact immutable folder', async () => {
+    const next =
+      "https://graph.microsoft.com/v1.0/me/mailFolders('immutable-inbox')/messages?$skiptoken=opaque%2Bpage";
+    const { graph, request } = fixture([
+      { value: [row()], '@odata.nextLink': next },
+      { value: [{ ...row(), id: 'mail-2' }] },
+    ]);
+    const first = await graph.inboxPage!();
+    expect(first.messages[0]).toMatchObject({
+      body: '',
+      senderName: 'Peer Name',
+      isRead: true,
+      hasAttachments: true,
+      replyTo: [{ name: 'Reply Name', address: 'reply@example.invalid' }],
+    });
+    expect(first.nextUrl).toBe(next);
+    expect((await graph.inboxPage!(next)).messages[0].id).toBe('mail-2');
+    expect(request).toHaveBeenCalledTimes(3);
+    for (const [url, init] of request.mock.calls) {
+      expect(init.method).toBe('GET');
+      const select = new URL(url).searchParams.get('$select')!;
+      expect(select.split(',')).not.toContain('body');
+      expect(select.split(',')).not.toContain('uniqueBody');
+    }
+    expect(new URL(request.mock.calls[2][0]).searchParams.get('$skiptoken')).toBe('opaque+page');
+  });
+  test.each([
+    'https://evil.invalid/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50',
+    'https://graph.microsoft.com/v1.0/users/other/mailFolders/immutable-inbox/messages?$skip=50',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-sent/messages?$skip=50',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$select=body',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$expand=attachments',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$filter=other',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$skip=100',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50#other',
+  ])('rejects unsafe metadata continuation before following it: %s', async (next) => {
+    const { graph, request } = fixture([]);
+    await expect(graph.inboxPage!(next)).rejects.toBeInstanceOf(MailGraphError);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+  test('rejects out-of-folder response and unsafe server-provided next link', async () => {
+    const first = fixture([{ value: [row('different-folder')] }]);
+    await expect(first.graph.inboxPage!()).rejects.toBeInstanceOf(MailGraphError);
+    const second = fixture([{ value: [row()], '@odata.nextLink': 'https://attacker.invalid' }]);
+    await expect(second.graph.inboxPage!()).rejects.toBeInstanceOf(MailGraphError);
+    expect(second.request).toHaveBeenCalledTimes(2);
+  });
+  test('matches exact sender or recipient locally and retains continuation on an empty search page', async () => {
+    const next =
+      'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50';
+    const { graph, request } = fixture([
+      {
+        value: [
+          row(),
+          { ...row(), from: { emailAddress: { address: 'notpeer@example.invalid' } } },
+        ],
+        '@odata.nextLink': next,
+      },
+      {
+        value: [
+          {
+            ...row('immutable-sent'),
+            from: { emailAddress: { address: 'self@example.invalid' } },
+            toRecipients: [{ emailAddress: { address: 'PEER@example.invalid' } }],
+          },
+          {
+            ...row('immutable-sent'),
+            isDraft: true,
+            toRecipients: [{ emailAddress: { address: 'peer@example.invalid' } }],
+          },
+        ],
+      },
+    ]);
+    expect(await graph.correspondencePage!('peer@example.invalid', 'inbox', 'absent')).toEqual({
+      messages: [],
+      nextUrl: next,
+      hasMore: true,
+    });
+    const sent = await graph.correspondencePage!('peer@example.invalid', 'sentitems', 'subject');
+    expect(sent.messages).toHaveLength(1);
+    expect(sent.messages[0]).toMatchObject({ sentByUser: true, body: '' });
+    for (const [url] of request.mock.calls)
+      expect(url).not.toMatch(/\$filter|\$search|peer|absent/);
   });
 });

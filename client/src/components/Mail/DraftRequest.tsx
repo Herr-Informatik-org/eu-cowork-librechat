@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FilePenLine, ExternalLink, Loader2 } from 'lucide-react';
 import type { MailWorkspaceResult, MailWorkspaceContent } from 'librechat-data-provider';
 import { useMailDraftRequest } from '~/data-provider/Mail';
@@ -21,22 +21,34 @@ export function safeOutlookDraftUrl(value?: string): string | undefined {
   }
 }
 
-type Props = { result: MailWorkspaceResult; content?: MailWorkspaceContent; editing?: boolean };
+type Props = {
+  result: MailWorkspaceResult;
+  content?: MailWorkspaceContent;
+  editing?: boolean;
+  openRequest?: number;
+};
 
 export function MailDraftRequest(props: Props) {
-  return <DraftRequest key={`${props.result.id}:${props.result.revision}`} {...props} />;
+  return <DraftRequest key={props.result.id} {...props} />;
 }
 
-function DraftRequest({ result, content, editing = false }: Props) {
+function DraftRequest({ result, content, editing = false, openRequest = 0 }: Props) {
   const t = useLocalize();
   const mutation = useMailDraftRequest();
   const [open, setOpen] = useState(false);
   const [instructions, setInstructions] = useState('');
+  const input = useRef<HTMLTextAreaElement>(null);
   const [requestId] = useState(() => crypto.randomUUID());
   const outcome = mutation.data;
   const url = safeOutlookDraftUrl(outcome?.draftUrl || content?.draft?.url);
   const existing =
     !!content?.draft || ['created', 'existing', 'stale', 'uncertain'].includes(result.draftStatus);
+  useEffect(() => {
+    if (openRequest > 0 && !editing && !existing) setOpen(true);
+  }, [openRequest, editing, existing]);
+  useEffect(() => {
+    if (open) input.current?.focus();
+  }, [open, openRequest]);
   return (
     <div className="mail-draft-request" data-mail-shortcuts="off">
       <div className="mail-draft-controls">
@@ -67,9 +79,20 @@ function DraftRequest({ result, content, editing = false }: Props) {
             mutation.mutate({ id: result.id, revision: result.revision, instructions, requestId });
           }}
         >
+          {!!content?.message.replyRecipients?.length && (
+            <p className="mail-draft-recipients">
+              <strong>{t('com_ui_mail_draft_reply_to')}</strong>:{' '}
+              {content.message.replyRecipients
+                .map((recipient) =>
+                  recipient.name ? `${recipient.name} <${recipient.address}>` : recipient.address,
+                )
+                .join(', ')}
+            </p>
+          )}
           <label>
             {t('com_ui_mail_draft_instructions')}
             <textarea
+              ref={input}
               rows={3}
               maxLength={4000}
               value={instructions}

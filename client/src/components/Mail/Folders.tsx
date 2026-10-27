@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, ChevronRight, FolderCheck } from 'lucide-react';
 import type { MailWorkspaceFolder } from 'librechat-data-provider';
 import { useMailFolders } from '~/data-provider/Mail';
@@ -17,9 +17,43 @@ export function FolderPicker({
 }) {
   const t = useLocalize();
   const [parents, setParents] = useState<MailWorkspaceFolder[]>([]);
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    container.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
   const folders = useMailFolders(active, parents.at(-1)?.id);
   return (
-    <div className="mail-folder-picker" role="dialog" aria-label={t('com_ui_mail_choose_folder')}>
+    <div
+      className="mail-folder-picker"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('com_ui_mail_choose_folder')}
+      ref={container}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onClose();
+        }
+        if (event.key !== 'Tab') return;
+        const buttons = Array.from(
+          container.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || [],
+        );
+        const first = buttons.at(0);
+        const last = buttons.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        }
+        if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }}
+    >
       <div className="mail-settings-heading">
         <h3>{t('com_ui_mail_choose_folder')}</h3>
         <button className="mail-button" onClick={onClose}>

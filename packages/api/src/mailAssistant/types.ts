@@ -11,7 +11,33 @@ export const MAIL_CATEGORIES: Record<MailPriority, string> = {
   low: 'KI: Niedrig',
 };
 
+export interface MailSignature {
+  enabled: boolean;
+  html: string;
+  fontFamily: 'Aptos' | 'Calibri' | 'Arial';
+  fontSize: 10 | 11 | 12 | 14;
+  logo?: { contentBytes: string };
+}
+export interface MailDraftContext {
+  sender: { name: string; address: string };
+  recipients: { name: string; address: string }[];
+  signatureEnabled: boolean;
+}
+export interface MailChatRequest {
+  revision: string;
+  message: string;
+  history: { role: 'user' | 'assistant'; content: string }[];
+  draft?: string;
+  includeCorrespondence?: boolean;
+}
+export interface MailChatResponse {
+  answer: string;
+  modelLabel?: string;
+  sources?: MailResult[];
+}
+
 export interface MailSettings {
+  signature?: MailSignature;
   enabled: boolean;
   mode: 'manual' | 'scheduled';
   weekdays: number[];
@@ -29,6 +55,10 @@ export interface MailMessage {
   changeKey: string;
   subject: string;
   sender: string;
+  senderName?: string;
+  replyTo?: { name: string; address: string }[];
+  isRead?: boolean;
+  hasAttachments?: boolean;
   receivedAt: string;
   sentAt?: string;
   body: string;
@@ -51,6 +81,10 @@ export interface MailAnalysis {
 }
 
 export interface MailResult extends Omit<MailAnalysis, 'draft'> {
+  mailboxLocation?: 'inbox' | 'sent';
+  analysisStatus?: 'pending' | 'complete';
+  isRead?: boolean;
+  hasAttachments?: boolean;
   id: string;
   subject: string;
   sender: string;
@@ -66,6 +100,8 @@ export interface MailResult extends Omit<MailAnalysis, 'draft'> {
 }
 
 export interface StoredMailResult extends MailResult {
+  connectionGeneration?: string;
+  correspondent?: string;
   messageId: string;
   conversationId: string;
   sourceHash: string;
@@ -80,6 +116,7 @@ export interface MailResultContent {
   resultId: string;
   mailbox: string;
   message: {
+    replyRecipients?: { name: string; address: string }[];
     subject: string;
     sender: string;
     receivedAt: string;
@@ -219,6 +256,7 @@ export interface MailStore {
   results(ownerId: string): Promise<StoredMailResult[]>;
   result(ownerId: string, id: string): Promise<StoredMailResult | null>;
   putResult(ownerId: string, token: string, result: StoredMailResult): Promise<void>;
+  seedResults(ownerId: string, results: StoredMailResult[]): Promise<StoredMailResult[]>;
   draftState(
     ownerId: string,
     conversationKey: string,
@@ -255,10 +293,25 @@ export interface MailResultQuery {
 export interface MailResultPage {
   results: MailResult[];
   nextCursor?: string;
+  complete?: boolean;
 }
 
 export interface MailGraph {
-  identity(): Promise<{ id: string; mail: string; userPrincipalName: string }>;
+  inboxPage?(
+    url?: string,
+  ): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }>;
+  correspondencePage?(
+    partner: string,
+    folder: 'inbox' | 'sentitems',
+    search?: string,
+    url?: string,
+  ): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }>;
+  identity(): Promise<{
+    id: string;
+    mail: string;
+    userPrincipalName: string;
+    displayName?: string;
+  }>;
   page(
     since: string,
     url?: string,
@@ -276,6 +329,7 @@ export interface MailGraph {
   createReply(
     id: string,
     text: string,
+    signature?: MailSignature,
   ): Promise<{ id: string; url?: string; warnings?: string[]; stop?: boolean }>;
   folders(parentId?: string): Promise<MailFolder[]>;
   folder(id: string): Promise<MailFolder>;
@@ -305,6 +359,13 @@ export interface MailRuntimeAdapter {
     ownerId: string,
     messages: MailMessage[],
     instructions: string,
+    beforeRequest: () => Promise<void>,
+    context?: MailDraftContext,
+  ): Promise<string>;
+  chat?(
+    ownerId: string,
+    messages: MailMessage[],
+    input: MailChatRequest,
     beforeRequest: () => Promise<void>,
   ): Promise<string>;
   audit(ownerId: string, event: string, resultId?: string): Promise<void>;

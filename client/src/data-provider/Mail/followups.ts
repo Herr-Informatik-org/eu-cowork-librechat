@@ -15,7 +15,8 @@ export function useMailPendingActions() {
   const draft = useIsMutating([MutationKeys.mailWorkspace, user?.id, 'draft-request']);
   const prepare = useIsMutating([MutationKeys.mailWorkspace, user?.id, 'followup-prepare']);
   const commit = useIsMutating([MutationKeys.mailWorkspace, user?.id, 'followup-commit']);
-  return { draft, followup: prepare + commit };
+  const chat = useIsMutating([MutationKeys.mailWorkspace, user?.id, 'chat']);
+  return { draft, chat, followup: prepare + commit };
 }
 
 export function useMailFollowupSettings(enabled = true) {

@@ -52,6 +52,12 @@ function fixture() {
   };
   const copy = <T>(value: T): T => structuredClone(value);
   const store: MailStore = {
+    seedResults: jest.fn(async (_owner, values) =>
+      values.map((value) => {
+        if (!results.has(value.id)) results.set(value.id, copy(value));
+        return copy(results.get(value.id)!);
+      }),
+    ),
     moveJobs: jest.fn(async (id) => copy(moves.get(id) ?? [])),
     enqueueMove: jest.fn(async (id, queue) => {
       const job = jobs.get(id);
@@ -947,17 +953,36 @@ describe('explicit manual drafts and attachment metadata', () => {
       [expect.objectContaining({ id: 'mail' })],
       instructions,
       expect.any(Function),
+      {
+        sender: { name: '', address: 'alice@example.invalid' },
+        recipients: [{ name: '', address: 'customer@example.invalid' }],
+        signatureEnabled: false,
+      },
     );
     expect(f.graph.createReply).toHaveBeenCalledTimes(1);
     expect(f.graph.createReply).toHaveBeenCalledWith(
       'mail',
       'Guten Tag\n\nGerne unterstützen wir Sie.',
+      undefined,
     );
     expect(JSON.stringify([...f.results.values()])).not.toContain(instructions);
     expect(JSON.stringify([...f.operations.values()])).not.toContain(instructions);
     await expect(requestDraft(f, 'Andere Bitte')).resolves.toMatchObject({ status: 'existing' });
     expect(f.adapter.analyzeDraft).toHaveBeenCalledTimes(1);
     expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+  });
+  test('uses confirmed owner and reply-to identities and keeps signature outside the model', async () => {
+    const f = await prepared();
+    const identity = await f.graph.identity();
+    f.graph.identity.mockResolvedValue(Object.assign(identity, { displayName: 'Alice Owner' }));
+    const original = f.message;
+    original.replyTo = [{ name: 'Actual recipient', address: 'reply@example.invalid' }];
+    original.senderName = 'Quoted colleague';
+    await requestDraft(f, 'Bitte freundlich antworten');
+    expect(jest.mocked(f.adapter.analyzeDraft!).mock.calls[0][4]).toMatchObject({
+      sender: { name: 'Alice Owner', address: 'alice@example.invalid' },
+      recipients: [{ name: 'Actual recipient', address: 'reply@example.invalid' }],
+    });
   });
   test('an existing human draft is linked and persisted but never rewritten or duplicated', async () => {
     const f = await prepared();

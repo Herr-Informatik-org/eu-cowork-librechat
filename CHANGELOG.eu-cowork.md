@@ -1,5 +1,21 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-27 — Vollständiger Posteingang, Mail-Chat und eigene Signatur
+
+- Die Übersicht lädt alle eigenen Inbox-Metadatenseiten und zeigt ungeprüfte Mails
+  getrennt von KI-Ergebnissen. Aktualisieren startet neu; einzelne Mails derselben
+  Unterhaltung bleiben sichtbar. Antwortbarrieren gelten weiterhin pro Unterhaltung.
+- Kompakte Zeilen, direkte Ablage mit E, alternative Ordnerwahl mit Shift+E und
+  weitere Tastenkürzel erleichtern die Bearbeitung. Offene Texte bleiben erhalten.
+- Ein eingebetteter Mail-Chat kann Fragen beantworten und auf ausdrücklichen Wunsch
+  eigene Korrespondenz mit demselben Partner aus Eingang und Gesendet einbeziehen.
+  Er nutzt die konfigurierte Modellroute mit Budget und Audit, ohne Schreibwerkzeuge.
+- Explizite Entwürfe nutzen bestätigte Antwortempfänger und ein einheitliches
+  HTML-Layout. Persönliche Signatur und bewusst hochgeladenes Logo sind verschlüsselt,
+  vom Modellkontext getrennt und bleiben beim Bearbeiten des Antwortteils erhalten.
+- Mail-HTML bleibt bereinigt und isoliert; externe Ressourcen und Dateianhänge
+  werden nicht automatisch geöffnet. Versand und Odoo-Aufgabenablage bleiben aus.
+
 ## 2026-10-27 — Mailbearbeitung unabhängig von Odoo ausrollen
 
 - Die Odoo-Aufgabenablage ist standardmässig ausgeschaltet. Nur der ausdrückliche

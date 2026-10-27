@@ -12,10 +12,13 @@ import type { MailCodec } from './privateData';
 import { nextMailRun, mailHistoryStart } from './schedule';
 import { MAIL_CONSENT_VERSION } from './types';
 import { activeMoveJob, summarizeMove } from './moves';
+import { normalizeMailSignature } from './signature';
+import type { MailSignature } from './types';
 
 interface Row extends Omit<MailJob, 'checkpoint' | 'history'> {
   _id: string;
   checkpointEncrypted?: string;
+  signatureEncrypted?: string;
   historyEncrypted?: string;
   results?: Record<string, { encrypted: string; updatedAt: Date }>;
   moveJobsEncrypted?: string;
@@ -42,6 +45,7 @@ export function createMongoMailStore({
   const decode = (row: Row): MailJob => {
     const {
       checkpointEncrypted,
+      signatureEncrypted,
       historyEncrypted,
       results: _results,
       _id: _id,
@@ -51,6 +55,14 @@ export function createMongoMailStore({
     } = row;
     return {
       ...job,
+      settings: {
+        ...job.settings,
+        ...(signatureEncrypted && {
+          signature: normalizeMailSignature(
+            codec.open<MailSignature>(row.ownerId, 'signature', signatureEncrypted),
+          ),
+        }),
+      },
       ...(checkpointEncrypted && {
         checkpoint: codec.open<MailCheckpoint>(row.ownerId, 'checkpoint', checkpointEncrypted),
       }),
@@ -215,6 +227,11 @@ export function createMongoMailStore({
         if (!old && observedExisting)
           throw Error('Die persönliche Verbindung wurde während des Speicherns getrennt.');
         observedExisting ||= !!old;
+        const { signature: requestedSignature, ...plainSettings } = settings;
+        const signature =
+          requestedSignature === undefined
+            ? old?.settings.signature
+            : normalizeMailSignature(requestedSignature);
         const selection = settings.history ?? { mode: 'off' };
         const previous = old?.settings.history ?? { mode: 'off' };
         const changed =
@@ -240,7 +257,10 @@ export function createMongoMailStore({
             { _id: ownerId, ownerId, revision: old ? old.revision : { $exists: false } },
             {
               $set: {
-                settings,
+                settings: plainSettings,
+                ...(signature && {
+                  signatureEncrypted: codec.seal(ownerId, 'signature', signature),
+                }),
                 nextRunAt: nextMailRun(settings, now) ?? '',
                 ...(settings.enabled && !old?.enabledAt && { enabledAt: until }),
                 ...(history && {
@@ -426,6 +446,54 @@ export function createMongoMailStore({
         $set: { [`results.${result.id}`]: entry },
       });
       if (!write.matchedCount) throw new Error('Die persönliche Verarbeitung wurde angehalten.');
+    },
+    async seedResults(ownerId, values) {
+      if (values.length > 50 || values.some((value) => !/^[a-f0-9]{64}$/.test(value.id)))
+        throw Error('Die Posteingangsseite ist ungültig. Bitte erneut laden.');
+      const unique = [...new Map(values.map((value) => [value.id, value])).values()];
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const row = await collection().findOne({ _id: ownerId, ownerId });
+        if (!row) throw Error('Bitte zuerst die persönlichen Mail-Einstellungen speichern.');
+        const missing = unique.filter((value) => !row.results?.[value.id]);
+        if (!missing.length)
+          return unique.map((value) =>
+            codec.open<StoredMailResult>(
+              ownerId,
+              `result:${value.id}`,
+              row.results![value.id].encrypted,
+            ),
+          );
+        const additions: Record<string, { encrypted: string; updatedAt: Date }> = {};
+        for (const value of missing)
+          additions[value.id] = {
+            encrypted: codec.seal(ownerId, `result:${value.id}`, value),
+            updatedAt: new Date(),
+          };
+        // The server-side size guard also covers concurrent results from the analysis worker.
+        const growth = BSON.calculateObjectSize({ results: additions }) + 1024;
+        const saved = await collection().updateOne(
+          {
+            _id: ownerId,
+            ownerId,
+            revision: row.revision,
+            ...Object.fromEntries(
+              missing.map((value) => [`results.${value.id}`, { $exists: false }]),
+            ),
+            $expr: { $lt: [{ $bsonSize: '$$ROOT' }, 12 * 1024 * 1024 - growth] },
+          },
+          {
+            $set: Object.fromEntries(
+              Object.entries(additions).map(([key, value]) => [`results.${key}`, value]),
+            ),
+          },
+        );
+        if (!saved.matchedCount && BSON.calculateObjectSize(row) + growth >= 12 * 1024 * 1024)
+          throw Error(
+            'Die lokale Mailübersicht ist voll. Bitte die Auswahl verkleinern oder den Support kontaktieren.',
+          );
+        // Re-read after an insert or competing edit; never return stale analysis or overwrite it.
+      }
+      throw Error('Die Mailübersicht wurde gleichzeitig geändert. Bitte erneut laden.');
     },
     async draftState(ownerId, conversationKey) {
       const row = await operations().findOne({ _id: conversationKey, ownerId });

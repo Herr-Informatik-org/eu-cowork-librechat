@@ -6,7 +6,7 @@ export { MailGraphError } from './errors';
 
 const origin = 'https://graph.microsoft.com';
 const fields =
-  'id,conversationId,changeKey,subject,from,receivedDateTime,sentDateTime,categories,isDraft,webLink,parentFolderId';
+  'id,conversationId,changeKey,subject,from,replyTo,receivedDateTime,sentDateTime,categories,isDraft,webLink,parentFolderId,isRead,hasAttachments';
 const otherFolderAliases = new Set([
   'archive',
   'clutter',
@@ -55,7 +55,7 @@ export function safeOutlookUrl(value: unknown): string | undefined {
 }
 
 function message(value: Record<string, unknown>): MailMessage {
-  const from = value.from as { emailAddress?: { address?: string } } | undefined;
+  const from = value.from as { emailAddress?: { address?: string; name?: string } } | undefined;
   const body = value.body as { content?: string; contentType?: string } | undefined;
   const result: MailMessage = {
     id: text(value.id, 2048),
@@ -63,6 +63,18 @@ function message(value: Record<string, unknown>): MailMessage {
     changeKey: text(value.changeKey, 2048),
     subject: text(value.subject, 500),
     sender: text(from?.emailAddress?.address, 320),
+    senderName: text(from?.emailAddress?.name, 320),
+    replyTo: Array.isArray(value.replyTo)
+      ? value.replyTo
+          .slice(0, 50)
+          .map((item) => ({
+            name: text(item?.emailAddress?.name, 320),
+            address: text(item?.emailAddress?.address, 320),
+          }))
+          .filter((item) => item.address)
+      : [],
+    isRead: value.isRead === true,
+    hasAttachments: value.hasAttachments === true,
     receivedAt: text(value.receivedDateTime, 40),
     sentAt: text(value.sentDateTime, 40),
     body: text(body?.content, 12_000),
@@ -338,7 +350,115 @@ export function createMailGraph({
       throw new MailGraphError(400);
     }
   }
+  const metadataFields = `${fields},toRecipients,ccRecipients`;
+  const metadataFolders = new Map<string, Promise<string>>();
+  async function metadataFolder(alias: 'inbox' | 'sentitems'): Promise<string> {
+    if (!metadataFolders.has(alias))
+      metadataFolders.set(
+        alias,
+        (async () => {
+          const folder = await call(`/v1.0/me/mailFolders/${alias}?$select=id`);
+          if (typeof folder.id !== 'string' || !folder.id || folder.id.length > 2048)
+            throw new MailGraphError(502);
+          return folder.id;
+        })(),
+      );
+    return metadataFolders.get(alias)!;
+  }
+  function metadataPagePath(link: string | undefined, path: string): string {
+    const query = new URLSearchParams({
+      $select: metadataFields,
+      $orderby: 'receivedDateTime desc',
+      $top: '50',
+    });
+    if (link) {
+      if (link.length > 20_000) throw new MailGraphError(400);
+      const next = new URL(origin + folderPagePath(link, path));
+      const seen = new Set<string>();
+      for (const [key, value] of next.searchParams) {
+        if (seen.has(key)) throw new MailGraphError(400);
+        seen.add(key);
+        if (key === '$skip' && /^\d{1,10}$/.test(value)) query.set(key, value);
+        else if (key === '$skiptoken' && value && value.length <= 16_000) query.set(key, value);
+        else if (
+          key === '$select' &&
+          value.split(',').sort().join(',') === metadataFields.split(',').sort().join(',')
+        )
+          continue;
+        else if (key === '$orderby' && value === 'receivedDateTime desc') continue;
+        else if (key === '$top' && /^\d+$/.test(value) && Number(value) > 0 && Number(value) <= 50)
+          continue;
+        else throw new MailGraphError(400);
+      }
+      if (!seen.has('$skip') && !seen.has('$skiptoken')) throw new MailGraphError(400);
+    }
+    return `${path}?${query}`;
+  }
+  async function metadataPage(alias: 'inbox' | 'sentitems', url?: string) {
+    const folder = await metadataFolder(alias);
+    const path = `/v1.0/me/mailFolders/${id(folder)}/messages`;
+    const value = await call(metadataPagePath(url, path));
+    if (!Array.isArray(value.value) || value.value.length > 50) throw new MailGraphError(502);
+    const next = value['@odata.nextLink'];
+    if (next !== undefined && typeof next !== 'string') throw new MailGraphError(502);
+    if (typeof next === 'string') metadataPagePath(next, path);
+    const rows = value.value as Record<string, unknown>[];
+    if (
+      rows.some(
+        (row) =>
+          !row || typeof row !== 'object' || Array.isArray(row) || row.parentFolderId !== folder,
+      )
+    )
+      throw new MailGraphError(502);
+    return {
+      rows,
+      ...(typeof next === 'string' && { nextUrl: next }),
+      hasMore: typeof next === 'string',
+    };
+  }
   return {
+    async inboxPage(url) {
+      const { rows, ...page } = await metadataPage('inbox', url);
+      return {
+        ...page,
+        messages: rows
+          .filter((row) => row.isDraft !== true)
+          .map((row) => message({ ...row, body: undefined })),
+      };
+    },
+    async correspondencePage(partner, folder, search = '', url) {
+      if (
+        !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(partner) ||
+        partner.length > 320 ||
+        search.length > 160 ||
+        !['inbox', 'sentitems'].includes(folder)
+      )
+        throw new MailGraphError(400);
+      const { rows, ...page } = await metadataPage(folder, url);
+      const expected = partner.trim().toLowerCase();
+      const matches = (value: unknown) =>
+        typeof value === 'string' && value.trim().toLowerCase() === expected;
+      const selected = rows
+        .filter((row) => {
+          if (row.isDraft === true) return false;
+          const from = row.from as { emailAddress?: { address?: string } } | undefined;
+          if (folder === 'inbox') return matches(from?.emailAddress?.address);
+          return [
+            ...(Array.isArray(row.toRecipients) ? row.toRecipients : []),
+            ...(Array.isArray(row.ccRecipients) ? row.ccRecipients : []),
+          ].some((item) => matches(item?.emailAddress?.address));
+        })
+        .map((row) => ({
+          ...message({ ...row, body: undefined }),
+          sentByUser: folder === 'sentitems',
+        }))
+        .filter((mail) =>
+          `${mail.subject} ${mail.sender} ${mail.senderName ?? ''}`
+            .toLocaleLowerCase()
+            .includes(search.toLocaleLowerCase()),
+        );
+      return { ...page, messages: selected };
+    },
     preview: createPreviewOperation({
       call,
       id,
@@ -435,11 +555,12 @@ export function createMailGraph({
       }
     },
     async identity() {
-      const value = await call('/v1.0/me?$select=id,mail,userPrincipalName');
+      const value = await call('/v1.0/me?$select=id,mail,userPrincipalName,displayName');
       return {
         id: text(value.id, 128),
         mail: text(value.mail, 320),
         userPrincipalName: text(value.userPrincipalName, 320),
+        displayName: text(value.displayName, 320),
       };
     },
     async page(since, url) {

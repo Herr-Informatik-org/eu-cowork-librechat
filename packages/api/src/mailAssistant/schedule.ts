@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { MAIL_CONSENT_VERSION } from './types';
 import type { MailSettings } from './types';
+import { normalizeMailSignature } from './signature';
 
 const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 const date = z
@@ -10,8 +11,12 @@ const date = z
     const instant = Date.parse(`${value}T00:00:00Z`);
     return Number.isFinite(instant) && new Date(instant).toISOString().slice(0, 10) === value;
   });
-export const mailSettingsSchema: z.ZodType<MailSettings> = z
+export const mailSettingsSchema: z.ZodType<MailSettings, z.ZodTypeDef, unknown> = z
   .object({
+    signature: z
+      .unknown()
+      .transform((value) => (value === undefined ? undefined : normalizeMailSignature(value)))
+      .optional(),
     enabled: z.boolean(),
     mode: z.enum(['manual', 'scheduled']),
     weekdays: z.array(z.number().int().min(1).max(7)).min(1).max(7),

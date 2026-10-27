@@ -260,3 +260,39 @@ test.each([
   expect(safeOutlookDraftUrl(url)).toBeUndefined();
   expect(safeOdooTaskUrl(url)).toBeUndefined();
 });
+
+test('R opens a manual draft form without generating and preserves instructions across refresh', () => {
+  const view = render(<MailDraftRequest result={result} openRequest={1} />);
+  const input = screen.getByRole('textbox');
+  expect(input).toHaveFocus();
+  fireEvent.change(input, { target: { value: 'Meine eigene ausführliche Antwortvorgabe' } });
+  view.rerender(<MailDraftRequest result={{ ...result, revision: 'refreshed' }} openRequest={1} />);
+  expect(screen.getByRole('textbox')).toHaveValue('Meine eigene ausführliche Antwortvorgabe');
+  expect(mockDraft).not.toHaveBeenCalled();
+});
+
+test('shows actual reply recipients as inert text before the draft request', () => {
+  render(
+    <MailDraftRequest
+      result={result}
+      openRequest={1}
+      content={{
+        resultId: result.id,
+        mailbox: 'owner@example.test',
+        message: {
+          subject: '',
+          sender: 'sender@example.test',
+          receivedAt: '',
+          body: '',
+          bodyTruncated: false,
+          replyRecipients: [
+            { name: '<img src=x onerror=alert(1)>', address: 'reply@example.test' },
+          ],
+        },
+      }}
+    />,
+  );
+  expect(screen.getByText(/<img src=x onerror=alert\(1\)> <reply@example.test>/)).toBeVisible();
+  expect(document.querySelector('img')).toBeNull();
+  expect(mockDraft).not.toHaveBeenCalled();
+});

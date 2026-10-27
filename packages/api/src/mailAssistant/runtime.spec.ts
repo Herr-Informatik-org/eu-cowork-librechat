@@ -126,11 +126,21 @@ describe('Mail assistant runtime boundaries', () => {
         [],
         'Der Termin ist bestätigt.',
         async () => undefined,
+        {
+          sender: { name: 'Eigener Name', address: 'person@example.com' },
+          recipients: [{ name: 'Kundin', address: 'customer@example.com' }],
+          signatureEnabled: true,
+        },
       ),
     ).toBe('Guten Tag, der Termin ist bestätigt.');
     const messages = payloads[0].messages as { role: string; content: string }[];
     expect(JSON.parse(messages[1].content)).toEqual({
       userInstructions: 'Der Termin ist bestätigt.',
+      replyContext: {
+        sender: { name: 'Eigener Name', address: 'person@example.com' },
+        recipients: [{ name: 'Kundin', address: 'customer@example.com' }],
+        signatureEnabled: true,
+      },
       emails: [],
     });
     expect(payloads[0]).not.toHaveProperty('tools');
@@ -138,6 +148,62 @@ describe('Mail assistant runtime boundaries', () => {
       runtime.adapter.analyzeDraft!(owner, [], 'x'.repeat(4001), async () => undefined),
     ).rejects.toThrow();
     expect(payloads).toHaveLength(1);
+  });
+  it('answers context questions through the configured budgeted route without mail tools', async () => {
+    const f = fixture();
+    let payload: Record<string, unknown> = {};
+    f.deps.fetch = async (_url, init) => {
+      payload = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: JSON.stringify({ answer: 'In dieser Mail fehlt der Termin.' }),
+              },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 100, completion_tokens: 20 },
+        }),
+      );
+    };
+    const runtime = createMailAssistantRuntime(f.deps)!;
+    const answer = await runtime.adapter.chat!(
+      owner,
+      [],
+      {
+        revision: 'a'.repeat(64),
+        message: 'Welcher Termin?',
+        history: [],
+        draft: 'Entwurf als Daten',
+      },
+      async () => {},
+    );
+    expect(answer).toBe('In dieser Mail fehlt der Termin.');
+    const messages = payload.messages as { role: string; content: string }[];
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user']);
+    expect(messages[0].content).toContain('keine Werkzeuge');
+    expect(JSON.parse(messages[1].content)).toEqual({
+      question: 'Welcher Termin?',
+      history: [],
+      currentDraft: 'Entwurf als Daten',
+      emails: [],
+    });
+    expect(payload).not.toHaveProperty('tools');
+    expect(payload).not.toHaveProperty('functions');
+    expect(payload.model).toBe('fixture-model');
+  });
+  it('requires confirmed reply identity and does not infer it from quoted mail signatures', async () => {
+    const f = fixture();
+    const request = jest.fn();
+    f.deps.fetch = request;
+    const runtime = createMailAssistantRuntime(f.deps)!;
+    await expect(
+      runtime.adapter.analyzeDraft!(owner, [], 'Bitte antworten', async () => undefined),
+    ).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
   });
   it('requires MCP use permission before exposing personal Odoo settings', async () => {
     const f = fixture();

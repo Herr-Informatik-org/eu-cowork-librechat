@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Mail,
   Search,
@@ -31,14 +30,17 @@ import {
   useMailContent,
   useMailActions,
   useMailMoveJobs,
+  useMailInbox,
 } from '~/data-provider/Mail';
 import type { TranslationKeys } from '~/hooks/useLocalize';
-import { useAuthContext, useLocalize, useNewConvo } from '~/hooks';
-import { prepareMailChat } from './handoff';
+import { useAuthContext, useLocalize } from '~/hooks';
 import { mailShortcutKey, ShortcutHelp } from './Shortcuts';
 import { MailFollowupSettings, MailFollowupAction } from './Followup';
-import { MailDraftRequest } from './DraftRequest';
+import { MailDraftRequest, safeOutlookDraftUrl } from './DraftRequest';
 import { MailAttachments } from './Attachments';
+import { MailChat, MailCorrespondence, emptyMailChat } from './Chat';
+import type { MailChatState } from './Chat';
+import { MailSignatureSettings } from './Signature';
 import { FolderPicker, useDoneFolder } from './Folders';
 import SafeMailPreview from './SafeMailPreview';
 import { MoveDialog, MoveProgress, isMoveActive } from './Operations';
@@ -299,6 +301,11 @@ function PersonalSettings({
           </>
         )}
         <p className="mail-muted">{t('com_ui_mail_batch_hint')}</p>
+        <MailSignatureSettings
+          value={form.signature}
+          onChange={(signature) => update({ signature })}
+          disabled={busy}
+        />
         <button
           className="mail-button primary"
           type="submit"
@@ -327,34 +334,51 @@ type DraftEditor = {
   revision: string;
 };
 
-function Detail({
-  result,
-  status,
-  folder,
-  onMove,
-  moveUnavailable,
-  editor,
-  onEditorChange,
-}: {
-  result: MailWorkspaceResult;
-  status: MailWorkspaceStatus;
-  folder: MailWorkspaceFolder | null;
-  onMove: (items: MailWorkspaceResult[]) => void;
-  moveUnavailable: boolean;
-  editor?: DraftEditor;
-  onEditorChange: (editor?: DraftEditor) => void;
-}) {
+type MailDetailControls = { reply: () => void; chat: () => void; outlook: () => void };
+
+const Detail = forwardRef<
+  MailDetailControls,
+  {
+    result: MailWorkspaceResult;
+    status: MailWorkspaceStatus;
+    folder: MailWorkspaceFolder | null;
+    onMove: (items: MailWorkspaceResult[]) => void;
+    moveUnavailable: boolean;
+    editor?: DraftEditor;
+    onEditorChange: (editor?: DraftEditor) => void;
+    chatState: MailChatState;
+    onChatChange: (update: (previous: MailChatState) => MailChatState) => void;
+    onOpen: (result: MailWorkspaceResult) => void;
+  }
+>(function Detail(
+  {
+    result,
+    status,
+    folder,
+    onMove,
+    moveUnavailable,
+    editor,
+    onEditorChange,
+    chatState,
+    onChatChange,
+    onOpen,
+  },
+  ref,
+) {
   const t = useLocalize();
-  const { user } = useAuthContext();
-  const { newConversation } = useNewConvo();
-  const navigate = useNavigate();
   const content = useMailContent(result.id, result.revision);
   const actions = useMailActions();
-  const [tab, setTab] = useState<'message' | 'draft'>(editor ? 'draft' : 'message');
+  const [tab, setTab] = useState<'message' | 'draft' | 'chat'>(editor ? 'draft' : 'message');
   const editing = !!editor;
   const body = editor?.body || '';
   const revision = editor?.revision || '';
   const [notice, setNotice] = useState('');
+  const [draftOpenRequest, setDraftOpenRequest] = useState(0);
+  const [chatFocusRequest, setChatFocusRequest] = useState(0);
+  const editorInput = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (editing && tab === 'draft') editorInput.current?.focus();
+  }, [editing, tab]);
   const displayedContent = editor?.content || content.data;
   const data =
     displayedContent?.resultId === result.id &&
@@ -362,29 +386,73 @@ function Detail({
       ? displayedContent
       : undefined;
   const busy = actions.draft.isLoading || actions.priority.isLoading;
-  const locked = status.settings.consentVersion !== consentVersion;
+  const locked =
+    status.settings.consentVersion !== consentVersion || result.mailboxLocation === 'sent';
   const selectedBody = tab === 'draft' ? data?.draft : data?.message;
   const startChat = () => {
-    if (!data || !user?.id) return;
-    const draft = editing ? body : data.draft?.replyText || data.draft?.body || '';
-    const text = t('com_ui_mail_chat_prompt', {
-      subject: data.message.subject,
-      sender: data.message.sender,
-      mailbox: data.mailbox,
-      original: data.message.body,
-      draft,
-      questions: result.questions.join('\n'),
-    });
-    const token = prepareMailChat(user.id, text);
-    newConversation();
-    navigate(`/c/new?mailReview=${encodeURIComponent(token)}`);
+    if (!data) return;
+    setTab('chat');
+    setChatFocusRequest((value) => value + 1);
   };
+  useImperativeHandle(ref, () => ({
+    reply: () => {
+      if (locked || busy || editing || !data) return;
+      if (data.draft?.revision && data.draft.replyText !== undefined) {
+        setTab('draft');
+        onEditorChange({
+          result,
+          content: data,
+          body: data.draft.replyText,
+          revision: data.draft.revision,
+        });
+        return;
+      }
+      setDraftOpenRequest((value) => value + 1);
+    },
+    chat: startChat,
+    outlook: () => {
+      if (editing) return;
+      const url = safeOutlookDraftUrl(data?.draft?.url);
+      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    },
+  }));
+  const summary = (
+    <>
+      <div className="mail-summary-heading">
+        <h3>{t('com_ui_mail_summary')}</h3>
+        <span>{t(draftStates[result.draftStatus])}</span>
+      </div>
+      <p>{result.summary}</p>
+      {result.questions.length > 0 && (
+        <div className="mail-questions">
+          <h4>{t('com_ui_mail_questions')}</h4>
+          <ul>
+            {result.questions.map((question, i) => (
+              <li key={i}>{question}</li>
+            ))}
+          </ul>
+          <p>{t('com_ui_mail_questions_private')}</p>
+        </div>
+      )}
+      <details>
+        <summary>{t('com_ui_mail_reason')}</summary>
+        <p>{result.reason}</p>
+      </details>
+    </>
+  );
   return (
-    <article className="mail-detail" aria-label={t('com_ui_mail_detail')}>
+    <article
+      className={`mail-detail ${tab === 'chat' ? 'mail-detail-chat' : ''}`}
+      aria-label={t('com_ui_mail_detail')}
+    >
       <header className="mail-detail-heading">
         <div className="mail-detail-kicker">
           <span className={`mail-priority ${result.priority}`}>
-            {t(priorities[result.priority])}
+            {t(
+              result.analysisStatus === 'pending'
+                ? 'com_ui_mail_not_analyzed'
+                : priorities[result.priority],
+            )}
           </span>
           <span>{date(result.receivedAt, status.settings.timeZone)}</span>
           {result.moveStatus === 'completed' && (
@@ -433,7 +501,14 @@ function Detail({
           <FolderCheck size={16} />
           {t('com_ui_mail_mark_done')}
         </button>
-        <MailDraftRequest result={result} content={data} editing={editing} />
+        {result.mailboxLocation !== 'sent' && (
+          <MailDraftRequest
+            result={result}
+            content={data}
+            editing={editing}
+            openRequest={draftOpenRequest}
+          />
+        )}
         {status.odooAvailable === true && <MailFollowupAction result={result} />}
       </div>
       {editing && <p className="mail-notice">{t('com_ui_mail_edit_before_move')}</p>}
@@ -449,28 +524,17 @@ function Detail({
           </ul>
         </div>
       ) : null}
-      <section className="mail-summary">
-        <div className="mail-summary-heading">
-          <h3>{t('com_ui_mail_summary')}</h3>
-          <span>{t(draftStates[result.draftStatus])}</span>
-        </div>
-        <p>{result.summary}</p>
-        {result.questions.length > 0 && (
-          <div className="mail-questions">
-            <h4>{t('com_ui_mail_questions')}</h4>
-            <ul>
-              {result.questions.map((question, i) => (
-                <li key={i}>{question}</li>
-              ))}
-            </ul>
-            <p>{t('com_ui_mail_questions_private')}</p>
-          </div>
-        )}
-        <details>
-          <summary>{t('com_ui_mail_reason')}</summary>
-          <p>{result.reason}</p>
-        </details>
-      </section>
+      {result.analysisStatus !== 'pending' &&
+        (tab === 'chat' ? (
+          <details className="mail-summary mail-summary-compact">
+            <summary>
+              {t('com_ui_mail_summary')} · {result.summary}
+            </summary>
+            {summary}
+          </details>
+        ) : (
+          <section className="mail-summary">{summary}</section>
+        ))}
       <div className="mail-tabs" role="tablist" aria-label={t('com_ui_mail_content')}>
         <button role="tab" aria-selected={tab === 'message'} onClick={() => setTab('message')}>
           {t('com_ui_mail_original')}
@@ -479,8 +543,10 @@ function Detail({
           {t('com_ui_mail_draft')}
         </button>
         <button
-          className="mail-button mail-chat-button"
-          disabled={!data || busy}
+          role="tab"
+          aria-selected={tab === 'chat'}
+          className="mail-chat-button"
+          disabled={!data}
           onClick={startChat}
         >
           <MessageSquare size={15} />
@@ -501,8 +567,34 @@ function Detail({
           </button>
         </p>
       )}
-      {data && !selectedBody && <p className="mail-empty">{t('com_ui_mail_draft_unavailable')}</p>}
-      {selectedBody && (
+      {tab === 'chat' && data && (
+        <MailChat
+          result={result}
+          draft={editing ? body : data.draft?.replyText || data.draft?.body}
+          state={chatState}
+          onChange={onChatChange}
+          onOpen={onOpen}
+          focusRequest={chatFocusRequest}
+          onApply={
+            data.draft?.revision && data.draft.replyText !== undefined && !locked && !busy
+              ? (text) => {
+                  if (!data.draft?.revision || text.length > 12000) return;
+                  onEditorChange({
+                    result,
+                    content: data,
+                    body: text,
+                    revision: data.draft.revision,
+                  });
+                  setTab('draft');
+                }
+              : undefined
+          }
+        />
+      )}
+      {tab !== 'chat' && data && !selectedBody && (
+        <p className="mail-empty">{t('com_ui_mail_draft_unavailable')}</p>
+      )}
+      {tab !== 'chat' && selectedBody && (
         <section className="mail-body">
           <div className="mail-body-actions">
             {tab === 'draft' && !editing && (
@@ -542,6 +634,7 @@ function Detail({
               <label className="mail-edit-label">
                 {t('com_ui_mail_edit_hint')}
                 <textarea
+                  ref={editorInput}
                   value={body}
                   disabled={busy}
                   onChange={(event) =>
@@ -601,10 +694,11 @@ function Detail({
         </p>
       )}
       <MailAttachments result={result} />
+      <MailCorrespondence result={result} onOpen={onOpen} />
       <footer className="mail-detail-footer">{t('com_ui_mail_never_send')}</footer>
     </article>
   );
-}
+});
 
 function MailWorkspace() {
   const t = useLocalize();
@@ -615,6 +709,8 @@ function MailWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
+  const detailControls = useRef<MailDetailControls>(null);
+  const moveSubmitting = useRef(false);
   const rowButtons = useRef(new Map<string, HTMLButtonElement>());
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
@@ -622,6 +718,9 @@ function MailWorkspace() {
   const [state, setState] = useState<'open' | 'done' | 'all'>('open');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editors, setEditors] = useState<Record<string, DraftEditor>>({});
+  const [pinned, setPinned] = useState<Record<string, MailWorkspaceResult>>({});
+  const [chats, setChats] = useState<Record<string, MailChatState>>({});
+  const chatScope = useRef(Symbol());
   const mailbox = status?.connection.connected
     ? status.connection.mailbox?.toLowerCase()
     : undefined;
@@ -630,51 +729,134 @@ function MailWorkspace() {
   const [notice, setNotice] = useState('');
   const [checked, setChecked] = useState<Map<string, MailWorkspaceResult>>(new Map());
   const [folderPicker, setFolderPicker] = useState(false);
+  const [moveFolderItems, setMoveFolderItems] = useState<MailWorkspaceResult[] | null>(null);
   const { folder, chooseFolder } = useDoneFolder(user?.id, status?.connection.mailbox);
   const [moveSelection, setMoveSelection] = useState<MoveSelection | null>(null);
   const jobsQuery = useMailMoveJobs(!!status?.available && !!status.connection.connected);
   const jobs = jobsQuery.data?.jobs || [];
   const moveUnavailable = !!jobsQuery.isLoading || !!jobsQuery.isError || jobs.some(isMoveActive);
-  const resultQuery = useMailResults(
+  const mailboxAvailable = !!status?.available && !!status.connection.connected;
+  const inboxMode = state === 'open';
+  const inboxQuery = useMailInbox(mailboxAvailable && inboxMode);
+  const analysisQuery = useMailResults(
     { search: query, priority: priority || undefined, state },
-    !!status?.available && !!status?.connection.connected,
+    mailboxAvailable && !inboxMode,
   );
+  const resultQuery = inboxMode ? inboxQuery : analysisQuery;
+  const loadedRows = useMemo(() => {
+    const unique = new Map<string, MailWorkspaceResult>();
+    for (const page of resultQuery.data?.pages || [])
+      for (const row of page.results) unique.set(row.id, row);
+    return Array.from(unique.values());
+  }, [resultQuery.data]);
   const rows = useMemo(
-    () => resultQuery.data?.pages.flatMap((page) => page.results) || [],
-    [resultQuery.data],
+    () =>
+      inboxMode
+        ? loadedRows.filter((row) => {
+            if (priority && (row.analysisStatus === 'pending' || row.priority !== priority))
+              return false;
+            const text = query.trim().toLocaleLowerCase();
+            return (
+              !text ||
+              `${row.sender} ${row.subject} ${row.summary}`.toLocaleLowerCase().includes(text)
+            );
+          })
+        : loadedRows,
+    [loadedRows, inboxMode, priority, query],
   );
   const editor = selectedId ? currentEditor(selectedId) : undefined;
-  const selected = editor?.result || rows.find((row) => row.id === selectedId);
+  const selected =
+    editor?.result ||
+    loadedRows.find((row) => row.id === selectedId) ||
+    (selectedId ? pinned[selectedId] : undefined);
+  const activeChatScope = chatScope.current;
+  const openMail = (row: MailWorkspaceResult) => {
+    setPinned((previous) => ({ ...previous, [row.id]: row }));
+    setSelectedId(row.id);
+  };
   const selectionHasEditor = [...checked.keys()].some((id) => !!currentEditor(id));
-  const eligible = rows.filter((row) => !row.moveStatus);
+  const eligible = rows.filter((row) => !row.moveStatus && row.mailboxLocation !== 'sent');
   const selectable = eligible.slice(0, 100);
   const allSelected = selectable.length > 0 && selectable.every((row) => checked.has(row.id));
-  const requestMove = (items: MailWorkspaceResult[]) => {
+  const requestMove = (items: MailWorkspaceResult[], target = folder, immediately = false) => {
     if (
-      !folder ||
+      !target ||
       moveUnavailable ||
-      items.some((item) => !!item.moveStatus || !!currentEditor(item.id)) ||
+      moveSubmitting.current ||
+      items.some(
+        (item) => !!item.moveStatus || item.mailboxLocation === 'sent' || !!currentEditor(item.id),
+      ) ||
       !items.length ||
       items.length > 100 ||
       status?.settings.consentVersion !== consentVersion
     )
       return;
-    setMoveSelection({
+    const selection = {
       request: {
         requestId: crypto.randomUUID(),
-        folderId: folder.id,
+        folderId: target.id,
         items: items.map(({ id, revision }) => ({ id, revision })),
       },
-      folderName: folder.path || folder.displayName,
+      folderName: target.path || target.displayName,
       subjects: items.map((item) => item.subject),
+    };
+    if (!immediately) {
+      setMoveSelection(selection);
+      return;
+    }
+    moveSubmitting.current = true;
+    actions.enqueueMove.mutate(selection.request, {
+      onSuccess: () => {
+        setChecked((previous) => {
+          const next = new Map(previous);
+          for (const item of items) next.delete(item.id);
+          return next;
+        });
+        setNotice(t('com_ui_mail_bulk_queued'));
+      },
+      onError: () => setNotice(t('com_ui_mail_job_submit_error')),
+      onSettled: () => {
+        moveSubmitting.current = false;
+      },
     });
   };
   const previousRunning = useRef(false);
   const running = !!status?.activity.running || !!status?.activity.continuing;
   useEffect(() => {
+    chatScope.current = Symbol();
     setEditors({});
+    setPinned({});
+    setChats({});
     setSelectedId(null);
+    setChecked(new Map());
   }, [mailbox]);
+  useEffect(
+    () => () => {
+      chatScope.current = Symbol();
+    },
+    [],
+  );
+  const nextInboxCursor = inboxQuery.data?.pages.at(-1)?.nextCursor;
+  const {
+    fetchNextPage: fetchInboxNext,
+    isFetching: inboxFetching,
+    isError: inboxError,
+  } = inboxQuery;
+  const requestedInboxCursor = useRef<string>();
+  useEffect(() => {
+    if (!nextInboxCursor) requestedInboxCursor.current = undefined;
+    if (
+      !mailboxAvailable ||
+      !inboxMode ||
+      !nextInboxCursor ||
+      inboxFetching ||
+      inboxError ||
+      requestedInboxCursor.current === nextInboxCursor
+    )
+      return;
+    requestedInboxCursor.current = nextInboxCursor;
+    void fetchInboxNext().catch(() => undefined);
+  }, [mailboxAvailable, inboxMode, nextInboxCursor, inboxFetching, inboxError, fetchInboxNext]);
   useEffect(() => {
     if (search === query) return;
     const timer = setTimeout(() => {
@@ -744,13 +926,58 @@ function MailWorkspace() {
           setNotice('');
           return;
         }
-        if (key === 'e') {
-          if (checked.size) requestMove(Array.from(checked.values()));
-          else if (selected) requestMove([selected]);
+        if (key === 'e' || key === 'Shift+e') {
+          const items = checked.size ? Array.from(checked.values()) : [];
+          if (!items.length && selected) items.push(selected);
+          if (key === 'e') requestMove(items, folder, true);
+          else if (
+            items.length &&
+            !moveUnavailable &&
+            !items.some(
+              (item) =>
+                item.moveStatus || item.mailboxLocation === 'sent' || currentEditor(item.id),
+            ) &&
+            status.settings.consentVersion === consentVersion
+          ) {
+            setMoveFolderItems(items);
+            setFolderPicker(true);
+          }
+          return;
+        }
+        if (key === 'Shift+x') {
+          setChecked(allSelected ? new Map() : new Map(selectable.map((row) => [row.id, row])));
+          return;
+        }
+        if (key === 'r' || key === 'c' || key === 'o') {
+          if (!selected) return;
+          const action = { r: 'reply', c: 'chat', o: 'outlook' } as const;
+          detailControls.current?.[action[key]]();
+          return;
+        }
+        if (['1', '2', '3'].includes(key)) {
+          if (
+            !selected ||
+            editor ||
+            selected.mailboxLocation === 'sent' ||
+            actions.priority.isLoading ||
+            status.settings.consentVersion !== consentVersion
+          )
+            return;
+          actions.priority.mutate(
+            {
+              id: selected.id,
+              priority: ({ '1': 'important', '2': 'normal', '3': 'low' } as const)[
+                key as '1' | '2' | '3'
+              ],
+            },
+            {
+              onError: () => setNotice(t('com_ui_mail_error')),
+            },
+          );
           return;
         }
         if (key === 'x') {
-          if (!selected || selected.moveStatus) return;
+          if (!selected || selected.moveStatus || selected.mailboxLocation === 'sent') return;
           setChecked((previous) => {
             const next = new Map(previous);
             if (next.has(selected.id)) next.delete(selected.id);
@@ -763,7 +990,7 @@ function MailWorkspace() {
         const index = rows.findIndex((row) => row.id === selectedId);
         const offset = key === 'j' || key === 'ArrowDown' ? 1 : -1;
         const next = rows[index < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, index + offset))];
-        setSelectedId(next.id);
+        openMail(next);
         const button = rowButtons.current.get(next.id);
         button?.focus({ preventScroll: true });
         button?.scrollIntoView?.({ block: 'nearest' });
@@ -790,7 +1017,11 @@ function MailWorkspace() {
           </button>
           <button
             className="mail-button"
-            onClick={() => void actions.refresh()}
+            onClick={() => {
+              requestedInboxCursor.current = undefined;
+              void actions.refresh();
+              if (inboxMode) void inboxQuery.refresh();
+            }}
             aria-label={t('com_ui_mail_refresh')}
           >
             <RefreshCw size={16} />
@@ -944,6 +1175,11 @@ function MailWorkspace() {
               <option value="all">{t('com_ui_mail_all')}</option>
             </select>
             <span className="mail-count">{t('com_ui_mail_loaded', { count: rows.length })}</span>
+            {inboxMode && (inboxQuery.isFetching || inboxQuery.hasNextPage) && (
+              <span className="mail-muted" role="status">
+                {t('com_ui_mail_inbox_loading', { count: loadedRows.length })}
+              </span>
+            )}
           </div>
           <div className="mail-bulk-selection">
             <label>
@@ -1017,7 +1253,11 @@ function MailWorkspace() {
                         type="checkbox"
                         aria-label={t('com_ui_mail_select_one', { subject: row.subject })}
                         checked={checked.has(row.id)}
-                        disabled={!!row.moveStatus || (!checked.has(row.id) && checked.size >= 100)}
+                        disabled={
+                          !!row.moveStatus ||
+                          row.mailboxLocation === 'sent' ||
+                          (!checked.has(row.id) && checked.size >= 100)
+                        }
                         onChange={(event) =>
                           setChecked((previous) => {
                             const next = new Map(previous);
@@ -1034,7 +1274,7 @@ function MailWorkspace() {
                         else rowButtons.current.delete(row.id);
                       }}
                       className={`mail-row ${row.id === selectedId ? 'selected' : ''}`}
-                      onClick={() => setSelectedId(row.id)}
+                      onClick={() => openMail(row)}
                       aria-pressed={row.id === selectedId}
                     >
                       <div className="mail-row-top">
@@ -1044,16 +1284,28 @@ function MailWorkspace() {
                       <div className="mail-row-subject">
                         {row.subject || t('com_ui_mail_no_subject')}
                       </div>
-                      <p>{row.summary}</p>
-                      <div className="mail-row-bottom">
+                      <div className="mail-row-preview">
+                        <p>{row.summary}</p>
                         <span className={`mail-priority ${row.priority}`}>
-                          {t(priorities[row.priority])}
+                          {t(
+                            row.analysisStatus === 'pending'
+                              ? 'com_ui_mail_not_analyzed'
+                              : priorities[row.priority],
+                          )}
                         </span>
-                        <span>
-                          {row.moveStatus === 'completed'
-                            ? t('com_ui_mail_done')
-                            : t(draftStates[row.draftStatus])}
-                        </span>
+                        {row.moveStatus === 'completed' ? (
+                          <span title={t('com_ui_mail_done')} aria-label={t('com_ui_mail_done')}>
+                            <Check size={12} />
+                          </span>
+                        ) : null}
+                        {row.moveStatus !== 'completed' && row.draftStatus !== 'none' ? (
+                          <span
+                            title={t(draftStates[row.draftStatus])}
+                            aria-label={t(draftStates[row.draftStatus])}
+                          >
+                            <FileText size={12} />
+                          </span>
+                        ) : null}
                       </div>
                     </button>
                   </li>
@@ -1087,6 +1339,7 @@ function MailWorkspace() {
                     {t('com_ui_mail_list')}
                   </button>
                   <Detail
+                    ref={detailControls}
                     key={selected.id}
                     result={selected}
                     status={status}
@@ -1094,8 +1347,22 @@ function MailWorkspace() {
                     onMove={requestMove}
                     moveUnavailable={moveUnavailable}
                     editor={editor}
+                    chatState={chats[selected.id] || emptyMailChat()}
+                    onChatChange={(update) => {
+                      if (chatScope.current !== activeChatScope) return;
+                      setChats((previous) =>
+                        chatScope.current === activeChatScope
+                          ? {
+                              ...previous,
+                              [selected.id]: update(previous[selected.id] || emptyMailChat()),
+                            }
+                          : previous,
+                      );
+                    }}
+                    onOpen={openMail}
                     onEditorChange={(value) =>
                       setEditors((previous) => {
+                        if (chatScope.current !== activeChatScope) return previous;
                         const next = { ...previous };
                         if (value) next[selected.id] = value;
                         else delete next[selected.id];
@@ -1125,8 +1392,14 @@ function MailWorkspace() {
             <FolderPicker
               active
               chosen={folder}
-              onChoose={chooseFolder}
-              onClose={() => setFolderPicker(false)}
+              onChoose={(chosen) => {
+                if (moveFolderItems) requestMove(moveFolderItems, chosen);
+                else chooseFolder(chosen);
+              }}
+              onClose={() => {
+                setFolderPicker(false);
+                setMoveFolderItems(null);
+              }}
             />
           </div>
         </div>
