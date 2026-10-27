@@ -9,7 +9,7 @@ import type {
 import { MAIL_CONSENT_VERSION } from './types';
 import { MailAssistantError, resultRevision } from './engine';
 
-export const mailChatSchema = z
+export const mailChatSchema: z.ZodType<MailChatRequest> = z
   .object({
     revision: z.string().regex(/^[a-f0-9]{64}$/),
     message: z.string().trim().min(1).max(4000),
