@@ -315,7 +315,7 @@ function PersonalSettings({
           </p>
         )}
       </form>
-      <MailFollowupSettings />
+      {status.odooAvailable === true && <MailFollowupSettings />}
     </aside>
   );
 }
@@ -434,7 +434,7 @@ function Detail({
           {t('com_ui_mail_mark_done')}
         </button>
         <MailDraftRequest result={result} content={data} editing={editing} />
-        <MailFollowupAction result={result} />
+        {status.odooAvailable === true && <MailFollowupAction result={result} />}
       </div>
       {editing && <p className="mail-notice">{t('com_ui_mail_edit_before_move')}</p>}
       {result.moveStatus === 'uncertain' && (
@@ -839,6 +839,7 @@ function MailWorkspace() {
       <MoveProgress
         jobs={status?.connection.connected ? jobs : []}
         running={running}
+        odooAvailable={status?.odooAvailable === true}
         details={
           <>
             {status?.activity.history.mode !== 'off' &&

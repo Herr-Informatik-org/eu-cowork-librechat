@@ -141,9 +141,41 @@ describe('Mail assistant runtime boundaries', () => {
   });
   it('requires MCP use permission before exposing personal Odoo settings', async () => {
     const f = fixture();
+    f.deps.env!.MAIL_ASSISTANT_ODOO_ENABLED = 'true';
     await expect(createMailAssistantRuntime(f.deps)!.followup!.settings(owner)).rejects.toThrow(
       'MCP-Zugriff',
     );
+  });
+  it.each([undefined, 'false', '', 'TRUE', '1', 'true '])(
+    'keeps Odoo absent without exact deployment opt-in (%s), while mail remains available',
+    async (value) => {
+      const f = fixture();
+      if (value !== undefined) f.deps.env!.MAIL_ASSISTANT_ODOO_ENABLED = value;
+      const runtime = createMailAssistantRuntime(f.deps)!;
+      expect(runtime.followup).toBeUndefined();
+      expect(mailAssistantConfigurationStatus(f.deps.env)).toMatchObject({
+        enabled: true,
+        configured: true,
+        odooEnabled: false,
+      });
+      expect((await runtime.adapter.availability(owner)).available).toBe(true);
+      expect(runtime.engine.requestDraft).toEqual(expect.any(Function));
+    },
+  );
+  it('creates Odoo services only for an explicitly enabled valid CW01 runtime', () => {
+    const f = fixture();
+    f.deps.env!.MAIL_ASSISTANT_ODOO_ENABLED = 'true';
+    expect(createMailAssistantRuntime(f.deps)!.followup).toBeDefined();
+    expect(mailAssistantConfigurationStatus(f.deps.env).odooEnabled).toBe(true);
+    for (const override of [
+      { MAIL_ASSISTANT_ENABLED: 'false' },
+      { MAIL_ASSISTANT_INSTANCE: 'cw02' },
+      { MAIL_ASSISTANT_DATA_KEY: 'invalid' },
+    ]) {
+      const env = { ...f.deps.env, ...override };
+      expect(mailAssistantConfigurationStatus(env).odooEnabled).toBe(false);
+      expect(createMailAssistantRuntime({ ...f.deps, env })).toBeNull();
+    }
   });
   it('keeps hostile mail content in data and gives the model no operation or recipient authority', async () => {
     const f = fixture();
@@ -356,10 +388,15 @@ describe('Mail assistant runtime boundaries', () => {
     expect(mailAssistantConfigurationStatus(f.deps.env)).toEqual({
       enabled: true,
       configured: false,
+      odooEnabled: false,
       reason: expect.any(String),
     });
     expect(createMailAssistantRuntime(f.deps)).toBeNull();
-    expect(mailAssistantConfigurationStatus(baseEnv)).toEqual({ enabled: true, configured: true });
+    expect(mailAssistantConfigurationStatus(baseEnv)).toEqual({
+      enabled: true,
+      configured: true,
+      odooEnabled: false,
+    });
   });
   it.each(['ban', 'deny', 'unverify', 'remove'] as const)(
     'reloads current user restrictions (%s)',

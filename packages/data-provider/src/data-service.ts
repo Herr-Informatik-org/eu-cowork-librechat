@@ -51,7 +51,7 @@ import * as r from './roles';
 
 export const getMailWorkspaceAvailability = (
   signal?: AbortSignal,
-): Promise<{ available: boolean }> =>
+): Promise<{ available: boolean; odooAvailable?: boolean }> =>
   request.get(endpoints.mailWorkspace('/availability'), { signal });
 export const getMailWorkspaceStatus = (signal?: AbortSignal): Promise<MailWorkspaceStatus> =>
   request.get(endpoints.mailWorkspace('/status'), { signal });

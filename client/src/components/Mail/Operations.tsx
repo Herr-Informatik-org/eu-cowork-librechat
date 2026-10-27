@@ -101,10 +101,12 @@ export function MoveProgress({
   jobs,
   running,
   details,
+  odooAvailable = false,
 }: {
   jobs: MailWorkspaceMoveJob[];
   running: boolean;
   details: ReactNode;
+  odooAvailable?: boolean;
 }) {
   const t = useLocalize();
   const actions = useMailActions();
@@ -167,12 +169,12 @@ export function MoveProgress({
           {running ? t('com_ui_mail_running_short') : t('com_ui_mail_ready')}
           {running && <progress aria-label={t('com_ui_mail_analysis_progress')} />}
         </span>
-        {(pending.draft > 0 || pending.followup > 0) && (
+        {(pending.draft > 0 || (odooAvailable && pending.followup > 0)) && (
           <span className="mail-activity-pending" role="status">
             <Loader2 size={13} className="animate-spin" aria-hidden="true" />
             {[
               pending.draft > 0 ? t('com_ui_mail_draft_running_short') : '',
-              pending.followup > 0 ? t('com_ui_mail_followup_pending') : '',
+              odooAvailable && pending.followup > 0 ? t('com_ui_mail_followup_pending') : '',
             ]
               .filter(Boolean)
               .join(' · ')}

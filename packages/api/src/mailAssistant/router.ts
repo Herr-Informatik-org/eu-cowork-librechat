@@ -28,6 +28,10 @@ const safeRoute =
 
 export function createMailAssistantRouter(runtime: MailAssistantRuntime | null): Router {
   const router = Router();
+  const status = async (id: string) => ({
+    ...(await runtime!.engine.status(id)),
+    odooAvailable: !!runtime?.followup,
+  });
   router.use(json({ limit: '64kb' }));
   router.use((_req, res, next) => {
     res.set('Cache-Control', 'no-store');
@@ -38,11 +42,11 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
     safeRoute(async (req, res) => {
       const id = owner(req);
       if (!runtime) {
-        res.json({ available: false });
+        res.json({ available: false, odooAvailable: false });
         return;
       }
       await runtime.adapter.authorize(id);
-      res.json({ available: true });
+      res.json({ available: true, odooAvailable: !!runtime.followup });
     }),
   );
   router.get(
@@ -51,6 +55,7 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
       if (!runtime) {
         res.json({
           available: false,
+          odooAvailable: false,
           reason: 'Der Mail-Assistent ist in dieser Umgebung noch nicht freigegeben.',
           modelLabel: '',
           connection: { connected: false },
@@ -65,7 +70,7 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
         });
         return;
       }
-      res.json(await runtime.engine.status(owner(req)));
+      res.json(await status(owner(req)));
     }),
   );
   router.use((_req, res, next) => {
@@ -81,7 +86,7 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
     '/settings',
     safeRoute(async (req, res) => {
       await runtime!.engine.settings(owner(req), req.body);
-      res.json(await runtime!.engine.status(owner(req)));
+      res.json(await status(owner(req)));
     }),
   );
   router.get(
@@ -184,7 +189,7 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
     '/pause',
     safeRoute(async (req, res) => {
       await runtime!.engine.pause(owner(req));
-      res.json(await runtime!.engine.status(owner(req)));
+      res.json(await status(owner(req)));
     }),
   );
   router.delete(
@@ -195,7 +200,7 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
       await runtime!.followup?.clearPreviews(id);
       await runtime!.oauth.disconnect(id);
       await runtime!.engine.disconnect(id);
-      res.json(await runtime!.engine.status(id));
+      res.json(await status(id));
     }),
   );
   router.patch(
@@ -212,7 +217,7 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
         .regex(/^[a-zA-Z0-9_-]+$/)
         .parse(req.params.id);
       await runtime!.engine.priority(owner(req), id, body.priority);
-      res.json(await runtime!.engine.status(owner(req)));
+      res.json(await status(owner(req)));
     }),
   );
   router.get(

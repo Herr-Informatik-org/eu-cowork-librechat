@@ -75,20 +75,31 @@ interface ModelResponse {
 export function mailAssistantConfigurationStatus(env: NodeJS.ProcessEnv = process.env): {
   enabled: boolean;
   configured: boolean;
+  odooEnabled: boolean;
   reason?: string;
 } {
   const enabled = env.MAIL_ASSISTANT_ENABLED === 'true';
   if (!enabled)
-    return { enabled: false, configured: false, reason: 'Der Mail-Assistent ist deaktiviert.' };
+    return {
+      enabled: false,
+      configured: false,
+      odooEnabled: false,
+      reason: 'Der Mail-Assistent ist deaktiviert.',
+    };
   try {
     if (env.MAIL_ASSISTANT_INSTANCE !== 'cw01') throw new Error();
     readMailOAuthConfig(env);
     createMailCodec(env.MAIL_ASSISTANT_DATA_KEY ?? '');
-    return { enabled: true, configured: true };
+    return {
+      enabled: true,
+      configured: true,
+      odooEnabled: env.MAIL_ASSISTANT_ODOO_ENABLED === 'true',
+    };
   } catch {
     return {
       enabled: true,
       configured: false,
+      odooEnabled: false,
       reason: 'Die private CW01-Mail-Konfiguration ist unvollständig oder ungültig.',
     };
   }
@@ -534,6 +545,7 @@ export function createMailAssistantRuntime(
     codec,
   });
   const engine = createMailAssistantEngine({ store, adapter });
+  if (env.MAIL_ASSISTANT_ODOO_ENABLED !== 'true') return { engine, oauth, adapter };
   const followupIdentity = async (ownerId: string) => {
     const req = await fresh(ownerId);
     if (

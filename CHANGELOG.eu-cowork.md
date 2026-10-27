@@ -1,5 +1,15 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-27 — Mailbearbeitung unabhängig von Odoo ausrollen
+
+- Die Odoo-Aufgabenablage ist standardmässig ausgeschaltet. Nur der ausdrückliche
+  Schalter `MAIL_ASSISTANT_ODOO_ENABLED=true` gibt die vorbereitete Erweiterung frei;
+  Benutzer-, Profil- und Werkzeugrechte werden weiterhin separat geprüft.
+- Ohne Freigabe erscheinen keine Odoo-Einstellungen oder Ablageaktionen. Auch direkte
+  Anfragen zur Vorbereitung und Ablage bleiben gesperrt.
+- Mailanalyse, manuelle Antwortentwürfe, Anhangsmetadaten, Mehrfachauswahl und
+  Tastenkürzel funktionieren unabhängig davon. Der CWV01-Rollout benötigt kein ERP-Modul.
+
 ## 2026-10-27 — Isolierte Mailreleases und begrenzte Odoo-Vorschauen
 
 - Manuelle Image-Builds anderer Branches veröffentlichen nur ihren Commit-Tag.

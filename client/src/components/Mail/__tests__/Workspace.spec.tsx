@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { deserialize, serialize } from 'node:v8';
 import type {
   MailWorkspaceContent,
   MailWorkspaceResult,
@@ -62,10 +63,12 @@ jest.mock('~/hooks', () => ({
       ),
 }));
 jest.mock('../Followup', () => ({
-  MailFollowupSettings: () => null,
-  MailFollowupAction: () => null,
+  MailFollowupSettings: () => <span data-testid="odoo-settings" />,
+  MailFollowupAction: () => <span data-testid="odoo-action" />,
 }));
-jest.mock('../DraftRequest', () => ({ MailDraftRequest: () => null }));
+jest.mock('../DraftRequest', () => ({
+  MailDraftRequest: () => <span data-testid="draft-request" />,
+}));
 jest.mock('../Attachments', () => ({ MailAttachments: () => null }));
 jest.mock('~/data-provider/Mail', () => ({
   useMailPendingActions: () => mockPending,
@@ -84,6 +87,14 @@ jest.mock('~/data-provider/Mail', () => ({
   useMailFolders: () => ({ data: { folders: mockFolders } }),
   useMailActions: () => mockActions(),
 }));
+
+const originalStructuredClone = globalThis.structuredClone;
+beforeAll(() => {
+  globalThis.structuredClone ??= <T,>(value: T): T => deserialize(serialize(value)) as T;
+});
+afterAll(() => {
+  globalThis.structuredClone = originalStructuredClone;
+});
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -701,8 +712,35 @@ it('keeps character shortcuts out of draft editors and mail iframe focus', () =>
 
 it('keeps pending draft and task work visible while reading another mail', () => {
   mockPending = { draft: 1, followup: 1 };
+  mockStatus.odooAvailable = true;
   mount();
   chooseMail();
   expect(screen.getByText(/Entwurf wird erstellt/)).toBeVisible();
   expect(screen.getByRole('button', { name: 'Im neuen Chat überarbeiten' })).toBeEnabled();
+});
+
+it.each([undefined, false])(
+  'hides all Odoo controls without explicit availability (%s)',
+  (value) => {
+    mockStatus.odooAvailable = value;
+    mockPending = { draft: 1, followup: 1 };
+    mount();
+    chooseMail();
+    expect(screen.queryByTestId('odoo-action')).not.toBeInTheDocument();
+    expect(screen.getByTestId('draft-request')).toBeInTheDocument();
+    expect(screen.getByText(/Entwurf wird erstellt/)).toBeVisible();
+    expect(screen.queryByText(/Odoo-Auftrag läuft/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Einstellungen' }));
+    expect(screen.queryByTestId('odoo-settings')).not.toBeInTheDocument();
+  },
+);
+
+it('shows Odoo controls only when the server explicitly enables them', () => {
+  mockStatus.odooAvailable = true;
+  mount();
+  chooseMail();
+  expect(screen.getByTestId('odoo-action')).toBeInTheDocument();
+  expect(screen.getByTestId('draft-request')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Einstellungen' }));
+  expect(screen.getByTestId('odoo-settings')).toBeInTheDocument();
 });

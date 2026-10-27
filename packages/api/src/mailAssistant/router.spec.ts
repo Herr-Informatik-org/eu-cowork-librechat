@@ -269,6 +269,62 @@ describe('Personal mail HTTP boundary', () => {
         .expect(400);
     }
     expect(runtime.engine.move).toHaveBeenCalledTimes(1);
+    const base = '/api/agents/office/mail-assistant';
+    const followup = runtime.followup!;
+    const target = { profile: 'odoo-technik', mode: 'todo' };
+    await request(app)
+      .get(`${base}/followup/settings`)
+      .set('authorization', 'Bearer fixture')
+      .expect(200);
+    await request(app)
+      .get(`${base}/followup/projects?profile=odoo-technik&search=GL`)
+      .set('authorization', 'Bearer fixture')
+      .expect(200);
+    await request(app)
+      .put(`${base}/followup/settings`)
+      .set('authorization', 'Bearer fixture')
+      .send(target)
+      .expect(200);
+    for (const path of ['/status', '/availability']) {
+      const result = await request(app)
+        .get(`${base}${path}`)
+        .set('authorization', 'Bearer fixture')
+        .expect(200);
+      expect(result.body.odooAvailable).toBe(true);
+    }
+    delete runtime.followup;
+    for (const path of ['/followup/settings', '/followup/projects?profile=odoo-technik&search=GL'])
+      await request(app).get(`${base}${path}`).set('authorization', 'Bearer fixture').expect(400);
+    await request(app)
+      .put(`${base}/followup/settings`)
+      .set('authorization', 'Bearer fixture')
+      .send(target)
+      .expect(400);
+    await request(app)
+      .post(`${base}/results/result-1/followup/prepare`)
+      .set('authorization', 'Bearer fixture')
+      .send({ revision })
+      .expect(400);
+    await request(app)
+      .post(`${base}/followup/commit`)
+      .set('authorization', 'Bearer fixture')
+      .send(commit)
+      .expect(400);
+    for (const action of ['settings', 'saveSettings', 'projects', 'prepare', 'commit'] as const)
+      expect(followup[action]).toHaveBeenCalledTimes(1);
+    for (const path of ['/status', '/availability']) {
+      const result = await request(app)
+        .get(`${base}${path}`)
+        .set('authorization', 'Bearer fixture')
+        .expect(200);
+      expect(result.body.odooAvailable).toBe(false);
+    }
+    await request(app)
+      .post(`${base}/results/result-1/draft-request`)
+      .set('authorization', 'Bearer fixture')
+      .send(draftRequest)
+      .expect(200);
+    expect(runtime.engine.requestDraft).toHaveBeenCalledTimes(2);
   });
   it('returns complete safe defaults while the feature is off', async () => {
     const result = await request(setup())
@@ -277,6 +333,7 @@ describe('Personal mail HTTP boundary', () => {
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({
       available: false,
+      odooAvailable: false,
       settings: defaultMailSettings(),
       connection: { connected: false },
       activity: { running: false, pending: 0 },

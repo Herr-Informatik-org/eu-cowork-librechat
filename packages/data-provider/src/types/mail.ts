@@ -28,6 +28,7 @@ export type MailWorkspaceResult = {
 };
 export type MailWorkspaceStatus = {
   available: boolean;
+  odooAvailable?: boolean;
   reason?: string;
   modelLabel: string;
   modelFingerprint?: string;
