@@ -1,5 +1,21 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-27 — Kompakte Mailbearbeitung und gezielte Folgeaktionen auf CW01
+
+- Eine schmale gemeinsame Statuszeile und Tastenkürzel lassen mehr Platz für Liste
+  und Mailinhalt. Verschiebeaktionen benötigen weiterhin eine Bestätigung.
+- Die Analyse ordnet Mails ein, erstellt aber keine automatischen Antwortentwürfe
+  mehr. Ein persönlicher Klick mit optionalen Zusatzangaben erzeugt den Entwurf;
+  ein geprüfter Link öffnet ihn in Outlook. Bestehende Entwürfe bleiben geschützt.
+- Anhänge werden ausschliesslich als Metadaten angezeigt. Auch eingebettete Bilder
+  werden nicht mehr automatisch geladen oder dekodiert; Dateiinhalte gehen nicht ans Modell.
+- Persönliche Odoo-Ziele verwenden ausschliesslich freigegebene bestehende Profile.
+  Zielwahl und Kundenthema-Suche sind vorbereitet. Schreiben bleibt gesperrt, bis
+  eine sichere Odoo-Brückenerweiterung auch Versand durch Mailvorlagen und Automationen
+  verhindert. Kein Fallback auf allgemeine Schreibwerkzeuge und keine zusätzlichen Profilrechte.
+- Der Folgehelfer ist auf den bestätigten CW01-Stand begrenzt. Outlook-Add-in,
+  Entra-Freigaben, Graph-Scopes und andere Instanzen bleiben unverändert.
+
 ## 2026-10-27 — Mailaufträge und abgesicherte HTML-Vorschau für CW01
 
 - Einzelne oder bis zu 100 ausdrücklich ausgewählte Originalmails werden als

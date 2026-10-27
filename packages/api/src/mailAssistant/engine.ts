@@ -18,6 +18,9 @@ import type {
   StoredMailMoveJob,
   MailMoveJob,
   MailMoveRequest,
+  MailDraftRequest,
+  MailDraftResponse,
+  MailAttachments,
 } from './types';
 import { MAIL_CATEGORIES, MAIL_CONSENT_VERSION } from './types';
 import {
@@ -27,14 +30,14 @@ import {
   nextMailRun,
   mailHistoryStart,
 } from './schedule';
-import { MailGraphError } from './graph';
+import { MailGraphError, safeOutlookUrl } from './graph';
 import { activeMoveJob, publicMoveJob, summarizeMove } from './moves';
 
 export class MailAssistantError extends Error {}
 class ManualMovePending extends Error {}
 class ManualLeaseBusy extends MailAssistantError {}
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const resultRevision = (result: StoredMailResult) =>
+export const resultRevision = (result: StoredMailResult): string =>
   hash([result.messageId, result.conversationId, result.sourceHash]);
 const sourceHash = (mail: MailMessage) =>
   hash([mail.id, mail.subject, mail.sender, mail.receivedAt, mail.body]);
@@ -256,68 +259,8 @@ export function createMailAssistantEngine({
     result.categoryApplied = true;
     await guard();
     await store.putResult(owner, token, result);
-    if (
-      uncertain ||
-      analysis.action !== 'reply' ||
-      priority === 'low' ||
-      existing ||
-      !analysis.draft.trim()
-    )
-      return;
-    // Re-read the thread immediately before creation: an employee may have answered or started a draft meanwhile.
-    const fresh = await graph.thread(mail.conversationId);
-    if (
-      !fresh.complete ||
-      fresh.messages.some(
-        (item) =>
-          item.isDraft ||
-          (item.sentByUser &&
-            Date.parse(item.sentAt ?? item.receivedAt) >= Date.parse(mail.receivedAt)) ||
-          (!item.sentByUser &&
-            !item.isDraft &&
-            Date.parse(item.receivedAt) > Date.parse(mail.receivedAt)),
-      )
-    ) {
-      result.draftStatus = 'existing';
-      result.questions = [
-        ...result.questions.slice(0, 9),
-        'Der Gesprächsverlauf wurde inzwischen verändert. Bitte in Outlook prüfen.',
-      ];
-      await store.putResult(owner, token, result);
-      return;
-    }
-    await adapter.audit(owner, 'draft_requested', resultId);
-    await guard();
-    if (!(await store.reserveDraft(owner, token, resultId, sourceHash(mail)))) return;
-    // Persist before POST. A crash or ambiguous response can never trigger a blind second creation.
-    result.operationPending = true;
-    result.draftStatus = 'uncertain';
-    await store.putResult(owner, token, result);
-    try {
-      const created = await graph.createReply(mail.id, analysis.draft);
-      await store.finishDraft(owner, resultId, sourceHash(mail), 'completed');
-      result.draftId = created.id;
-      result.draftUrl = created.url;
-      result.draftStatus = 'created';
-      if (created.warnings?.length) result.draftWarnings = created.warnings;
-      result.operationPending = false;
-      await adapter.audit(owner, 'draft_completed', resultId);
-      await guard();
-      await store.putResult(owner, token, result);
-      if (created.stop)
-        throw new MailAssistantError(
-          'Die Mailprüfung wurde nach einem unvollständigen Entwurf angehalten. Bitte prüfe seine Hinweise in Outlook.',
-        );
-    } catch (error) {
-      if (error instanceof MailGraphError && !error.uncertain) {
-        await store.finishDraft(owner, resultId, sourceHash(mail), 'failed');
-        result.operationPending = false;
-        result.draftStatus = 'error';
-        await store.putResult(owner, token, result);
-      }
-      throw error;
-    }
   }
+
   async function run(owner: string, scheduled = false, resumeRevision?: number) {
     await available(owner);
     const initial = await store.read(owner);
@@ -563,7 +506,7 @@ export function createMailAssistantEngine({
       ticking = false;
     }
   }
-  async function content(owner: string, id: string): Promise<MailResultContent> {
+  async function readContext(owner: string, id: string) {
     await adapter.authorize(owner);
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id))
       throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
@@ -609,6 +552,14 @@ export function createMailAssistantEngine({
         );
     };
     await guard();
+    return {
+      result,
+      connection: { mailbox: connection.mailbox, generation: connection.generation },
+      guard,
+    };
+  }
+  async function content(owner: string, id: string): Promise<MailResultContent> {
+    const { result, connection, guard } = await readContext(owner, id);
     await adapter.audit(owner, 'result_content_requested', id);
     const graph = await adapter.graph(owner, guard);
     try {
@@ -634,7 +585,11 @@ export function createMailAssistantEngine({
       };
       await guard();
       if (result.draftId || result.draftStatus !== 'none') response.draftUnavailable = true;
-      if (result.draftId && result.draftStatus === 'created' && !result.operationPending) {
+      if (
+        result.draftId &&
+        ['created', 'existing', 'stale'].includes(result.draftStatus) &&
+        !result.operationPending
+      ) {
         try {
           const draft = await graph.message(result.draftId);
           await guard();
@@ -644,13 +599,14 @@ export function createMailAssistantEngine({
             draft.conversationId === result.conversationId
           ) {
             response.draft = {
+              ...(safeOutlookUrl(draft.messageUrl) && { url: safeOutlookUrl(draft.messageUrl) }),
               subject: draft.subject,
               body: draft.body,
               bodyTruncated: draft.bodyTruncated === true,
               preview: await graph.preview(result.draftId),
             };
             await guard();
-            if (!result.editPending) {
+            if (result.draftStatus === 'created' && !result.editPending) {
               try {
                 const editable = await graph.editableReply(result.draftId);
                 await guard();
@@ -681,6 +637,23 @@ export function createMailAssistantEngine({
       }
       throw error;
     }
+  }
+  async function attachments(owner: string, id: string): Promise<MailAttachments> {
+    const { result, guard } = await readContext(owner, id);
+    await adapter.audit(owner, 'attachment_metadata_requested', id);
+    const graph = await adapter.graph(owner, guard);
+    const message = await graph.message(result.messageId);
+    if (
+      message.id !== result.messageId ||
+      message.conversationId !== result.conversationId ||
+      message.isDraft
+    )
+      throw new MailAssistantError('Die Originalmail passt nicht mehr zum Mail-Vorgang.');
+    const metadata = await graph.attachments(result.messageId);
+    await guard();
+    await adapter.audit(owner, 'attachment_metadata_read', id);
+    await guard();
+    return metadata;
   }
   async function folders(owner: string, parentId?: string): Promise<MailFolder[]> {
     await adapter.authorize(owner);
@@ -1094,6 +1067,156 @@ export function createMailAssistantEngine({
     }
   }
 
+  async function requestDraft(
+    owner: string,
+    id: string,
+    input: MailDraftRequest,
+  ): Promise<MailDraftResponse> {
+    const parsed = z
+      .object({
+        revision: z.string().regex(/^[a-f0-9]{64}$/),
+        instructions: z.string().max(4000),
+        requestId: z.string().uuid(),
+      })
+      .strict()
+      .parse(input);
+    await available(owner);
+    if (!adapter.analyzeDraft)
+      throw new MailAssistantError('Die manuelle Entwurfserstellung ist nicht verfügbar.');
+    const generate = adapter.analyzeDraft;
+    return manualOperation(owner, id, async (result, token, guard) => {
+      if (parsed.revision !== resultRevision(result))
+        throw new MailAssistantError(
+          'Die Mail wurde inzwischen geändert. Bitte neu laden und erneut auswählen.',
+        );
+      const barrier = await store.draftState(owner, id);
+      if (
+        result.operationPending ||
+        result.draftStatus === 'uncertain' ||
+        barrier?.state === 'pending'
+      )
+        return { status: 'uncertain' as const };
+      const graph = await adapter.graph(owner, guard);
+      const response = (status: MailDraftResponse['status'], url?: string): MailDraftResponse => ({
+        status,
+        ...(safeOutlookUrl(url) && { draftUrl: safeOutlookUrl(url) }),
+      });
+      const rememberExisting = async (draft: MailMessage) => {
+        await adapter.audit(owner, 'manual_draft_existing', id);
+        await guard();
+        await store.putResult(owner, token, {
+          ...result,
+          draftId: draft.id,
+          draftUrl: safeOutlookUrl(draft.messageUrl),
+          draftStatus:
+            result.draftId === draft.id && result.draftStatus === 'created'
+              ? 'created'
+              : 'existing',
+        });
+        return response('existing', draft.messageUrl);
+      };
+      const mail = await graph.message(result.messageId);
+      if (
+        mail.id !== result.messageId ||
+        mail.conversationId !== result.conversationId ||
+        mail.isDraft ||
+        sourceHash(mail) !== result.sourceHash
+      )
+        throw new MailAssistantError(
+          'Die Originalmail passt nicht mehr zum Mail-Vorgang. Bitte neu prüfen.',
+        );
+      const thread = await graph.thread(mail.conversationId);
+      const existing = thread.messages.find((item) => item.isDraft);
+      if (existing) return rememberExisting(existing);
+      if (
+        result.draftId ||
+        (barrier?.state === 'completed' && barrier.sourceHash === result.sourceHash)
+      )
+        return response('existing', result.draftUrl);
+      const context = thread.messages
+        .filter((item) => !item.isDraft)
+        .sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt));
+      if (!context.some((item) => item.id === mail.id)) context.push(mail);
+      const changed = (messages: MailMessage[]) =>
+        messages.some(
+          (item) =>
+            item.isDraft ||
+            (item.sentByUser &&
+              Date.parse(item.sentAt ?? item.receivedAt) >= Date.parse(mail.receivedAt)) ||
+            (!item.sentByUser &&
+              !item.isDraft &&
+              Date.parse(item.receivedAt) > Date.parse(mail.receivedAt)),
+        );
+      if (
+        !thread.complete ||
+        context.length > 20 ||
+        context.some((item) => item.bodyTruncated) ||
+        JSON.stringify(context).length > 55000 ||
+        changed(context)
+      )
+        throw new MailAssistantError(
+          'Der Gesprächsverlauf ist unvollständig oder wurde bereits fortgesetzt. Bitte in Outlook prüfen.',
+        );
+      await adapter.audit(owner, 'manual_draft_requested', id);
+      await guard();
+      const text = z
+        .string()
+        .trim()
+        .min(1)
+        .max(12000)
+        .parse(await generate(owner, context, parsed.instructions, guard));
+      await guard();
+      const fresh = await graph.thread(mail.conversationId);
+      const newDraft = fresh.messages.find((item) => item.isDraft);
+      if (newDraft) return rememberExisting(newDraft);
+      const fingerprint = (messages: MailMessage[]) => hash(messages.map(sourceHash).sort());
+      if (
+        !fresh.complete ||
+        changed(fresh.messages) ||
+        fingerprint(fresh.messages) !== fingerprint(thread.messages)
+      )
+        throw new MailAssistantError(
+          'Der Gesprächsverlauf wurde inzwischen geändert. Es wurde kein Entwurf erstellt. Bitte neu laden.',
+        );
+      const current = await graph.message(result.messageId);
+      if (sourceHash(current) !== result.sourceHash)
+        throw new MailAssistantError(
+          'Die Originalmail wurde inzwischen geändert. Es wurde kein Entwurf erstellt.',
+        );
+      await guard();
+      if (!(await store.reserveDraft(owner, token, id, result.sourceHash, true)))
+        throw new MailAssistantError(
+          'Diese Entwurfserstellung wurde bereits angefordert. Bitte neu laden.',
+        );
+      result.operationPending = true;
+      result.draftStatus = 'uncertain';
+      await store.putResult(owner, token, result);
+      try {
+        const created = await graph.createReply(result.messageId, text);
+        await store.finishDraft(owner, id, result.sourceHash, 'completed');
+        result.draftId = created.id;
+        result.draftUrl = safeOutlookUrl(created.url);
+        result.draftStatus = 'created';
+        result.operationPending = false;
+        if (created.warnings?.length) result.draftWarnings = created.warnings;
+        await guard();
+        await store.putResult(owner, token, result);
+        await adapter.audit(owner, 'manual_draft_completed', id);
+        return response('created', created.url);
+      } catch (error) {
+        if (error instanceof MailGraphError && !error.uncertain) {
+          await store.finishDraft(owner, id, result.sourceHash, 'failed');
+          result.operationPending = false;
+          result.draftStatus = 'error';
+          await store.putResult(owner, token, result);
+          throw error;
+        }
+        if (error instanceof MailGraphError && error.uncertain) return response('uncertain');
+        throw error;
+      }
+    });
+  }
+
   async function editDraft(
     owner: string,
     id: string,
@@ -1223,6 +1346,8 @@ export function createMailAssistantEngine({
     folders,
     move,
     editDraft,
+    requestDraft,
+    attachments,
     async status(owner: string) {
       await adapter.authorize(owner);
       const availability = await adapter.availability(owner);

@@ -72,6 +72,7 @@ export type MailWorkspaceContent = {
   };
   draft?: {
     subject: string;
+    url?: string;
     body: string;
     bodyTruncated: boolean;
     preview?: MailWorkspacePreview;
@@ -116,4 +117,58 @@ export type MailWorkspaceMoveJob = {
   }[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type MailFollowupProfile = 'odoo-administrator' | 'odoo-admin' | 'odoo-technik';
+export type MailFollowupTarget = {
+  profile: MailFollowupProfile;
+  mode: 'project' | 'todo';
+  projectId?: number;
+};
+export type MailFollowupSettings = MailFollowupTarget & {
+  projectName?: string;
+  userName: string;
+};
+export type MailFollowupConfiguration = {
+  profiles: { id: MailFollowupProfile; label: string }[];
+  settings: MailFollowupSettings | null;
+};
+export type MailFollowupOutcome = {
+  taskId?: number;
+  taskUrl?: string;
+  action?: 'created' | 'appended';
+  status: 'completed' | 'uncertain';
+};
+export type MailFollowupPreview =
+  | {
+      token: string;
+      title: string;
+      body: string;
+      targetLabel: string;
+      writeAvailable: boolean;
+      writeReason?: string;
+      candidates: { id: number; name: string; customer?: string }[];
+      suggestedTaskId?: number;
+      expiresAt: string;
+      existing?: never;
+    }
+  | { existing: MailFollowupOutcome };
+export type MailDraftRequest = {
+  revision: string;
+  instructions: string;
+  requestId: string;
+};
+export type MailDraftOutcome = {
+  status: 'created' | 'existing' | 'uncertain';
+  draftUrl?: string;
+};
+export type MailAttachments = {
+  attachments: {
+    id: string;
+    name: string;
+    contentType: string;
+    size: number;
+    isInline: boolean;
+  }[];
+  hasMore: boolean;
 };

@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { Check, FolderCheck, Loader2 } from 'lucide-react';
 import type { MailWorkspaceMoveJob, MailWorkspaceMoveRequest } from 'librechat-data-provider';
-import { useMailActions } from '~/data-provider/Mail';
+import { useMailActions, useMailPendingActions } from '~/data-provider/Mail';
 import { useLocalize } from '~/hooks';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 
@@ -66,7 +67,9 @@ function JobProgress({
           </button>
         )}
       </div>
-      <progress aria-label={t('com_ui_mail_jobs')} max={job.total || 1} value={processed} />
+      {!active && (
+        <progress aria-label={t('com_ui_mail_jobs')} max={job.total || 1} value={processed} />
+      )}
       {!active && (
         <>
           <p>
@@ -94,43 +97,113 @@ function JobProgress({
     </article>
   );
 }
-export function MoveProgress({ jobs }: { jobs: MailWorkspaceMoveJob[] }) {
+export function MoveProgress({
+  jobs,
+  running,
+  details,
+}: {
+  jobs: MailWorkspaceMoveJob[];
+  running: boolean;
+  details: ReactNode;
+}) {
   const t = useLocalize();
   const actions = useMailActions();
-  if (!jobs.length) return null;
+  const pending = useMailPendingActions();
   const active = jobs.filter(isMoveActive);
   const history = jobs.filter((job) => !isMoveActive(job)).slice(0, 5);
+  const hints = jobs.reduce(
+    (count, job) =>
+      count +
+      job.items.filter((item) => ['failed', 'uncertain', 'cancelled'].includes(item.status)).length,
+    0,
+  );
   return (
-    <section className="mail-jobs" aria-label={t('com_ui_mail_jobs')}>
-      {active.map((job) => (
-        <JobProgress
-          key={job.id}
-          job={job}
-          onStop={() => actions.pause.mutate()}
-          stopping={actions.pause.isLoading}
-        />
-      ))}
+    <section className="mail-activity" aria-label={t('com_ui_mail_activity')}>
+      <div className="mail-activity-row">
+        {active.map((job) => {
+          const processed = job.items.filter(
+            (item) => item.status !== 'queued' && item.status !== 'running',
+          ).length;
+          return (
+            <div
+              key={job.id}
+              className="mail-activity-move"
+              role="status"
+              aria-label={t('com_ui_mail_jobs')}
+            >
+              <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+              <span>{t(jobLabels[job.status])}</span>
+              <strong>
+                {processed}/{job.total}
+              </strong>
+              <progress aria-label={t('com_ui_mail_jobs')} max={job.total || 1} value={processed} />
+              <span className="mail-job-target" title={job.folderName}>
+                {job.folderName || t('com_ui_mail_job_validate_folder')}
+              </span>
+              <button
+                className="mail-button mail-job-stop"
+                disabled={actions.pause.isLoading}
+                onClick={() => actions.pause.mutate()}
+                aria-label={t('com_ui_mail_stop_jobs')}
+                title={t('com_ui_mail_stop_jobs')}
+              >
+                {t('com_ui_mail_stop_short')}
+              </button>
+            </div>
+          );
+        })}
+        {!active.length && history.length > 0 && (
+          <span className="mail-activity-completed" role="status">
+            <Check size={13} aria-hidden="true" />
+            {t('com_ui_mail_activity_moved', { count: history[0].completed })}
+          </span>
+        )}
+        <span
+          className="mail-activity-analysis"
+          role="status"
+          title={running ? t('com_ui_mail_running') : undefined}
+        >
+          <span className={`mail-status-dot ${running ? 'running' : ''}`} />
+          {running ? t('com_ui_mail_running_short') : t('com_ui_mail_ready')}
+          {running && <progress aria-label={t('com_ui_mail_analysis_progress')} />}
+        </span>
+        {(pending.draft > 0 || pending.followup > 0) && (
+          <span className="mail-activity-pending" role="status">
+            <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+            {[
+              pending.draft > 0 ? t('com_ui_mail_draft_running_short') : '',
+              pending.followup > 0 ? t('com_ui_mail_followup_pending') : '',
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </span>
+        )}
+        <details className="mail-activity-details">
+          <summary className={hints ? 'mail-activity-warning' : ''}>
+            {hints
+              ? t('com_ui_mail_activity_hints', { count: hints })
+              : t('com_ui_mail_activity_details')}
+          </summary>
+          <div className="mail-activity-popover">
+            <div className="mail-activity-stats">{details}</div>
+            {active.map((job) => (
+              <JobProgress key={job.id} job={job} />
+            ))}
+            {history.length > 0 && (
+              <section aria-label={t('com_ui_mail_job_history')}>
+                <h3>{t('com_ui_mail_job_history')}</h3>
+                {history.map((job) => (
+                  <JobProgress key={job.id} job={job} />
+                ))}
+              </section>
+            )}
+          </div>
+        </details>
+      </div>
       {actions.pause.isError && (
         <p className="mail-error" role="alert">
           {t('com_ui_mail_stop_error')}
         </p>
-      )}
-      {history.length > 0 && (
-        <details className="mail-job-history">
-          <summary>
-            {active.length ? t('com_ui_mail_job_history') : t(jobLabels[history[0].status])}
-            {' · '}
-            {t('com_ui_mail_job_counts', {
-              succeeded: history[0].completed,
-              failed: history[0].items.filter((item) =>
-                ['failed', 'uncertain', 'cancelled'].includes(item.status),
-              ).length,
-            })}
-          </summary>
-          {history.map((job) => (
-            <JobProgress key={job.id} job={job} />
-          ))}
-        </details>
       )}
     </section>
   );
@@ -150,7 +223,13 @@ export function MoveDialog({
   const cancel = useRef<HTMLButtonElement>(null);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const previous = document.activeElement;
+    const workspace = container.current?.closest<HTMLElement>('.mail-workspace');
     cancel.current?.focus();
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+      else if (workspace?.isConnected) workspace.focus();
+    };
   }, []);
   return (
     <div className="mail-move-overlay">

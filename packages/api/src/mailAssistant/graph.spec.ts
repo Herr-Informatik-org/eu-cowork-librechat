@@ -31,6 +31,7 @@ describe('fixed personal Graph adapter', () => {
     expect(init.redirect).toBe('error');
     expect(init.headers.Prefer).toContain('ImmutableId');
     expect(Object.keys(graph).sort()).toEqual([
+      'attachments',
       'categorize',
       'createReply',
       'editDraft',
@@ -45,6 +46,53 @@ describe('fixed personal Graph adapter', () => {
       'preview',
       'thread',
     ]);
+  });
+  test('attachment listing returns bounded metadata and never reads bytes or follows links', async () => {
+    const { graph, request } = setup();
+    request.mockResolvedValueOnce(
+      response({
+        value: [
+          {
+            id: 'attachment',
+            name: 'invoice.pdf',
+            contentType: 'application/pdf',
+            size: 4300,
+            isInline: false,
+            contentBytes: 'ignored-payload',
+            sourceUrl: 'https://attacker.test/private',
+          },
+        ],
+        '@odata.nextLink': 'https://attacker.test/more',
+      }),
+    );
+    await expect(graph.attachments(row.id)).resolves.toEqual({
+      attachments: [
+        {
+          id: 'attachment',
+          name: 'invoice.pdf',
+          contentType: 'application/pdf',
+          size: 4300,
+          isInline: false,
+        },
+      ],
+      hasMore: true,
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][0]).toBe(
+      'https://graph.microsoft.com/v1.0/me/messages/id%2F%2B%3D%3D/attachments?$select=id,name,contentType,size,isInline&$top=100',
+    );
+    expect(request.mock.calls[0][1].method).toBe('GET');
+  });
+  test.each([
+    { id: '', name: 'x', contentType: 'text/plain', size: 1, isInline: false },
+    { id: 'x', name: 'x', contentType: 'text/plain', size: -1, isInline: false },
+    { id: 'x', name: 'x', contentType: 'text/plain', size: 1, isInline: 'false' },
+    null,
+  ])('invalid attachment metadata fails closed without byte reads', async (entry) => {
+    const { graph, request } = setup();
+    request.mockResolvedValueOnce(response({ value: [entry] }));
+    await expect(graph.attachments('mail')).rejects.toMatchObject({ status: 502 });
+    expect(request).toHaveBeenCalledTimes(1);
   });
   test.each([
     'https://attacker.test/v1.0/me/mailFolders/inbox/messages/delta',

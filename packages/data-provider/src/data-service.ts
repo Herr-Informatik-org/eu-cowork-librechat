@@ -10,6 +10,15 @@ import type {
   MailWorkspacePriority,
   MailWorkspaceMoveRequest,
   MailWorkspaceMoveJob,
+  MailFollowupProfile,
+  MailFollowupTarget,
+  MailFollowupSettings,
+  MailFollowupConfiguration,
+  MailFollowupPreview,
+  MailFollowupOutcome,
+  MailDraftRequest,
+  MailDraftOutcome,
+  MailAttachments,
 } from './types/mail';
 import type { TFileConfig } from './file-config';
 import type {
@@ -97,6 +106,41 @@ export const enqueueMailWorkspaceMove = (
   request.post(endpoints.mailWorkspace('/move-jobs'), input);
 export const saveMailWorkspaceDraft = (id: string, body: string, revision: string): Promise<void> =>
   request.put(endpoints.mailWorkspaceResult(id, 'draft'), { body, revision });
+
+export const getMailFollowupSettings = (signal?: AbortSignal): Promise<MailFollowupConfiguration> =>
+  request.get(endpoints.mailWorkspace('/followup/settings'), { signal });
+export const getMailFollowupProjects = (
+  profile: MailFollowupProfile,
+  search: string,
+  signal?: AbortSignal,
+): Promise<{ projects: { id: number; name: string }[] }> =>
+  request.get(
+    endpoints.mailWorkspace(`/followup/projects?${new URLSearchParams({ profile, search })}`),
+    { signal },
+  );
+export const saveMailFollowupSettings = (
+  target: MailFollowupTarget,
+): Promise<MailFollowupSettings> =>
+  request.put(endpoints.mailWorkspace('/followup/settings'), target);
+export const prepareMailFollowup = (id: string, revision: string): Promise<MailFollowupPreview> =>
+  request.post(endpoints.mailWorkspace(`/results/${encodeURIComponent(id)}/followup/prepare`), {
+    revision,
+  });
+export const commitMailFollowup = (input: {
+  token: string;
+  taskId?: number;
+}): Promise<MailFollowupOutcome> =>
+  request.post(endpoints.mailWorkspace('/followup/commit'), input);
+export const requestMailWorkspaceDraft = (
+  id: string,
+  input: MailDraftRequest,
+): Promise<MailDraftOutcome> =>
+  request.post(endpoints.mailWorkspaceResult(id, 'draft-request'), input);
+export const getMailWorkspaceAttachments = (
+  id: string,
+  signal?: AbortSignal,
+): Promise<MailAttachments> =>
+  request.get(endpoints.mailWorkspaceResult(id, 'attachments'), { signal });
 
 export const getBrainHistory = (signal?: AbortSignal): Promise<BrainHistoryStatus> =>
   request.get(endpoints.brainHistory(), { signal });

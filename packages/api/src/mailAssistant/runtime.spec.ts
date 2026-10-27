@@ -99,6 +99,52 @@ function fixture() {
   };
 }
 describe('Mail assistant runtime boundaries', () => {
+  it('generates a draft only for explicit user instructions, without granting tools', async () => {
+    const f = fixture();
+    const payloads: Record<string, unknown>[] = [];
+    f.deps.fetch = async (_input, init) => {
+      payloads.push(JSON.parse(String(init?.body)));
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: JSON.stringify({ draft: 'Guten Tag, der Termin ist bestätigt.' }),
+              },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 100, completion_tokens: 20 },
+        }),
+      );
+    };
+    const runtime = createMailAssistantRuntime(f.deps)!;
+    expect(
+      await runtime.adapter.analyzeDraft!(
+        owner,
+        [],
+        'Der Termin ist bestätigt.',
+        async () => undefined,
+      ),
+    ).toBe('Guten Tag, der Termin ist bestätigt.');
+    const messages = payloads[0].messages as { role: string; content: string }[];
+    expect(JSON.parse(messages[1].content)).toEqual({
+      userInstructions: 'Der Termin ist bestätigt.',
+      emails: [],
+    });
+    expect(payloads[0]).not.toHaveProperty('tools');
+    await expect(
+      runtime.adapter.analyzeDraft!(owner, [], 'x'.repeat(4001), async () => undefined),
+    ).rejects.toThrow();
+    expect(payloads).toHaveLength(1);
+  });
+  it('requires MCP use permission before exposing personal Odoo settings', async () => {
+    const f = fixture();
+    await expect(createMailAssistantRuntime(f.deps)!.followup!.settings(owner)).rejects.toThrow(
+      'MCP-Zugriff',
+    );
+  });
   it('keeps hostile mail content in data and gives the model no operation or recipient authority', async () => {
     const f = fixture();
     const source: MailMessage = {
@@ -332,7 +378,7 @@ describe('Mail assistant runtime boundaries', () => {
       createMailAssistantRuntime(f.deps)!.adapter.audit(owner, 'draft_requested'),
     ).rejects.toThrow();
   });
-  it('uses only the explicit model, preserves privacy restrictions and accounts before returning a draft', async () => {
+  it('uses only the explicit model and discards unsolicited drafts during classification', async () => {
     const f = fixture();
     f.setRoute('https://openrouter.ai/api/v1');
     const calls: { url: string; body: Record<string, unknown> }[] = [];
@@ -362,7 +408,7 @@ describe('Mail assistant runtime boundaries', () => {
     f.deps.createTransaction = jest.fn().mockResolvedValue(undefined);
     const runtime = createMailAssistantRuntime(f.deps)!;
     const result = await runtime.adapter.analyze(owner, [], async () => undefined);
-    expect(result.draft).toBe('Guten Tag');
+    expect(result.draft).toBe('');
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe('https://openrouter.ai/api/v1/chat/completions');
     expect(calls[0].body.model).toBe('fixture-model');

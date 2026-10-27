@@ -341,10 +341,42 @@ export function createMailGraph({
   return {
     preview: createPreviewOperation({
       call,
-      raw: (path, timeout) => raw(path, 'GET', undefined, undefined, 'text', timeout),
       id,
       beforeRequest,
     }),
+    async attachments(messageId) {
+      const data = await call(
+        `/v1.0/me/messages/${id(messageId)}/attachments?$select=id,name,contentType,size,isInline&$top=100`,
+      );
+      if (!Array.isArray(data.value) || data.value.length > 100) throw new MailGraphError(502);
+      const attachments = data.value.map((item: Record<string, unknown>) => {
+        if (
+          !item ||
+          typeof item !== 'object' ||
+          typeof item.id !== 'string' ||
+          !item.id ||
+          item.id.length > 2048 ||
+          typeof item.name !== 'string' ||
+          item.name.length > 255 ||
+          typeof item.contentType !== 'string' ||
+          item.contentType.length > 255 ||
+          !Number.isSafeInteger(item.size) ||
+          (item.size as number) < 0 ||
+          typeof item.isInline !== 'boolean'
+        )
+          throw new MailGraphError(502);
+        return {
+          id: item.id,
+          name: item.name,
+          contentType: item.contentType,
+          size: item.size as number,
+          isInline: item.isInline,
+        };
+      });
+      if (data['@odata.nextLink'] != null && typeof data['@odata.nextLink'] !== 'string')
+        throw new MailGraphError(502);
+      return { attachments, hasMore: !!data['@odata.nextLink'] };
+    },
     async folders(parentId) {
       const path = parentId
         ? `/v1.0/me/mailFolders/${id(parentId)}/childFolders`
