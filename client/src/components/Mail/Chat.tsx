@@ -4,6 +4,7 @@ import type { MailWorkspaceResult } from 'librechat-data-provider';
 import { useMailChat, useMailCorrespondence } from '~/data-provider/Mail';
 import { useLocalize } from '~/hooks';
 import { mailActionError } from './Followup';
+import { buildMailChatRequest } from './context';
 
 type Message = {
   role: 'user' | 'assistant';
@@ -68,7 +69,6 @@ export function MailChat({
     const message = state.input.trim();
     if (!message || state.pending || submitting.current) return;
     submitting.current = true;
-    const history = state.messages.slice(-12).map(({ role, content }) => ({ role, content }));
     onChange((previous) => ({
       ...previous,
       pending: true,
@@ -76,13 +76,15 @@ export function MailChat({
       error: undefined,
     }));
     try {
-      const response = await mutation.mutateAsync({
+      const request = buildMailChatRequest({
         revision: result.revision,
         message,
-        history,
+        history: state.messages,
         draft,
         includeCorrespondence: state.includeCorrespondence,
       });
+      if (!request) throw new Error();
+      const response = await mutation.mutateAsync(request);
       onChange((previous) => ({
         ...previous,
         pending: false,

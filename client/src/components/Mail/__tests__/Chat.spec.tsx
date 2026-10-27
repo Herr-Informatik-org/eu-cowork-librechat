@@ -151,3 +151,32 @@ it('loads correspondence only after opening the section and keeps search/paging 
   fireEvent.click(screen.getByRole('button', { name: 'Weitere Mails laden' }));
   expect(mockNext).toHaveBeenCalledTimes(1);
 });
+
+it('keeps a long answer fully visible while bounding it for the next question', async () => {
+  const answer = `Ausführliche Antwort ${'A'.repeat(9000)}`;
+  mockChat.mockResolvedValueOnce({ answer, sources: [] });
+  render(<Harness />);
+  fireEvent.change(screen.getByRole('textbox'), {
+    target: { value: 'Bitte ausführlich erklären' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Fragen' }));
+  expect(await screen.findByText(answer)).toBeVisible();
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Bitte kürzer' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Fragen' }));
+  await waitFor(() => expect(mockChat).toHaveBeenCalledTimes(2));
+  expect(mockChat.mock.calls[1][0].history[1]).toEqual({
+    role: 'assistant',
+    content: answer.slice(0, 4000),
+  });
+  expect(JSON.stringify(mockChat.mock.calls[1][0]).length).toBeLessThanOrEqual(24000);
+  expect(screen.getByText(answer)).toBeVisible();
+});
+
+it('retains the question and skips the request if its serialized payload cannot fit', async () => {
+  const input = '\u0000'.repeat(4000);
+  render(<Harness initial={{ ...emptyMailChat(), input }} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Fragen' }));
+  expect(await screen.findByRole('alert')).toBeVisible();
+  expect(screen.getByRole('textbox')).toHaveValue(input);
+  expect(mockChat).not.toHaveBeenCalled();
+});
