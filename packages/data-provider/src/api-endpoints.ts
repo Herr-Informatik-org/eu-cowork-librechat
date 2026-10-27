@@ -503,6 +503,16 @@ export const brainGraph = (params: import('./types/brain').BrainGraphParams = {}
   }
   return `${BASE_URL}/api/brain/graph${query.size ? `?${query}` : ''}`;
 };
+export const mailWorkspace = (path = '') => `${BASE_URL}/api/mail${path}`;
+export const mailWorkspaceResults = (params: import('./types/mail').MailWorkspaceParams = {}) => {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) query.set(key, value);
+  }
+  return `${mailWorkspace('/results')}${query.size ? `?${query}` : ''}`;
+};
+export const mailWorkspaceResult = (id: string, action: string) =>
+  mailWorkspace(`/results/${encodeURIComponent(id)}/${encodeURIComponent(action)}`);
 export const brainNodes = () => `${BASE_URL}/api/brain/nodes`;
 export const brainStatus = () => `${BASE_URL}/api/brain/status`;
 export const brainHistory = () => `${BASE_URL}/api/brain/history`;

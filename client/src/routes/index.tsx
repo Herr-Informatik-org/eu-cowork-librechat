@@ -131,6 +131,11 @@ export const router = createBrowserRouter(
               element: <ChatRoute />,
             },
             {
+              path: 'mail',
+              lazy: () =>
+                import('~/components/Mail/Workspace').then((m) => ({ Component: m.default })),
+            },
+            {
               path: 'search',
               element: <Search />,
             },

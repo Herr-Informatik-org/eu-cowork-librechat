@@ -12,7 +12,7 @@ describe('personal mail privacy and working windows', () => {
     ...defaultMailSettings(),
     enabled: true,
     mode: 'scheduled' as const,
-    consentVersion: '2026-10-25',
+    consentVersion: '2026-10-27',
   };
   test('requires explicit consent and rejects target mailbox/user input', () => {
     expect(defaultMailSettings().enabled).toBe(false);

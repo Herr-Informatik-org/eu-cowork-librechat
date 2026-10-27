@@ -1,5 +1,25 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-27 — Persönlicher Mailbereich für CW01
+
+- Neue Webansicht mit Suche, Prioritäts- und Erledigt-Filtern, eigener Ordnerauswahl,
+  Klartextvorschau und geschützter Entwurfsbearbeitung. Ein neuer Chat übernimmt
+  den gewählten Kontext nur flüchtig und sendet ihn nicht ungefragt ab.
+- Einzelne Originalmails lassen sich nach ausdrücklicher Bestätigung in einen
+  eigenen bestehenden Ordner verschieben. Auswahlversion, Benutzerbindung,
+  atomare Sperren und Audit schützen manuelle Änderungen auch bei pausierter KI.
+- Neue Antwortentwürfe erhalten den nativen zitierten Verlauf, Kategorien und
+  kopierte Dateianhänge. Dateien gelangen nicht zum Modell. Nicht unterstützte
+  Anhänge und unklare Schreibausgänge werden sichtbar; vorhandene Entwürfe werden
+  nicht ungefragt nachgerüstet oder überschrieben. Es gibt keinen Sendeaufruf.
+- Gewählte Prüfungen laufen in gespeicherten 20er-Paketen bis zum Ende weiter;
+  Pause, geänderte Einstellungen, Fehler und die geplanten Arbeitszeiten stoppen
+  die Fortsetzung. Bestehende Freigaben benötigen die persönliche Bestätigung
+  der erweiterten Verarbeitung vom 27.10.2026.
+- Die Webliste lädt alle innerhalb von 30 Tagen erhaltenen Ergebnisse seitenweise.
+  Statt der früheren stillen 200-Ergebnis-Verdrängung hält ein Speicherlimit die
+  Verarbeitung sichtbar an. Freigabe weiterhin ausschliesslich intern für CW01.
+
 ## 2026-10-26 — Mail-Vorgang persönlich zur Überarbeitung öffnen
 
 - Der Mail-Assistent kann die eigene Originalmail und einen weiterhin gültigen

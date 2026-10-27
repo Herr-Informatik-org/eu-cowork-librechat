@@ -1,3 +1,4 @@
+import { BSON } from 'mongodb';
 import type { Collection, Document } from 'mongodb';
 import type {
   MailCheckpoint,
@@ -8,6 +9,7 @@ import type {
 } from './types';
 import type { MailCodec } from './privateData';
 import { nextMailRun, mailHistoryStart } from './schedule';
+import { MAIL_CONSENT_VERSION } from './types';
 
 interface Row extends Omit<MailJob, 'checkpoint' | 'history'> {
   _id: string;
@@ -51,7 +53,13 @@ export function createMongoMailStore({
   };
   const fieldsFor = (owner: string, fields: Partial<MailJob>): Document => {
     const result: Document = {};
-    for (const name of ['lastRunAt', 'nextRunAt', 'lastError', 'leaseUntil'] as const) {
+    for (const name of [
+      'lastRunAt',
+      'nextRunAt',
+      'lastError',
+      'leaseUntil',
+      'continuation',
+    ] as const) {
       if (fields[name] !== undefined) result[name] = fields[name];
     }
     if (fields.checkpoint)
@@ -110,6 +118,7 @@ export function createMongoMailStore({
               $unset: {
                 leaseToken: '',
                 leaseUntil: '',
+                continuation: '',
                 ...(!history && (changed || selection.mode === 'off') && { historyEncrypted: '' }),
               },
             },
@@ -128,7 +137,7 @@ export function createMongoMailStore({
         {
           $set: { 'settings.enabled': false, nextRunAt: '' },
           $inc: { revision: 1 },
-          $unset: { leaseToken: '', leaseUntil: '' },
+          $unset: { leaseToken: '', leaseUntil: '', continuation: '' },
         },
       );
     },
@@ -141,8 +150,9 @@ export function createMongoMailStore({
         .find(
           {
             'settings.enabled': true,
-            'settings.mode': 'scheduled',
+            'settings.consentVersion': MAIL_CONSENT_VERSION,
             $and: [
+              { $or: [{ 'settings.mode': 'scheduled' }, { 'continuation.mode': 'manual' }] },
               {
                 $or: [
                   { nextRunAt: { $lte: now.toISOString() } },
@@ -176,24 +186,31 @@ export function createMongoMailStore({
         },
       ]);
     },
-    async claim(ownerId, token, now) {
+    async claim(ownerId, token, now, manual = false, revision) {
       const row = await collection().findOneAndUpdate(
         {
           _id: ownerId,
           ownerId,
-          'settings.enabled': true,
+          ...(revision !== undefined && { revision }),
+          ...(manual
+            ? { 'settings.consentVersion': MAIL_CONSENT_VERSION }
+            : { 'settings.enabled': true }),
           $or: [{ leaseToken: { $exists: false } }, { leaseUntil: { $lt: now } }],
         },
         {
-          $set: { leaseToken: token, leaseUntil: new Date(now.getTime() + 120_000), lastError: '' },
+          $set: {
+            leaseToken: token,
+            leaseUntil: new Date(now.getTime() + 120_000),
+            ...(!manual && { lastError: '' }),
+          },
         },
         { returnDocument: 'after' },
       );
       if (!row) return null;
       const cutoff = now.getTime() - 30 * 86400_000;
-      const stale = Object.entries(row.results ?? {})
-        .sort(([, a], [, b]) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .filter(([, value], index) => index >= 200 || new Date(value.updatedAt).getTime() < cutoff);
+      const stale = Object.entries(row.results ?? {}).filter(
+        ([, value]) => new Date(value.updatedAt).getTime() < cutoff,
+      );
       if (stale.length)
         await collection().updateOne(
           { _id: ownerId, ownerId, leaseToken: token },
@@ -207,7 +224,7 @@ export function createMongoMailStore({
       return (
         (
           await collection().updateOne(
-            { _id: ownerId, ownerId, leaseToken: token, 'settings.enabled': true },
+            { _id: ownerId, ownerId, leaseToken: token },
             { $set: fieldsFor(ownerId, fields) },
           )
         ).matchedCount === 1
@@ -231,7 +248,6 @@ export function createMongoMailStore({
       return Object.entries(row?.results ?? {})
         .filter(([, value]) => new Date(value.updatedAt).getTime() >= cutoff)
         .sort(([, a], [, b]) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .slice(0, 200)
         .map(([id, result]) =>
           codec.open<StoredMailResult>(ownerId, `result:${id}`, result.encrypted),
         );
@@ -249,46 +265,30 @@ export function createMongoMailStore({
     },
     async putResult(ownerId, token, result) {
       if (!/^[a-f0-9]{64}$/.test(result.id)) throw new Error('Ungültiger Mail-Vorgang.');
-      const write = await collection().updateOne(
-        { _id: ownerId, ownerId, leaseToken: token, 'settings.enabled': true },
-        [
-          {
-            $set: {
-              [`results.${result.id}`]: {
-                $literal: {
-                  encrypted: codec.seal(ownerId, `result:${result.id}`, result),
-                  updatedAt: new Date(),
-                },
-              },
-            },
-          },
-          {
-            $set: {
-              results: {
-                $arrayToObject: {
-                  $slice: [
-                    {
-                      $sortArray: {
-                        input: { $objectToArray: '$results' },
-                        sortBy: { 'v.updatedAt': -1, k: 1 },
-                      },
-                    },
-                    200,
-                  ],
-                },
-              },
-            },
-          },
-        ],
-      );
+      const binding = { _id: ownerId, ownerId, leaseToken: token };
+      const row = await collection().findOne(binding);
+      if (!row) throw new Error('Die persönliche Verarbeitung wurde angehalten.');
+      const entry = {
+        encrypted: codec.seal(ownerId, `result:${result.id}`, result),
+        updatedAt: new Date(),
+      };
+      const proposed = { ...row, results: { ...row.results, [result.id]: entry } };
+      // Keep headroom for encrypted cursors and settings; never silently evict visible work.
+      if (BSON.calculateObjectSize(proposed) > 12 * 1024 * 1024)
+        throw new Error(
+          'Der Speicher für Mail-Ergebnisse ist voll. Bitte die Administration informieren.',
+        );
+      const write = await collection().updateOne(binding, {
+        $set: { [`results.${result.id}`]: entry },
+      });
       if (!write.matchedCount) throw new Error('Die persönliche Verarbeitung wurde angehalten.');
     },
     async draftState(ownerId, conversationKey) {
       const row = await operations().findOne({ _id: conversationKey, ownerId });
       return row ? { sourceHash: row.sourceHash, state: row.state } : null;
     },
-    async reserveDraft(ownerId, token, conversationKey, sourceHash) {
-      const lease = { _id: ownerId, ownerId, leaseToken: token, 'settings.enabled': true };
+    async reserveDraft(ownerId, token, conversationKey, sourceHash, retryFailed = false) {
+      const lease = { _id: ownerId, ownerId, leaseToken: token };
       const finishReservation = async (): Promise<boolean> => {
         if (await collection().findOne(lease)) return true;
         // A disconnect may purge both collections between the lease read and reservation write.
@@ -303,7 +303,11 @@ export function createMongoMailStore({
       };
       if (!(await collection().findOne(lease))) return false;
       const old = await operations().findOne({ _id: conversationKey, ownerId });
-      if (old?.state === 'pending' || old?.sourceHash === sourceHash) return false;
+      if (
+        old?.state === 'pending' ||
+        (old?.sourceHash === sourceHash && !(retryFailed && old.state === 'failed'))
+      )
+        return false;
       if (old) {
         const reserved =
           (

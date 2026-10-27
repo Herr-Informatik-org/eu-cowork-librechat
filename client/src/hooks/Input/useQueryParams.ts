@@ -21,6 +21,7 @@ import {
 import { useAuthContext, useAgentsMap, useDefaultConvo, useSubmitMessage } from '~/hooks';
 import { startupConfigKey, useGetAgentByIdQuery } from '~/data-provider';
 import { useChatContext, useChatFormContext } from '~/Providers';
+import { consumeMailChat } from '~/components/Mail/handoff';
 import store from '~/store';
 
 const PROJECT_ID_SEARCH_PARAM = 'projectId';
@@ -50,6 +51,7 @@ export default function useQueryParams({
 }: {
   textAreaRef: React.RefObject<HTMLTextAreaElement>;
 }) {
+  const { user } = useAuthContext();
   const maxAttempts = 50;
   const attemptsRef = useRef(0);
   const MAX_SETTINGS_WAIT_MS = 3000;
@@ -249,8 +251,12 @@ export default function useQueryParams({
       });
 
       // Support both 'prompt' and 'q' as query parameters, with 'prompt' taking precedence
-      const decodedPrompt = queryParams.prompt || queryParams.q || '';
-      const shouldAutoSubmit = queryParams.submit?.toLowerCase() === 'true';
+      const mailReview = queryParams.mailReview;
+      const decodedPrompt = mailReview
+        ? consumeMailChat(user?.id || '', mailReview) || ''
+        : queryParams.prompt || queryParams.q || '';
+      const shouldAutoSubmit = !mailReview && queryParams.submit?.toLowerCase() === 'true';
+      delete queryParams.mailReview;
       delete queryParams.prompt;
       delete queryParams.q;
       delete queryParams.submit;
@@ -359,6 +365,7 @@ export default function useQueryParams({
     };
   }, [
     searchParams,
+    user?.id,
     methods,
     textAreaRef,
     newQueryConvo,

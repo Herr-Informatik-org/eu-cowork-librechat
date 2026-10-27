@@ -54,7 +54,7 @@ describe('Personal mail HTTP boundary', () => {
       (await request(app).get('/api/agents/office/mail-assistant/results/result-1/content')).status,
     ).toBe(401);
   });
-  it('uses authenticated ownership for bounded result content and disables response caching', async () => {
+  it('binds content, folder choices and explicit mutations to the authenticated owner', async () => {
     const content = jest.fn(async () => ({
       resultId: 'result-1',
       mailbox: 'person@example.invalid',
@@ -69,6 +69,10 @@ describe('Personal mail HTTP boundary', () => {
     const runtime: MailAssistantRuntime = {
       engine: {
         content,
+        results: jest.fn(),
+        folders: jest.fn(),
+        move: jest.fn(),
+        editDraft: jest.fn(),
         status: jest.fn(),
         settings: jest.fn(),
         run: jest.fn(),
@@ -126,6 +130,41 @@ describe('Personal mail HTTP boundary', () => {
       .set('authorization', 'Bearer fixture');
     expect(failure.status).toBe(400);
     expect(failure.text).not.toContain('provider-private-token');
+    const revision = 'a'.repeat(64);
+    await request(app)
+      .get('/api/agents/office/mail-assistant/folders?parentId=own-folder')
+      .set('authorization', 'Bearer fixture')
+      .expect(200);
+    expect(runtime.engine.folders).toHaveBeenCalledWith(owner, 'own-folder');
+    await request(app)
+      .post('/api/agents/office/mail-assistant/results/result-1/move')
+      .set('authorization', 'Bearer fixture')
+      .send({ folderId: 'own-folder', revision })
+      .expect(200);
+    expect(runtime.engine.move).toHaveBeenCalledWith(owner, 'result-1', 'own-folder', revision);
+    await request(app)
+      .put('/api/agents/office/mail-assistant/results/result-1/draft')
+      .set('authorization', 'Bearer fixture')
+      .send({ body: 'Explicit edited reply', revision })
+      .expect(204);
+    expect(runtime.engine.editDraft).toHaveBeenCalledWith(
+      owner,
+      'result-1',
+      'Explicit edited reply',
+      revision,
+    );
+    for (const extra of [
+      { ownerId: 'someone-else' },
+      { messageId: 'arbitrary-graph-id' },
+      { send: true },
+    ]) {
+      await request(app)
+        .post('/api/agents/office/mail-assistant/results/result-1/move')
+        .set('authorization', 'Bearer fixture')
+        .send({ folderId: 'own-folder', revision, ...extra })
+        .expect(400);
+    }
+    expect(runtime.engine.move).toHaveBeenCalledTimes(1);
   });
   it('returns complete safe defaults while the feature is off', async () => {
     const result = await request(setup())

@@ -1,4 +1,5 @@
 const fs = require('fs').promises;
+const express = require('express');
 const mongoose = require('mongoose');
 const {
   createOfficeRouter,
@@ -9,7 +10,13 @@ const {
   restoreTenantContextFromReq,
 } = require('@librechat/api');
 const { ResourceType, PermissionBits } = require('librechat-data-provider');
-const { checkBan, uaParser, configMiddleware, createFileLimiters } = require('~/server/middleware');
+const {
+  requireJwtAuth,
+  checkBan,
+  uaParser,
+  configMiddleware,
+  createFileLimiters,
+} = require('~/server/middleware');
 const { findAccessibleResources } = require('~/server/services/PermissionService');
 const { createAgentRouter } = require('./agents');
 const {
@@ -21,6 +28,8 @@ const { createMulterInstance } = require('./files/multer');
 const images = require('./files/images');
 const db = require('~/models');
 const { getAppConfig } = require('~/server/services/Config');
+
+let webRouter;
 
 async function initialize() {
   const upload = await createMulterInstance();
@@ -62,6 +71,13 @@ async function initialize() {
     },
   });
   mailAssistant?.engine.start();
+  webRouter = express.Router();
+  webRouter.use(
+    requireJwtAuth,
+    checkBan,
+    configMiddleware,
+    createMailAssistantRouter(mailAssistant),
+  );
   return createOfficeRouter({
     mailAssistantRouter: createMailAssistantRouter(mailAssistant),
     mailAssistantCallbackRouter: createMailAssistantCallbackRouter(mailAssistant),
@@ -107,4 +123,9 @@ async function initialize() {
   });
 }
 
-module.exports = { initialize };
+function web() {
+  if (!webRouter) throw new Error('Der Mail-Bereich wurde noch nicht initialisiert.');
+  return webRouter;
+}
+
+module.exports = { initialize, web };

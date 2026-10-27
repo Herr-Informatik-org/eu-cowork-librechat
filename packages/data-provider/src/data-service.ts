@@ -1,4 +1,14 @@
 import type { AxiosResponse } from 'axios';
+import type {
+  MailWorkspaceStatus,
+  MailWorkspaceSettings,
+  MailWorkspaceContent,
+  MailWorkspaceFolder,
+  MailWorkspaceParams,
+  MailWorkspacePage,
+  MailWorkspaceResult,
+  MailWorkspacePriority,
+} from './types/mail';
 import type { TFileConfig } from './file-config';
 import type {
   BrainGraph,
@@ -27,6 +37,56 @@ import * as config from './config';
 import request from './request';
 import * as s from './schemas';
 import * as r from './roles';
+
+export const getMailWorkspaceAvailability = (
+  signal?: AbortSignal,
+): Promise<{ available: boolean }> =>
+  request.get(endpoints.mailWorkspace('/availability'), { signal });
+export const getMailWorkspaceStatus = (signal?: AbortSignal): Promise<MailWorkspaceStatus> =>
+  request.get(endpoints.mailWorkspace('/status'), { signal });
+export const getMailWorkspaceResults = (
+  params: MailWorkspaceParams,
+  signal?: AbortSignal,
+): Promise<MailWorkspacePage> => request.get(endpoints.mailWorkspaceResults(params), { signal });
+export const getMailWorkspaceContent = (
+  id: string,
+  signal?: AbortSignal,
+): Promise<MailWorkspaceContent> =>
+  request.get(endpoints.mailWorkspaceResult(id, 'content'), { signal });
+export const getMailWorkspaceFolders = (
+  parentId?: string,
+  signal?: AbortSignal,
+): Promise<{ folders: MailWorkspaceFolder[] }> =>
+  request.get(
+    endpoints.mailWorkspace(
+      `/folders${parentId ? `?parentId=${encodeURIComponent(parentId)}` : ''}`,
+    ),
+    { signal },
+  );
+export const connectMailWorkspace = (): Promise<{ authorizationUrl: string }> =>
+  request.post(endpoints.mailWorkspace('/connect'), {});
+export const saveMailWorkspaceSettings = (
+  settings: MailWorkspaceSettings,
+): Promise<MailWorkspaceStatus> => request.put(endpoints.mailWorkspace('/settings'), settings);
+export const runMailWorkspace = (): Promise<{ accepted: true }> =>
+  request.post(endpoints.mailWorkspace('/run'), {});
+export const pauseMailWorkspace = (): Promise<MailWorkspaceStatus> =>
+  request.post(endpoints.mailWorkspace('/pause'), {});
+export const disconnectMailWorkspace = (): Promise<MailWorkspaceStatus> =>
+  request.delete(endpoints.mailWorkspace('/connection'));
+export const prioritizeMailWorkspaceResult = (
+  id: string,
+  priority: MailWorkspacePriority,
+): Promise<MailWorkspaceStatus> =>
+  request.patch(endpoints.mailWorkspaceResult(id, 'priority'), { priority });
+export const moveMailWorkspaceResult = (
+  id: string,
+  folderId: string,
+  revision: string,
+): Promise<{ result: MailWorkspaceResult }> =>
+  request.post(endpoints.mailWorkspaceResult(id, 'move'), { folderId, revision });
+export const saveMailWorkspaceDraft = (id: string, body: string, revision: string): Promise<void> =>
+  request.put(endpoints.mailWorkspaceResult(id, 'draft'), { body, revision });
 
 export const getBrainHistory = (signal?: AbortSignal): Promise<BrainHistoryStatus> =>
   request.get(endpoints.brainHistory(), { signal });

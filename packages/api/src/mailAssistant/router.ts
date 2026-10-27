@@ -27,11 +27,23 @@ const safeRoute =
 
 export function createMailAssistantRouter(runtime: MailAssistantRuntime | null): Router {
   const router = Router();
-  router.use(json({ limit: '8kb' }));
+  router.use(json({ limit: '64kb' }));
   router.use((_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
   });
+  router.get(
+    '/availability',
+    safeRoute(async (req, res) => {
+      const id = owner(req);
+      if (!runtime) {
+        res.json({ available: false });
+        return;
+      }
+      await runtime.adapter.authorize(id);
+      res.json({ available: true });
+    }),
+  );
   router.get(
     '/status',
     safeRoute(async (req, res) => {
@@ -133,6 +145,68 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
     }),
   );
   router.get(
+    '/results',
+    safeRoute(async (req, res) => {
+      const query = z
+        .object({
+          cursor: z.string().max(1024).optional(),
+          search: z.string().max(200).optional(),
+          priority: z.enum(['important', 'normal', 'low']).optional(),
+          state: z.enum(['open', 'done', 'all']).optional(),
+        })
+        .strict()
+        .parse(req.query);
+      res.json(await runtime!.engine.results(owner(req), query));
+    }),
+  );
+  router.get(
+    '/folders',
+    safeRoute(async (req, res) => {
+      const query = z
+        .object({ parentId: z.string().min(1).max(2048).optional() })
+        .strict()
+        .parse(req.query);
+      res.json({ folders: await runtime!.engine.folders(owner(req), query.parentId) });
+    }),
+  );
+  router.post(
+    '/results/:id/move',
+    safeRoute(async (req, res) => {
+      const id = z
+        .string()
+        .regex(/^[a-zA-Z0-9_-]{1,128}$/)
+        .parse(req.params.id);
+      const body = z
+        .object({
+          folderId: z.string().min(1).max(2048),
+          revision: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .strict()
+        .parse(req.body);
+      res.json({
+        result: await runtime!.engine.move(owner(req), id, body.folderId, body.revision),
+      });
+    }),
+  );
+  router.put(
+    '/results/:id/draft',
+    safeRoute(async (req, res) => {
+      const id = z
+        .string()
+        .regex(/^[a-zA-Z0-9_-]{1,128}$/)
+        .parse(req.params.id);
+      const body = z
+        .object({
+          body: z.string().min(1).max(12000),
+          revision: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .strict()
+        .parse(req.body);
+      await runtime!.engine.editDraft(owner(req), id, body.body, body.revision);
+      res.status(204).end();
+    }),
+  );
+  router.get(
     '/results/:id/content',
     safeRoute(async (req, res) => {
       const id = z
@@ -175,7 +249,7 @@ export function createMailAssistantCallbackRouter(runtime: MailAssistantRuntime 
       .status(success ? 200 : 400)
       .type('html')
       .send(
-        `<!doctype html><html lang="de"><meta charset="utf-8"><title>Persönlicher Mail-Assistent</title><h1>${success ? 'Postfach verbunden' : 'Postfach nicht verbunden'}</h1><p>${success ? 'Du kannst dieses Fenster schliessen und im Outlook-Add-in den Status aktualisieren. Die Verarbeitung beginnt erst nach deiner persönlichen Freigabe.' : 'Bitte schliesse dieses Fenster und verbinde dein eigenes Microsoft-Konto erneut. Das Konto muss zu deiner bestätigten Cowork-E-Mail-Adresse gehören.'}</p></html>`,
+        `<!doctype html><html lang="de"><meta charset="utf-8"><title>Persönlicher Mail-Assistent</title><h1>${success ? 'Postfach verbunden' : 'Postfach nicht verbunden'}</h1><p>${success ? 'Du kannst dieses Fenster schliessen und in Cowork oder im Outlook-Add-in den Status aktualisieren. Die Verarbeitung beginnt erst nach deiner persönlichen Freigabe.' : 'Bitte schliesse dieses Fenster und verbinde dein eigenes Microsoft-Konto erneut. Das Konto muss zu deiner bestätigten Cowork-E-Mail-Adresse gehören.'}</p></html>`,
       );
   });
   return router;

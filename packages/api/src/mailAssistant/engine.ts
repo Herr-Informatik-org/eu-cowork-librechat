@@ -9,6 +9,9 @@ import type {
   MailPriority,
   MailResult,
   MailResultContent,
+  MailResultQuery,
+  MailResultPage,
+  MailFolder,
   MailRuntimeAdapter,
   MailStore,
   StoredMailResult,
@@ -25,6 +28,8 @@ import { MailGraphError } from './graph';
 
 export class MailAssistantError extends Error {}
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const resultRevision = (result: StoredMailResult) =>
+  hash([result.messageId, result.conversationId, result.sourceHash]);
 const sourceHash = (mail: MailMessage) =>
   hash([mail.id, mail.subject, mail.sender, mail.receivedAt, mail.body]);
 const insideHistory = (mail: MailMessage, history: MailHistoryCheckpoint) =>
@@ -50,9 +55,15 @@ function publicResult(value: StoredMailResult): MailResult {
     categoryApplied: _category,
     draftId: _draft,
     operationPending: _pending,
+    moveDestination: _destination,
+    editPending: _edit,
     ...result
   } = value;
-  return { ...result, ...(value.operationPending && { draftStatus: 'uncertain' as const }) };
+  return {
+    ...result,
+    revision: resultRevision(value),
+    ...(value.operationPending && { draftStatus: 'uncertain' as const }),
+  };
 }
 
 /** The model proposes data only. This deterministic engine owns every allowed mailbox mutation. */
@@ -123,6 +134,7 @@ export function createMailAssistantEngine({
       return;
     const resultId = hash([owner, mail.conversationId]);
     const previous = await store.result(owner, resultId);
+    if (previous?.moveStatus && previous.messageId === mail.id) return;
     const barrier = await store.draftState(owner, resultId);
     const uncertain =
       barrier?.state === 'pending' ||
@@ -274,10 +286,15 @@ export function createMailAssistantEngine({
       result.draftId = created.id;
       result.draftUrl = created.url;
       result.draftStatus = 'created';
+      if (created.warnings?.length) result.draftWarnings = created.warnings;
       result.operationPending = false;
       await adapter.audit(owner, 'draft_completed', resultId);
       await guard();
       await store.putResult(owner, token, result);
+      if (created.stop)
+        throw new MailAssistantError(
+          'Die Mailprüfung wurde nach einem unvollständigen Entwurf angehalten. Bitte prüfe seine Hinweise in Outlook.',
+        );
     } catch (error) {
       if (error instanceof MailGraphError && !error.uncertain) {
         await store.finishDraft(owner, resultId, sourceHash(mail), 'failed');
@@ -288,15 +305,26 @@ export function createMailAssistantEngine({
       throw error;
     }
   }
-  async function run(owner: string, scheduled = false) {
+  async function run(owner: string, scheduled = false, resumeRevision?: number) {
     await available(owner);
     const initial = await store.read(owner);
-    if (!initial?.settings.enabled || !initial.enabledAt)
+    if (
+      !initial?.settings.enabled ||
+      !initial.enabledAt ||
+      initial.settings.consentVersion !== MAIL_CONSENT_VERSION
+    )
       throw new MailAssistantError('Bitte aktiviere zuerst deine persönliche Mailverarbeitung.');
+    if (
+      resumeRevision !== undefined &&
+      (initial.revision !== resumeRevision ||
+        initial.continuation?.revision !== resumeRevision ||
+        initial.continuation?.mode !== 'manual')
+    )
+      return;
     const token = randomUUID();
-    const job = await store.claim(owner, token, now());
+    const job = await store.claim(owner, token, now(), false, initial.revision);
     if (!job) {
-      if (scheduled) return;
+      if (scheduled || resumeRevision !== undefined) return;
       throw new MailAssistantError('Eine Prüfung läuft bereits.');
     }
     if (
@@ -313,15 +341,29 @@ export function createMailAssistantEngine({
     try {
       await guard();
       await adapter.audit(owner, scheduled ? 'scheduled_run_started' : 'manual_run_started');
+      const continuation =
+        job.continuation?.revision === job.revision
+          ? job.continuation
+          : {
+              mode: scheduled ? ('scheduled' as const) : ('manual' as const),
+              revision: job.revision,
+              liveComplete: false,
+            };
+      if (!(await store.update(owner, token, { continuation, nextRunAt: now().toISOString() })))
+        throw new MailAssistantError('Die Verarbeitung wurde angehalten.');
       const deadline = now().getTime() + 4 * 60_000;
       let processed = 0;
       const history = job.settings.history?.mode !== 'off' ? job.history : undefined;
       const graph = await adapter.graph(owner, guard);
       const live = async (limit: number) => {
-        if (processed >= limit || now().getTime() >= deadline) return;
+        if (continuation.liveComplete || processed >= limit || now().getTime() >= deadline) return;
         let checkpoint = job.checkpoint ?? { pending: [] };
         if (!checkpoint.pending.length) {
           const page = await graph.page(job.enabledAt!, checkpoint.url);
+          if (page.hasMore && (!page.nextUrl || page.nextUrl === checkpoint.url))
+            throw new MailAssistantError(
+              'Microsoft hat keine neue Posteingangsseite geliefert. Die Prüfung wurde angehalten.',
+            );
           checkpoint = {
             ...checkpoint,
             pending: [
@@ -350,6 +392,11 @@ export function createMailAssistantEngine({
           if (!(await store.update(owner, token, { checkpoint })))
             throw new MailAssistantError('Die Verarbeitung wurde angehalten.');
         }
+        if (!checkpoint.pending.length && !checkpoint.hasMore) {
+          continuation.liveComplete = true;
+          if (!(await store.update(owner, token, { continuation })))
+            throw new MailAssistantError('Die Verarbeitung wurde angehalten.');
+        }
         if (!checkpoint.pending.length && checkpoint.nextUrl)
           if (
             !(await store.update(owner, token, {
@@ -376,6 +423,10 @@ export function createMailAssistantEngine({
         await adapter.audit(owner, 'history_batch_started');
         if (!history.pending.length) {
           const page = await graph.historyPage(history.from, history.until, history.url);
+          if (page.hasMore && (!page.nextUrl || page.nextUrl === history.url))
+            throw new MailAssistantError(
+              'Microsoft hat keine neue Bestandsseite geliefert. Die Prüfung wurde angehalten.',
+            );
           history.pending = [
             ...new Set(
               page.messages
@@ -435,15 +486,30 @@ export function createMailAssistantEngine({
       await adapter.audit(owner, 'run_stopped').catch(() => {});
     } finally {
       const latest = await store.read(owner);
+      const continuation =
+        !errorMessage &&
+        latest?.revision === job.revision &&
+        latest.settings.enabled &&
+        latest.settings.consentVersion === MAIL_CONSENT_VERSION &&
+        latest.continuation?.revision === latest.revision &&
+        (!latest.continuation.liveComplete ||
+          (latest.settings.history?.mode !== 'off' && latest.history && !latest.history.completed))
+          ? latest.continuation
+          : null;
       await store.release(owner, token, {
         lastRunAt: now().toISOString(),
         lastError: errorMessage,
-        nextRunAt: latest
-          ? (nextMailRun(
-              latest.settings,
-              new Date(now().getTime() + latest.settings.intervalMinutes * 60_000),
-            ) ?? '')
-          : '',
+        continuation,
+        nextRunAt:
+          continuation &&
+          (continuation.mode === 'manual' || insideMailWindow(latest!.settings, now()))
+            ? new Date(now().getTime() + 1000).toISOString()
+            : latest
+              ? (nextMailRun(
+                  latest.settings,
+                  new Date(now().getTime() + latest.settings.intervalMinutes * 60_000),
+                ) ?? '')
+              : '',
       });
     }
   }
@@ -456,7 +522,12 @@ export function createMailAssistantEngine({
         lastPruned = now().getTime();
       }
       for (const owner of await store.due(now())) {
-        await run(owner, true).catch(async () => {
+        const job = await store.read(owner);
+        await run(
+          owner,
+          job?.continuation?.mode !== 'manual',
+          job?.continuation?.mode === 'manual' ? job.revision : undefined,
+        ).catch(async () => {
           await store.pause(owner);
         });
       }
@@ -501,7 +572,9 @@ export function createMailAssistantEngine({
         currentResult.conversationId !== result.conversationId ||
         currentResult.draftId !== result.draftId ||
         currentResult.draftStatus !== result.draftStatus ||
-        currentResult.operationPending !== result.operationPending
+        currentResult.operationPending !== result.operationPending ||
+        currentResult.moveStatus !== result.moveStatus ||
+        currentResult.editPending !== result.editPending
       )
         throw new MailAssistantError(
           'Der Mail-Vorgang wurde verändert. Bitte die Übersicht aktualisieren.',
@@ -545,6 +618,17 @@ export function createMailAssistantEngine({
               body: draft.body,
               bodyTruncated: draft.bodyTruncated === true,
             };
+            if (!result.editPending) {
+              try {
+                const editable = await graph.editableReply(result.draftId);
+                await guard();
+                response.draft.replyText = editable.text;
+                response.draft.revision = hash([result.draftId, editable.etag]);
+              } catch (error) {
+                if (!(error instanceof MailGraphError) || ![400, 409, 412].includes(error.status))
+                  throw error;
+              }
+            }
             delete response.draftUnavailable;
           }
         } catch (error) {
@@ -566,8 +650,286 @@ export function createMailAssistantEngine({
       throw error;
     }
   }
+  async function folders(owner: string, parentId?: string): Promise<MailFolder[]> {
+    await adapter.authorize(owner);
+    const job = await store.read(owner);
+    const connection = await adapter.connection(owner);
+    if (
+      job?.settings.consentVersion !== MAIL_CONSENT_VERSION ||
+      !connection.connected ||
+      !connection.generation
+    )
+      throw new MailAssistantError(
+        'Bitte bestätige die Freigabe und verbinde dein persönliches Postfach.',
+      );
+    const guard = async () => {
+      await adapter.authorize(owner);
+      const [current, latest] = await Promise.all([adapter.connection(owner), store.read(owner)]);
+      if (
+        !current.connected ||
+        current.generation !== connection.generation ||
+        current.mailbox !== connection.mailbox ||
+        latest?.revision !== job.revision
+      )
+        throw new MailAssistantError(
+          'Die persönliche Verbindung wurde geändert. Bitte erneut öffnen.',
+        );
+    };
+    await adapter.audit(owner, 'folders_requested');
+    const graph = await adapter.graph(owner, guard);
+    const selected = await graph.folders(parentId);
+    await guard();
+    return selected;
+  }
+
+  async function manualOperation<T>(
+    owner: string,
+    id: string,
+    action: (result: StoredMailResult, token: string, guard: () => Promise<void>) => Promise<T>,
+  ): Promise<T> {
+    await adapter.authorize(owner);
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id))
+      throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
+    const token = randomUUID();
+    const job = await store.claim(owner, token, now(), true);
+    if (!job)
+      throw new MailAssistantError(
+        'Bitte bestätige die persönliche Freigabe oder warte auf das Ende der laufenden Mail-Tranche.',
+      );
+    try {
+      const connection = await adapter.connection(owner);
+      if (!connection.connected || !connection.generation || !connection.mailbox)
+        throw new MailAssistantError('Bitte verbinde dein persönliches Microsoft-Konto erneut.');
+      const guard = async () => {
+        await adapter.authorize(owner);
+        const [latest, current] = await Promise.all([store.read(owner), adapter.connection(owner)]);
+        if (
+          !latest ||
+          latest.settings.consentVersion !== MAIL_CONSENT_VERSION ||
+          latest.revision !== job.revision ||
+          latest.leaseToken !== token ||
+          !latest.leaseUntil ||
+          latest.leaseUntil.getTime() <= now().getTime() ||
+          !current.connected ||
+          current.mailbox !== connection.mailbox ||
+          current.generation !== connection.generation
+        )
+          throw new MailAssistantError(
+            'Die persönliche Freigabe oder Verbindung wurde verändert. Bitte erneut prüfen.',
+          );
+        if (
+          !(await store.update(owner, token, { leaseUntil: new Date(now().getTime() + 120_000) }))
+        )
+          throw new MailAssistantError('Die Bearbeitung wurde angehalten.');
+      };
+      await guard();
+      const result = await store.result(owner, id);
+      if (!result) throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
+      return await action(result, token, guard);
+    } finally {
+      await store.release(owner, token, {});
+    }
+  }
+
+  async function move(
+    owner: string,
+    id: string,
+    folderId: string,
+    revision: string,
+  ): Promise<MailResult> {
+    return manualOperation(owner, id, async (result, token, guard) => {
+      if (revision !== resultRevision(result))
+        throw new MailAssistantError(
+          'Der Mail-Vorgang wurde inzwischen verändert. Bitte neu laden und die angezeigte Mail erneut auswählen.',
+        );
+      if (result.moveStatus === 'completed') return publicResult(result);
+      const operationKey = hash([owner, id, result.messageId, 'manual-move']);
+      if (
+        result.moveStatus === 'uncertain' ||
+        (await store.draftState(owner, operationKey))?.state === 'pending'
+      )
+        throw new MailAssistantError(
+          'Der Ausgang einer früheren Verschiebung ist unklar. Bitte in Outlook kontrollieren; es wird nicht erneut verschoben.',
+        );
+      const graph = await adapter.graph(owner, guard);
+      const folder = await graph.folder(folderId);
+      if (!folder.canMoveTo)
+        throw new MailAssistantError('Bitte einen eigenen Ablageordner wählen.');
+      const mail = await graph.message(result.messageId);
+      if (
+        mail.id !== result.messageId ||
+        mail.conversationId !== result.conversationId ||
+        mail.isDraft
+      )
+        throw new MailAssistantError('Die Originalmail passt nicht mehr zum Mail-Vorgang.');
+      await guard();
+      await adapter.audit(owner, 'manual_move_requested', id);
+      const operationHash = hash([result.messageId, folder.id, mail.changeKey]);
+      if (!(await store.reserveDraft(owner, token, operationKey, operationHash, true)))
+        throw new MailAssistantError(
+          'Diese Verschiebung wurde bereits angefordert. Bitte den Status prüfen.',
+        );
+      const pending = { ...result, moveStatus: 'uncertain' as const, moveDestination: folder.id };
+      await store.putResult(owner, token, pending);
+      try {
+        const moved = await graph.move(result.messageId, folder.id, mail.etag);
+        if (
+          !moved.id ||
+          moved.isDraft ||
+          moved.conversationId !== result.conversationId ||
+          moved.parentFolderId !== folder.id
+        )
+          throw new MailGraphError(0, true);
+        await store.finishDraft(owner, operationKey, operationHash, 'completed');
+        await guard();
+        const completed: StoredMailResult = {
+          ...result,
+          messageId: moved.id,
+          messageUrl: moved.messageUrl,
+          sourceHash: sourceHash({ ...mail, id: moved.id }),
+          moveStatus: 'completed',
+          doneFolder: folder.displayName,
+        };
+        await store.putResult(owner, token, completed);
+        await adapter.audit(owner, 'manual_move_completed', id);
+        return publicResult(completed);
+      } catch (error) {
+        if (error instanceof MailGraphError && !error.uncertain) {
+          await store.finishDraft(owner, operationKey, operationHash, 'failed');
+          await store.putResult(owner, token, result);
+        }
+        throw error;
+      }
+    });
+  }
+
+  async function editDraft(
+    owner: string,
+    id: string,
+    body: string,
+    revision: string,
+  ): Promise<void> {
+    if (!body.trim() || body.length > 12000 || !/^[a-f0-9]{64}$/.test(revision))
+      throw new MailAssistantError(
+        'Bitte einen vollständigen Antworttext mit höchstens 12000 Zeichen eingeben.',
+      );
+    await manualOperation(owner, id, async (result, token, guard) => {
+      if (
+        !result.draftId ||
+        result.draftStatus !== 'created' ||
+        result.operationPending ||
+        result.editPending
+      )
+        throw new MailAssistantError(
+          'Dieser Entwurf kann nicht sicher geändert werden. Bitte direkt in Outlook prüfen.',
+        );
+      const graph = await adapter.graph(owner, guard);
+      const draft = await graph.message(result.draftId);
+      if (
+        !draft.isDraft ||
+        draft.id !== result.draftId ||
+        draft.conversationId !== result.conversationId
+      )
+        throw new MailAssistantError('Der Entwurf wurde inzwischen verändert oder versendet.');
+      const editable = await graph.editableReply(result.draftId);
+      if (hash([result.draftId, editable.etag]) !== revision)
+        throw new MailAssistantError(
+          'Der Entwurf wurde inzwischen geändert. Bitte zuerst neu laden; deine Änderungen wurden nicht gespeichert.',
+        );
+      const operationKey = hash([owner, id, result.draftId, 'manual-draft-edit']);
+      if ((await store.draftState(owner, operationKey))?.state === 'pending')
+        throw new MailAssistantError(
+          'Der Ausgang der letzten Speicherung ist unklar. Bitte in Outlook prüfen.',
+        );
+      await adapter.audit(owner, 'manual_draft_edit_requested', id);
+      await guard();
+      if (!(await store.reserveDraft(owner, token, operationKey, revision, true)))
+        throw new MailAssistantError('Diese Änderung wurde bereits angefordert. Bitte neu laden.');
+      await store.putResult(owner, token, { ...result, editPending: true });
+      try {
+        await graph.editDraft(result.draftId, body, editable.etag);
+        await store.finishDraft(owner, operationKey, revision, 'completed');
+        await guard();
+        await store.putResult(owner, token, { ...result, editPending: false });
+        await adapter.audit(owner, 'manual_draft_edit_completed', id);
+      } catch (error) {
+        if (error instanceof MailGraphError && !error.uncertain) {
+          await store.finishDraft(owner, operationKey, revision, 'failed');
+          await store.putResult(owner, token, { ...result, editPending: false });
+        }
+        throw error;
+      }
+    });
+  }
+
+  async function results(owner: string, query: MailResultQuery): Promise<MailResultPage> {
+    await adapter.authorize(owner);
+    const parsed = z
+      .object({
+        cursor: z.string().max(1024).optional(),
+        search: z.string().max(200).optional(),
+        priority: z.enum(['important', 'normal', 'low']).optional(),
+        state: z.enum(['open', 'done', 'all']).optional(),
+      })
+      .strict()
+      .parse(query);
+    const fingerprint = hash([
+      owner,
+      parsed.search ?? '',
+      parsed.priority ?? '',
+      parsed.state ?? 'all',
+    ]);
+    let after: { receivedAt: string; id: string } | undefined;
+    if (parsed.cursor) {
+      try {
+        const cursor = z
+          .object({
+            fingerprint: z.string(),
+            receivedAt: z.string().datetime(),
+            id: z.string().regex(/^[a-f0-9]{64}$/),
+          })
+          .strict()
+          .parse(JSON.parse(Buffer.from(parsed.cursor, 'base64url').toString()));
+        if (cursor.fingerprint !== fingerprint) throw Error();
+        after = cursor;
+      } catch {
+        throw new MailAssistantError('Die Ergebnisliste wurde verändert. Bitte erneut laden.');
+      }
+    }
+    const search = parsed.search?.toLocaleLowerCase('de-CH') ?? '';
+    const filtered = (await store.results(owner))
+      .filter(
+        (item) =>
+          (!parsed.priority || item.priority === parsed.priority) &&
+          (parsed.state !== 'done' || item.moveStatus === 'completed') &&
+          (parsed.state !== 'open' || item.moveStatus !== 'completed') &&
+          (!search ||
+            `${item.subject}\n${item.sender}\n${item.summary}`
+              .toLocaleLowerCase('de-CH')
+              .includes(search)) &&
+          (!after ||
+            item.receivedAt < after.receivedAt ||
+            (item.receivedAt === after.receivedAt && item.id > after.id)),
+      )
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || a.id.localeCompare(b.id));
+    const selected = filtered.slice(0, 50);
+    const last = selected[selected.length - 1];
+    return {
+      results: selected.map(publicResult),
+      ...(filtered.length > 50 &&
+        last && {
+          nextCursor: Buffer.from(
+            JSON.stringify({ fingerprint, receivedAt: last.receivedAt, id: last.id }),
+          ).toString('base64url'),
+        }),
+    };
+  }
   return {
     content,
+    results,
+    folders,
+    move,
+    editDraft,
     async status(owner: string) {
       await adapter.authorize(owner);
       const availability = await adapter.availability(owner);
@@ -584,7 +946,10 @@ export function createMailAssistantEngine({
           history: job?.settings.history ?? { mode: 'off' },
         },
         activity: {
-          running: !!job?.leaseUntil && job.leaseUntil.getTime() > now().getTime(),
+          running:
+            (!!job?.leaseUntil && job.leaseUntil.getTime() > now().getTime()) ||
+            !!job?.continuation,
+          continuing: !!job?.continuation,
           lastRunAt: job?.lastRunAt,
           nextRunAt: job?.nextRunAt || undefined,
           lastError: job?.lastError || undefined,
@@ -602,7 +967,7 @@ export function createMailAssistantEngine({
             ...(job?.history?.until && { until: job.history.until }),
           },
         },
-        results: (await store.results(owner)).map(publicResult),
+        results: (await store.results(owner)).slice(0, 200).map(publicResult),
       };
     },
     async settings(owner: string, input: unknown) {
@@ -643,30 +1008,46 @@ export function createMailAssistantEngine({
       await adapter.audit(owner, 'local_data_deleted');
     },
     async priority(owner: string, id: string, priority: MailPriority) {
-      await available(owner);
       if (!Object.prototype.hasOwnProperty.call(MAIL_CATEGORIES, priority))
         throw new MailAssistantError('Ungültige Priorität.');
-      const token = randomUUID();
-      const job = await store.claim(owner, token, now());
-      if (!job)
-        throw new MailAssistantError(
-          'Bitte aktiviere die Verarbeitung oder warte bis zum Ende der laufenden Prüfung.',
-        );
-      try {
-        const result = await store.result(owner, id);
-        if (!result) throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
-        const guard = () => active(owner, job, token, false);
+      await manualOperation(owner, id, async (result, token, guard) => {
         const graph = await adapter.graph(owner, guard);
         const mail = await graph.message(result.messageId);
-        const categories = mail.categories.filter(
-          (value) => !Object.values(MAIL_CATEGORIES).includes(value),
-        );
+        if (
+          mail.id !== result.messageId ||
+          mail.conversationId !== result.conversationId ||
+          mail.isDraft
+        )
+          throw new MailAssistantError('Die Originalmail passt nicht mehr zum Mail-Vorgang.');
+        const categories = (current: string[]) => [
+          ...new Set([
+            ...current.filter((value) => !Object.values(MAIL_CATEGORIES).includes(value)),
+            MAIL_CATEGORIES[priority],
+          ]),
+        ];
         await adapter.audit(owner, 'manual_category_requested', id);
-        await graph.categorize(
-          result.messageId,
-          [...new Set([...categories, MAIL_CATEGORIES[priority]])],
-          mail.etag,
-        );
+        await graph.categorize(result.messageId, categories(mail.categories), mail.etag);
+        if (
+          result.draftId &&
+          result.draftStatus === 'created' &&
+          !result.operationPending &&
+          !result.editPending
+        ) {
+          try {
+            const draft = await graph.message(result.draftId);
+            if (
+              draft.id === result.draftId &&
+              draft.isDraft &&
+              draft.conversationId === result.conversationId
+            ) {
+              await adapter.audit(owner, 'manual_draft_category_requested', id);
+              await graph.categorize(result.draftId, categories(draft.categories), draft.etag);
+            }
+          } catch (error) {
+            if (!(error instanceof MailGraphError) || ![404, 410].includes(error.status))
+              throw error;
+          }
+        }
         await adapter.audit(owner, 'manual_category_completed', id);
         await guard();
         await store.putResult(owner, token, {
@@ -675,16 +1056,14 @@ export function createMailAssistantEngine({
           manualPriority: true,
           categoryApplied: true,
         });
-      } finally {
-        await store.release(owner, token, {});
-      }
+      });
     },
     tick,
     start() {
       if (!timer) {
         timer = setInterval(() => {
           void tick().catch(() => {});
-        }, 60_000);
+        }, 5000);
         timer.unref();
       }
     },

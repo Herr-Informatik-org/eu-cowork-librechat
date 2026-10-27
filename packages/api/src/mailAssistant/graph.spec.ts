@@ -33,28 +33,17 @@ describe('fixed personal Graph adapter', () => {
     expect(Object.keys(graph).sort()).toEqual([
       'categorize',
       'createReply',
+      'editDraft',
+      'editableReply',
+      'folder',
+      'folders',
       'historyPage',
       'identity',
       'message',
+      'move',
       'page',
       'thread',
     ]);
-  });
-  test('reply creation escapes HTML, never sets recipients or calls send', async () => {
-    const { graph, request } = setup();
-    request.mockResolvedValue(
-      response({ id: 'draft', isDraft: true, webLink: 'https://outlook.office.com/mail/draft' }),
-    );
-    await expect(
-      graph.createReply(row.id, '<script>alert(1)</script>\n\nDanke\nGruss'),
-    ).resolves.toEqual({ id: 'draft', url: 'https://outlook.office.com/mail/draft' });
-    expect(request.mock.calls[0][0]).toMatch(/\/me\/messages\/[^/]+\/createReply$/);
-    const body = JSON.parse(request.mock.calls[0][1].body);
-    expect(Object.keys(body)).toEqual(['message']);
-    expect(Object.keys(body.message)).toEqual(['body']);
-    expect(body.message.body.content).toBe(
-      '<p>&lt;script&gt;alert(1)&lt;/script&gt;</p><p>Danke<br>Gruss</p>',
-    );
   });
   test.each([
     'https://attacker.test/v1.0/me/mailFolders/inbox/messages/delta',
@@ -211,10 +200,12 @@ describe('fixed personal Graph adapter', () => {
     await expect(graph.identity()).rejects.toThrow('paused');
     expect(request).not.toHaveBeenCalled();
   });
-  test('ambiguous create has no retry and opaque provider details', async () => {
+  test('ambiguous category PATCH has no retry or provider detail exposure', async () => {
     const { graph, request } = setup();
     request.mockRejectedValue(new Error('token=private-token body=mail-content'));
-    await expect(graph.createReply('message', 'Hello')).rejects.toMatchObject({ uncertain: true });
+    await expect(graph.categorize('message', ['Kunde'], 'W/"current"')).rejects.toMatchObject({
+      uncertain: true,
+    });
     expect(request).toHaveBeenCalledTimes(1);
     expect(new MailGraphError(401).message).not.toContain('private-token');
   });

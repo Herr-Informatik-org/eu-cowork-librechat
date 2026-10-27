@@ -61,6 +61,7 @@ export enum QueryKeys {
   /* Memories */
   memories = 'memories',
   brain = 'brain',
+  mailWorkspace = 'mailWorkspace',
   principalSearch = 'principalSearch',
   accessRoles = 'accessRoles',
   resourcePermissions = 'resourcePermissions',
@@ -122,6 +123,7 @@ export enum MutationKeys {
   enableTwoFactor = 'enableTwoFactor',
   verifyTwoFactor = 'verifyTwoFactor',
   updateMemoryPreferences = 'updateMemoryPreferences',
+  mailWorkspace = 'mailWorkspace',
   createBrainNode = 'createBrainNode',
   updateBrainNode = 'updateBrainNode',
   forgetBrainNode = 'forgetBrainNode',

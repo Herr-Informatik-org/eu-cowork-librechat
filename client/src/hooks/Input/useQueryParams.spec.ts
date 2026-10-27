@@ -26,6 +26,7 @@ import { useChatContext, useChatFormContext } from '~/Providers';
 import useSubmitMessage from '~/hooks/Messages/useSubmitMessage';
 import useDefaultConvo from '~/hooks/Conversations/useDefaultConvo';
 import store from '~/store';
+import { prepareMailChat } from '~/components/Mail/handoff';
 
 // Other mocks
 jest.mock('react-router-dom', () => ({
@@ -559,5 +560,31 @@ describe('useQueryParams', () => {
     expect(params).toBeInstanceOf(URLSearchParams);
     expect(params.toString()).toBe('');
     expect(options).toEqual(expect.objectContaining({ replace: true }));
+  });
+  it('prefills a mail review without submitting even if submit=true is added to its URL', () => {
+    Object.defineProperty(global.crypto, 'randomUUID', {
+      value: () => '00000000-0000-4000-8000-000000000001',
+      configurable: true,
+    });
+    const token = prepareMailChat('test-user-id', 'Private selected mail context');
+    setUrlParams({ mailReview: token, submit: 'true', prompt: 'Unrelated URL prompt' });
+    (useQueryClient as jest.Mock).mockReturnValue({
+      getQueryData: jest
+        .fn()
+        .mockReturnValue({ interface: { autoSubmitFromUrl: true }, modelSpecs: { list: [] } }),
+    });
+    const textarea = document.createElement('textarea');
+    renderHook(() => useQueryParams({ textAreaRef: { current: textarea } }));
+    act(() => {
+      jest.advanceTimersByTime(100);
+    });
+    const methods = (useChatFormContext as jest.Mock).mock.results[0].value;
+    expect(methods.setValue).toHaveBeenCalledWith('text', 'Private selected mail context', {
+      shouldValidate: true,
+    });
+    expect(methods.handleSubmit).not.toHaveBeenCalled();
+    expect(
+      (useSubmitMessage as jest.Mock).mock.results[0].value.submitMessage,
+    ).not.toHaveBeenCalled();
   });
 });

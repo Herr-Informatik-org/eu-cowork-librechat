@@ -31,6 +31,7 @@ export * from './types/runs';
 export * from './types/web';
 export * from './types/graph';
 export * from './types/brain';
+export * from './types/mail';
 /* access permissions */
 export * from './accessPermissions';
 /* query/mutation keys */

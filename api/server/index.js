@@ -304,6 +304,7 @@ const startServer = async () => {
   app.use('/api/agents/chat', rejectChatStartsUntilReady);
   app.use('/api/agents/office/chat', rejectChatStartsUntilReady);
   app.use('/api/agents/office', await routes.office.initialize());
+  app.use('/api/mail', routes.office.web());
   app.use('/api/agents', routes.agents);
   app.use('/api/banner', routes.banner);
   app.use('/api/memories', routes.memories);

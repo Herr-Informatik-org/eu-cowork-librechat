@@ -25,7 +25,7 @@ function fixture() {
           ...defaultMailSettings(),
           enabled: true,
           mode: 'scheduled',
-          consentVersion: '2026-10-25',
+          consentVersion: '2026-10-27',
         },
       },
     ],
@@ -50,9 +50,13 @@ function fixture() {
   const copy = <T>(value: T): T => structuredClone(value);
   const store: MailStore = {
     draftState: async (id, key) => operations.get(id + ':' + key) ?? null,
-    reserveDraft: async (id, _token, key, sourceHash) => {
+    reserveDraft: async (id, _token, key, sourceHash, retryFailed = false) => {
       const old = operations.get(id + ':' + key);
-      if (old?.state === 'pending' || old?.sourceHash === sourceHash) return false;
+      if (
+        old?.state === 'pending' ||
+        (old?.sourceHash === sourceHash && !(retryFailed && old.state === 'failed'))
+      )
+        return false;
       operations.set(id + ':' + key, { sourceHash, state: 'pending' });
       return true;
     },
@@ -66,28 +70,41 @@ function fixture() {
       jobs.get(id)!.revision++;
       delete jobs.get(id)!.leaseToken;
       delete jobs.get(id)!.leaseUntil;
+      delete jobs.get(id)!.continuation;
     }),
     pause: jest.fn(async (id) => {
       jobs.get(id)!.settings.enabled = false;
       jobs.get(id)!.revision++;
       delete jobs.get(id)!.leaseToken;
       delete jobs.get(id)!.leaseUntil;
+      delete jobs.get(id)!.continuation;
     }),
     purge: jest.fn(async (id) => {
       jobs.delete(id);
       for (const key of results.keys()) if (key.startsWith(id + ':')) results.delete(key);
     }),
-    due: jest.fn(async () => [...jobs.keys()]),
+    due: jest.fn(async () =>
+      [...jobs]
+        .filter(
+          ([, job]) =>
+            job.settings.enabled &&
+            (job.settings.mode === 'scheduled' || job.continuation?.mode === 'manual') &&
+            (!job.nextRunAt || Date.parse(job.nextRunAt) <= instant.getTime()),
+        )
+        .map(([id]) => id),
+    ),
     prune: jest.fn(async () => {}),
-    claim: jest.fn(async (id, token, now) => {
+    claim: jest.fn(async (id, token, now, manual = false, revision) => {
       const job = jobs.get(id);
-      if (!job?.settings.enabled || (job.leaseUntil && job.leaseUntil > now)) return null;
+      if (!job || (!manual && !job.settings.enabled) || (job.leaseUntil && job.leaseUntil > now))
+        return null;
+      if (revision !== undefined && job.revision !== revision) return null;
       job.leaseToken = token;
       job.leaseUntil = new Date(now.getTime() + 120000);
       return copy(job);
     }),
     update: jest.fn(async (id, token, fields) => {
-      if (jobs.get(id)?.leaseToken !== token || !jobs.get(id)?.settings.enabled) return false;
+      if (jobs.get(id)?.leaseToken !== token) return false;
       Object.assign(jobs.get(id)!, copy(fields));
       return true;
     }),
@@ -105,13 +122,30 @@ function fixture() {
       results.has(id + ':' + key) ? copy(results.get(id + ':' + key)!) : null,
     ),
     putResult: jest.fn(async (id, token, result) => {
-      if (jobs.get(id)?.leaseToken !== token || !jobs.get(id)?.settings.enabled)
-        throw Error('lost lease');
+      if (jobs.get(id)?.leaseToken !== token) throw Error('lost lease');
       results.set(id + ':' + result.id, copy(result));
     }),
   };
   let guard = async () => {};
   const graph = {
+    folders: jest.fn(async () => [
+      { id: 'folder', displayName: '00_erledigt', childFolderCount: 0, canMoveTo: true },
+    ]),
+    folder: jest.fn(async (_id: string) => ({
+      id: 'folder',
+      displayName: '00_erledigt',
+      childFolderCount: 0,
+      canMoveTo: true,
+    })),
+    move: jest.fn(async (_id: string, folderId: string) => ({
+      ...copy(message),
+      id: 'moved-mail',
+      parentFolderId: folderId,
+    })),
+    editableReply: jest.fn(async (_id: string): Promise<{ text: string; etag: string }> => {
+      throw new MailGraphError(409);
+    }),
+    editDraft: jest.fn(async (_id: string, _text: string, _etag: string) => {}),
     identity: jest.fn(async () => ({
       id: 'own-ms-id',
       mail: 'alice@example.invalid',
@@ -139,10 +173,15 @@ function fixture() {
       await guard();
       message.categories = categories;
     }),
-    createReply: jest.fn(async (_id: string, _text: string) => {
-      await guard();
-      return { id: 'draft-id', url: 'https://outlook.office.com/mail/draft' };
-    }),
+    createReply: jest.fn(
+      async (
+        _id: string,
+        _text: string,
+      ): Promise<{ id: string; url?: string; warnings?: string[]; stop?: boolean }> => {
+        await guard();
+        return { id: 'draft-id', url: 'https://outlook.office.com/mail/draft' };
+      },
+    ),
   };
   const adapter: MailRuntimeAdapter = {
     authorize: jest.fn(async (id) => {
@@ -250,6 +289,117 @@ describe('mail assistant deterministic safety boundary', () => {
     });
     return f;
   }
+  test('a partial created draft is retained but provider failure stops automatic continuation', async () => {
+    const f = fixture();
+    f.graph.createReply.mockResolvedValue({
+      id: 'draft-id',
+      warnings: ['Anhang noch unvollständig'],
+      stop: true,
+    });
+    await f.engine.run(f.owner);
+    const saved = [...f.results.values()][0];
+    expect(saved).toMatchObject({
+      draftStatus: 'created',
+      draftId: 'draft-id',
+      operationPending: false,
+      draftWarnings: ['Anhang noch unvollständig'],
+    });
+    expect(f.jobs.get(f.owner)!.continuation).toBeNull();
+    expect(f.jobs.get(f.owner)!.lastError).toContain('unvollständigen Entwurf');
+    await f.engine.run(f.owner);
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+  });
+  test('old consent does not claim or mutate the deployed job before personal reconfirmation', async () => {
+    const f = fixture();
+    f.jobs.get(f.owner)!.settings.consentVersion = '2026-10-25';
+    const before = structuredClone(f.jobs.get(f.owner));
+    await expect(f.engine.run(f.owner)).rejects.toThrow('aktiviere');
+    expect(f.store.claim).not.toHaveBeenCalled();
+    expect(f.jobs.get(f.owner)).toEqual(before);
+  });
+  test('one manual request durably continues bounded batches after restart and stops at the live delta boundary', async () => {
+    const f = backloggedFixture();
+    f.jobs.get(f.owner)!.settings.mode = 'manual';
+    f.now('2026-10-26T20:00:00Z');
+    await f.engine.run(f.owner);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(20);
+    expect(f.jobs.get(f.owner)!.continuation).toMatchObject({ mode: 'manual', revision: 1 });
+    expect((await f.engine.status(f.owner)).activity.continuing).toBe(true);
+    f.now('2026-10-26T20:00:02Z');
+    const restarted = createMailAssistantEngine({
+      store: f.store,
+      adapter: f.adapter,
+      now: () => new Date('2026-10-26T20:00:02Z'),
+    });
+    await restarted.tick();
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(40);
+    expect(f.jobs.get(f.owner)!.continuation).toBeNull();
+    expect(f.jobs.get(f.owner)!.nextRunAt).toBe('');
+    await restarted.tick();
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(40);
+    expect(f.graph.page).toHaveBeenCalledTimes(1);
+  });
+  test('unchanged continuation URLs stop the chain instead of repeatedly polling an empty page', async () => {
+    const f = fixture();
+    f.jobs.get(f.owner)!.checkpoint = { url: 'unchanged', pending: [] };
+    f.graph.page.mockResolvedValue({ messages: [], nextUrl: 'unchanged', hasMore: true });
+    await f.engine.run(f.owner);
+    expect(f.jobs.get(f.owner)!.continuation).toBeNull();
+    expect(f.jobs.get(f.owner)!.lastError).toContain('keine neue Posteingangsseite');
+    expect(f.graph.page).toHaveBeenCalledTimes(1);
+  });
+  test('manual continuation cannot inherit new scheduled settings across a concurrent revision change', async () => {
+    const f = backloggedFixture();
+    f.jobs.get(f.owner)!.settings.mode = 'manual';
+    f.now('2026-10-26T20:00:00Z');
+    await f.engine.run(f.owner);
+    f.now('2026-10-26T20:01:00Z');
+    const read = f.store.read;
+    let reads = 0;
+    f.store.read = jest.fn(async (owner) => {
+      const job = await read(owner);
+      if (++reads === 1) {
+        f.jobs.get(f.owner)!.revision++;
+        f.jobs.get(f.owner)!.settings.mode = 'scheduled';
+        delete f.jobs.get(f.owner)!.continuation;
+      }
+      return job;
+    });
+    await f.engine.tick();
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(20);
+    expect(f.jobs.get(f.owner)!.settings.enabled).toBe(true);
+  });
+  test('pausing cancels persisted continuation before another batch', async () => {
+    const f = backloggedFixture();
+    f.jobs.get(f.owner)!.settings.mode = 'manual';
+    await f.engine.run(f.owner);
+    await f.engine.pause(f.owner);
+    f.now('2026-10-26T08:01:00Z');
+    await f.engine.tick();
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(20);
+    expect(f.jobs.get(f.owner)!.continuation).toBeUndefined();
+  });
+  test('an error stops continuation without discarding pending messages', async () => {
+    const f = backloggedFixture();
+    f.jobs.get(f.owner)!.settings.mode = 'manual';
+    await f.engine.run(f.owner);
+    (f.adapter.analyze as jest.Mock).mockRejectedValue(new Error('provider unavailable'));
+    f.now('2026-10-26T08:01:00Z');
+    await f.engine.tick();
+    expect(f.jobs.get(f.owner)!.continuation).toBeNull();
+    expect(f.jobs.get(f.owner)!.checkpoint!.pending).toHaveLength(10);
+    expect(f.jobs.get(f.owner)!.lastError).toContain('angehalten');
+  });
+  test('scheduled continuation never bypasses the end of working hours', async () => {
+    const f = backloggedFixture();
+    f.now('2026-10-26T15:59:00Z');
+    await f.engine.run(f.owner, true);
+    f.now('2026-10-26T16:00:00Z');
+    await f.engine.tick();
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(20);
+    expect(f.jobs.get(f.owner)!.nextRunAt).toBe('2026-10-27T07:00:00.000Z');
+    expect(f.jobs.get(f.owner)!.continuation?.mode).toBe('scheduled');
+  });
   test('live and historical backlogs share the twenty-message limit without losing either cursor', async () => {
     const f = backloggedFixture();
     await f.engine.run(f.owner);
@@ -551,7 +701,7 @@ describe('mail assistant deterministic safety boundary', () => {
     const status = await f.engine.status(f.owner);
     expect(status.modelLabel).toBe('New centrally configured default');
     expect(status.settings.enabled).toBe(true);
-    expect(status.settings.consentVersion).toBe('2026-10-25');
+    expect(status.settings.consentVersion).toBe('2026-10-27');
     await f.engine.run(f.owner);
     expect(f.adapter.analyze).toHaveBeenCalledTimes(1);
     expect(f.graph.createReply).toHaveBeenCalledTimes(1);
@@ -880,6 +1030,7 @@ describe('mail result content boundary', () => {
     expect(calls).toEqual([
       { url: 'https://graph.microsoft.com/v1.0/me/messages/mail', method: 'GET' },
       { url: 'https://graph.microsoft.com/v1.0/me/messages/draft-id', method: 'GET' },
+      { url: 'https://graph.microsoft.com/v1.0/me/messages/draft-id', method: 'GET' },
     ]);
     expect(content.message.subject).toHaveLength(500);
     expect(content.message.body).toHaveLength(12000);
@@ -909,5 +1060,204 @@ describe('mail result content boundary', () => {
       'Postfachverbindung wurde verändert',
     );
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('personal mail workspace mutations', () => {
+  async function processed() {
+    const f = fixture();
+    await f.engine.run(f.owner);
+    const result = [...f.results.values()][0];
+    const revision = (await f.engine.results(f.owner, {})).results[0].revision!;
+    return { ...f, result, revision };
+  }
+  test('manually moves only a saved own original, persists new Graph id, and is idempotent', async () => {
+    const f = await processed();
+    const result = await f.engine.move(f.owner, f.result.id, 'folder', f.revision);
+    expect(result).toMatchObject({ moveStatus: 'completed', doneFolder: '00_erledigt' });
+    expect(result).not.toHaveProperty('messageId');
+    expect(result).not.toHaveProperty('moveDestination');
+    expect(f.graph.move).toHaveBeenCalledWith('mail', 'folder', 'W/"version"');
+    expect(f.results.get(`${f.owner}:${f.result.id}`)?.messageId).toBe('moved-mail');
+    await f.engine.move(f.owner, f.result.id, 'folder', result.revision!);
+    expect(f.graph.move).toHaveBeenCalledTimes(1);
+  });
+  test('manual review and filing work while AI is paused and do not resume its schedule', async () => {
+    const f = await processed();
+    await f.engine.pause(f.owner);
+    jest.spyOn(f.adapter, 'availability').mockResolvedValue({ available: false, modelLabel: '' });
+    await f.engine.move(f.owner, f.result.id, 'folder', f.revision);
+    expect(f.jobs.get(f.owner)!.settings.enabled).toBe(false);
+    expect(f.jobs.get(f.owner)!.continuation).toBeUndefined();
+    expect(f.graph.move).toHaveBeenCalledTimes(1);
+  });
+  test('a manual priority change works while paused and mirrors only the own current draft category', async () => {
+    const f = await processed();
+    await f.engine.pause(f.owner);
+    f.graph.message.mockImplementation(async (id) => ({
+      ...f.message,
+      id,
+      isDraft: id === 'draft-id',
+      categories: id === 'draft-id' ? ['Customer', 'KI: Normal'] : ['Original'],
+    }));
+    f.graph.categorize.mockClear();
+    await f.engine.priority(f.owner, f.result.id, 'important');
+    expect(f.graph.categorize.mock.calls).toEqual([
+      ['mail', ['Original', 'KI: Wichtig'], 'W/"version"'],
+      ['draft-id', ['Customer', 'KI: Wichtig'], 'W/"version"'],
+    ]);
+    expect(f.jobs.get(f.owner)!.settings.enabled).toBe(false);
+  });
+  test('a definite rejected manual move may be retried on a fresh click', async () => {
+    const f = await processed();
+    f.graph.move.mockRejectedValueOnce(new MailGraphError(403));
+    await expect(f.engine.move(f.owner, f.result.id, 'folder', f.revision)).rejects.toThrow();
+    expect(f.results.get(`${f.owner}:${f.result.id}`)?.moveStatus).toBeUndefined();
+    await f.engine.move(f.owner, f.result.id, 'folder', f.revision);
+    expect(f.graph.move).toHaveBeenCalledTimes(2);
+    expect(f.results.get(`${f.owner}:${f.result.id}`)?.moveStatus).toBe('completed');
+  });
+  test('a newer mail in the same conversation cannot be moved using an old selection', async () => {
+    const f = await processed();
+    f.results.get(`${f.owner}:${f.result.id}`)!.messageId = 'newer-mail';
+    await expect(f.engine.move(f.owner, f.result.id, 'folder', f.revision)).rejects.toThrow(
+      'inzwischen verändert',
+    );
+    expect(f.graph.move).not.toHaveBeenCalled();
+    expect(f.graph.folder).not.toHaveBeenCalled();
+  });
+  test('a queued moved mail keeps its done state and is not analysed again', async () => {
+    const f = await processed();
+    await f.engine.move(f.owner, f.result.id, 'folder', f.revision);
+    const calls = (f.adapter.analyze as jest.Mock).mock.calls.length;
+    f.message.id = 'moved-mail';
+    f.jobs.get(f.owner)!.checkpoint = { pending: ['moved-mail'], hasMore: false };
+    await f.engine.run(f.owner);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(calls);
+    expect(f.results.get(`${f.owner}:${f.result.id}`)?.moveStatus).toBe('completed');
+  });
+  test('missing assistant draft does not prevent manual original categorization', async () => {
+    const f = await processed();
+    const original = f.graph.message.getMockImplementation()!;
+    f.graph.message.mockImplementation(async (id) => {
+      if (id === 'draft-id') throw new MailGraphError(404);
+      return original(id);
+    });
+    await f.engine.priority(f.owner, f.result.id, 'important');
+    expect(f.results.get(`${f.owner}:${f.result.id}`)).toMatchObject({
+      priority: 'important',
+      manualPriority: true,
+    });
+  });
+  test('draft category conflict is visible and does not falsely mark the whole correction completed', async () => {
+    const f = await processed();
+    f.graph.message.mockImplementation(async (id) => ({
+      ...f.message,
+      id,
+      isDraft: id === 'draft-id',
+    }));
+    f.graph.categorize.mockImplementation(async (id) => {
+      if (id === 'draft-id') throw new MailGraphError(412);
+    });
+    await expect(f.engine.priority(f.owner, f.result.id, 'important')).rejects.toThrow();
+    expect(f.results.get(`${f.owner}:${f.result.id}`)?.manualPriority).not.toBe(true);
+  });
+  test('unknown move outcome keeps a durable barrier and never retries blindly', async () => {
+    const f = await processed();
+    f.graph.move.mockRejectedValue(new MailGraphError(0, true));
+    await expect(f.engine.move(f.owner, f.result.id, 'folder', f.revision)).rejects.toThrow();
+    await expect(f.engine.move(f.owner, f.result.id, 'folder', f.revision)).rejects.toThrow(
+      'unklar',
+    );
+    expect(f.graph.move).toHaveBeenCalledTimes(1);
+    expect(f.results.get(`${f.owner}:${f.result.id}`)?.moveStatus).toBe('uncertain');
+  });
+  test.each([
+    'foreign-result',
+    'system-folder',
+    'changed-original',
+    'audit-failed',
+    'consent-revoked',
+  ])('prevents manual move for %s', async (failure) => {
+    const f = await processed();
+    if (failure === 'system-folder')
+      f.graph.folder.mockResolvedValue({
+        id: 'folder',
+        displayName: 'Drafts',
+        childFolderCount: 0,
+        canMoveTo: false,
+      });
+    if (failure === 'changed-original') f.message.conversationId = 'another';
+    if (failure === 'audit-failed')
+      jest.spyOn(f.adapter, 'audit').mockRejectedValue(Error('audit'));
+    if (failure === 'consent-revoked') delete f.jobs.get(f.owner)!.settings.consentVersion;
+    await expect(
+      f.engine.move(
+        f.owner,
+        failure === 'foreign-result' ? 'a'.repeat(64) : f.result.id,
+        'folder',
+        f.revision,
+      ),
+    ).rejects.toThrow();
+    expect(f.graph.move).not.toHaveBeenCalled();
+  });
+  test('explicit editing requires unchanged owned draft revision and preserves the reply-only contract', async () => {
+    const f = await processed();
+    f.graph.message.mockImplementation(async (id) => ({
+      ...f.message,
+      id,
+      isDraft: id === 'draft-id',
+    }));
+    f.graph.editableReply.mockResolvedValue({ text: 'Old reply', etag: 'W/"draft-v1"' });
+    const content = await f.engine.content(f.owner, f.result.id);
+    expect(content.draft?.replyText).toBe('Old reply');
+    await f.engine.editDraft(f.owner, f.result.id, 'Edited reply', content.draft!.revision!);
+    expect(f.graph.editDraft).toHaveBeenCalledWith('draft-id', 'Edited reply', 'W/"draft-v1"');
+    f.graph.editableReply.mockResolvedValue({ text: 'Changed by employee', etag: 'W/"draft-v2"' });
+    await expect(
+      f.engine.editDraft(f.owner, f.result.id, 'Stale reply', content.draft!.revision!),
+    ).rejects.toThrow('inzwischen geändert');
+    expect(f.graph.editDraft).toHaveBeenCalledTimes(1);
+  });
+  test('unknown draft save outcome blocks further changes and hides the editor', async () => {
+    const f = await processed();
+    f.graph.message.mockImplementation(async (id) => ({
+      ...f.message,
+      id,
+      isDraft: id === 'draft-id',
+    }));
+    f.graph.editableReply.mockResolvedValue({ text: 'Old reply', etag: 'W/"draft-v1"' });
+    const content = await f.engine.content(f.owner, f.result.id);
+    f.graph.editDraft.mockRejectedValue(new MailGraphError(0, true));
+    await expect(
+      f.engine.editDraft(f.owner, f.result.id, 'New reply', content.draft!.revision!),
+    ).rejects.toThrow();
+    expect((await f.engine.content(f.owner, f.result.id)).draft?.revision).toBeUndefined();
+    await expect(
+      f.engine.editDraft(f.owner, f.result.id, 'Retry', content.draft!.revision!),
+    ).rejects.toThrow();
+    expect(f.graph.editDraft).toHaveBeenCalledTimes(1);
+  });
+  test('cursor pages expose all retained results, bind filters/owner and never expose stored Graph ids', async () => {
+    const f = await processed();
+    f.results.clear();
+    for (let n = 0; n < 315; n++) {
+      const id = n.toString(16).padStart(64, '0');
+      f.results.set(`${f.owner}:${id}`, { ...f.result, id, subject: `Support ${n}` });
+    }
+    let cursor: string | undefined;
+    const ids: string[] = [];
+    do {
+      const page = await f.engine.results(f.owner, { cursor, search: 'support', state: 'open' });
+      expect(page.results.length).toBeLessThanOrEqual(50);
+      expect(page.results[0]).not.toHaveProperty('messageId');
+      ids.push(...page.results.map((item) => item.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(new Set(ids).size).toBe(315);
+    const page = await f.engine.results(f.owner, { search: 'support' });
+    await expect(
+      f.engine.results(f.owner, { cursor: page.nextCursor, search: 'changed' }),
+    ).rejects.toThrow('erneut laden');
   });
 });

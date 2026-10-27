@@ -1,5 +1,6 @@
 import { memo, useCallback, useState, lazy, Suspense } from 'react';
 import { useRecoilValue } from 'recoil';
+import { useLocation } from 'react-router-dom';
 import { ChevronDown, SlidersHorizontal, SquarePen } from 'lucide-react';
 import { QueryKeys } from 'librechat-data-provider';
 import { useQueryClient } from '@tanstack/react-query';
@@ -14,7 +15,7 @@ import SidePanelNav from '~/components/SidePanel/Nav';
 import store from '~/store';
 
 const AccountSettings = lazy(() => import('~/components/Nav/AccountSettings'));
-const PRIMARY_PANEL_IDS = new Set(['conversations', 'brain', 'files']);
+const PRIMARY_PANEL_IDS = new Set(['conversations', 'mail', 'brain', 'files']);
 
 const NewChatButton = memo(function NewChatButton({
   setActive,
@@ -138,6 +139,7 @@ function ExpandedPanel({
   const localize = useLocalize();
   const { active, setActive } = useActivePanel();
   const effectiveActive = resolveActivePanel(active, links);
+  const { pathname } = useLocation();
   const [toolsOpen, setToolsOpen] = useState(false);
   const primaryLinks = links.filter((link) => PRIMARY_PANEL_IDS.has(link.id));
   const toolLinks = links.filter((link) => !PRIMARY_PANEL_IDS.has(link.id));
@@ -181,7 +183,7 @@ function ExpandedPanel({
           <NavActionButton
             key={link.id}
             link={link}
-            isActive={link.id === effectiveActive}
+            isActive={pathname === '/mail' ? link.id === 'mail' : link.id === effectiveActive}
             expanded={expanded}
             setActive={setActive}
             onExpand={onExpand}
@@ -226,7 +228,9 @@ function ExpandedPanel({
                   <NavActionButton
                     key={link.id}
                     link={link}
-                    isActive={link.id === effectiveActive}
+                    isActive={
+                      pathname === '/mail' ? link.id === 'mail' : link.id === effectiveActive
+                    }
                     expanded
                     setActive={(id) => {
                       setActive(id);

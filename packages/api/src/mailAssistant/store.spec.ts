@@ -15,7 +15,7 @@ describe('personal mail durable lease and retention', () => {
     ...defaultMailSettings(),
     enabled: true,
     mode: 'scheduled' as const,
-    consentVersion: '2026-10-25',
+    consentVersion: '2026-10-27',
   };
   const result: StoredMailResult = {
     id: 'a'.repeat(64),
@@ -177,15 +177,15 @@ describe('personal mail durable lease and retention', () => {
     expect(await s.due(now)).toEqual(['bob']);
     expect(await s.due(new Date(now.getTime() + 121000))).toEqual(['alice', 'bob']);
   });
-  test('every result write enforces the 200 item content limit', async () => {
+  test('result retention does not silently remove previously visible mails', async () => {
     const s = store();
     await s.saveSettings('alice', settings, new Date());
     await s.claim('alice', 'token', new Date());
     for (let i = 0; i < 205; i++)
       await s.putResult('alice', 'token', { ...result, id: i.toString(16).padStart(64, '0') });
     const row = await db.collection('jobs').findOne({ ownerId: 'alice' });
-    expect(Object.keys(row?.results ?? {})).toHaveLength(200);
-    expect(await s.results('alice')).toHaveLength(200);
+    expect(Object.keys(row?.results ?? {})).toHaveLength(205);
+    expect(await s.results('alice')).toHaveLength(205);
   });
   test('pause and purge never allow a late worker to recreate results', async () => {
     const s = store();
@@ -276,5 +276,88 @@ describe('personal mail durable lease and retention', () => {
     });
     expect(await s.reserveDraft('alice', 'token', result.id, 'source')).toBe(false);
     expect(await db.collection('operations').countDocuments({ ownerId: 'alice' })).toBe(0);
+  });
+  test('retains more than 200 results across claims without silent eviction', async () => {
+    const s = store();
+    await s.saveSettings('alice', settings, new Date());
+    await s.claim('alice', 'writer', new Date());
+    for (let i = 0; i < 315; i++)
+      await s.putResult('alice', 'writer', { ...result, id: i.toString(16).padStart(64, '0') });
+    await s.release('alice', 'writer', {});
+    await s.claim('alice', 'next', new Date());
+    expect(await s.results('alice')).toHaveLength(315);
+  });
+  test('manual continuation survives process recreation and disappears on pause/settings edits', async () => {
+    const s = store();
+    await s.saveSettings('alice', { ...settings, mode: 'manual' }, new Date());
+    await s.claim('alice', 'writer', new Date());
+    await s.update('alice', 'writer', {
+      continuation: { mode: 'manual', revision: 1, liveComplete: false },
+      nextRunAt: new Date().toISOString(),
+    });
+    await s.release('alice', 'writer', {});
+    expect(await store().due(new Date())).toEqual(['alice']);
+    await s.saveSettings('alice', { ...settings, mode: 'manual' }, new Date());
+    expect(await s.due(new Date())).toEqual([]);
+    expect((await s.read('alice'))?.continuation).toBeUndefined();
+  });
+  test('storage budget stops a write before reaching Mongo document limits without removing results', async () => {
+    const s = store();
+    await s.saveSettings('alice', settings, new Date());
+    await s.claim('alice', 'token', new Date());
+    await s.putResult('alice', 'token', result);
+    await db
+      .collection('jobs')
+      .updateOne({ ownerId: 'alice' }, { $set: { budgetFixture: 'x'.repeat(12 * 1024 * 1024) } });
+    await expect(s.putResult('alice', 'token', { ...result, id: 'b'.repeat(64) })).rejects.toThrow(
+      'Speicher',
+    );
+    expect(await s.results('alice')).toEqual([result]);
+  });
+
+  test('old consent is excluded from scheduled and persisted manual continuation without mutating the job', async () => {
+    const s = store();
+    await s.saveSettings('alice', { ...settings, consentVersion: '2026-10-25' }, new Date());
+    await s.claim('alice', 'writer', new Date());
+    await s.update('alice', 'writer', {
+      continuation: { mode: 'manual', revision: 1, liveComplete: false },
+      nextRunAt: new Date().toISOString(),
+    });
+    await s.release('alice', 'writer', {});
+    const before = await s.read('alice');
+    expect(await s.due(new Date())).toEqual([]);
+    expect(await s.claim('alice', 'manual', new Date(), true)).toBeNull();
+    expect(await s.read('alice')).toEqual(before);
+  });
+  test('a paused user can explicitly claim for manual filing but pause revokes that claim', async () => {
+    const s = store();
+    await s.saveSettings('alice', settings, new Date());
+    await s.pause('alice');
+    expect(await s.claim('alice', 'auto', new Date())).toBeNull();
+    expect(await s.claim('alice', 'manual', new Date(), true)).not.toBeNull();
+    await s.putResult('alice', 'manual', result);
+    await s.pause('alice');
+    await expect(s.putResult('alice', 'manual', { ...result, subject: 'late' })).rejects.toThrow();
+    expect((await s.result('alice', result.id))?.subject).toBe(result.subject);
+  });
+  test('only explicit manual retries can reopen definitely failed operations', async () => {
+    const s = store();
+    await s.saveSettings('alice', settings, new Date());
+    await s.claim('alice', 'token', new Date());
+    expect(await s.reserveDraft('alice', 'token', result.id, 'revision')).toBe(true);
+    await s.finishDraft('alice', result.id, 'revision', 'failed');
+    expect(await s.reserveDraft('alice', 'token', result.id, 'revision')).toBe(false);
+    expect(await s.reserveDraft('alice', 'token', result.id, 'revision', true)).toBe(true);
+    expect(await s.reserveDraft('alice', 'token', result.id, 'revision', true)).toBe(false);
+    await s.finishDraft('alice', result.id, 'revision', 'completed');
+    expect(await s.reserveDraft('alice', 'token', result.id, 'revision', true)).toBe(false);
+  });
+  test('worker claims atomically bind the settings revision that authorized a run', async () => {
+    const s = store();
+    await s.saveSettings('alice', settings, new Date());
+    const old = (await s.read('alice'))!;
+    await s.saveSettings('alice', { ...settings, mode: 'manual' }, new Date());
+    expect(await s.claim('alice', 'stale-worker', new Date(), false, old.revision)).toBeNull();
+    expect((await s.read('alice'))?.leaseToken).toBeUndefined();
   });
 });

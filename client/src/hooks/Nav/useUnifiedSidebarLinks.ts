@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { useRecoilValue } from 'recoil';
-import { MessagesSquare } from 'lucide-react';
+import { MessagesSquare, Mail } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useMailAvailability } from '~/data-provider/Mail';
 import { useUserKeyQuery } from 'librechat-data-provider/react-query';
 import { getConfigDefaults, getEndpointField } from 'librechat-data-provider';
 import type { TEndpointsConfig } from 'librechat-data-provider';
@@ -15,6 +17,8 @@ const defaultInterface = getConfigDefaults().interface;
 export default function useUnifiedSidebarLinks() {
   /** Selector instead of the full conversation atom: the links only depend on
    * the endpoint, so parameter edits and other conversation writes stay out. */
+  const navigate = useNavigate();
+  const { data: mailStatus } = useMailAvailability();
   const endpoint = useRecoilValue(store.conversationEndpointByIndex(0)) ?? undefined;
   const { data: startupConfig } = useGetStartupConfig();
   const { data: endpointsConfig = {} as TEndpointsConfig } = useGetEndpointsQuery();
@@ -59,8 +63,15 @@ export default function useUnifiedSidebarLinks() {
       Component: ConversationsSection,
     };
 
-    return [conversationLink, ...sideNavLinks];
-  }, [sideNavLinks]);
+    const mailLink: NavLink = {
+      title: 'com_ui_mail_workspace',
+      label: '',
+      icon: Mail,
+      id: 'mail',
+      onClick: () => navigate('/mail'),
+    };
+    return [conversationLink, ...(mailStatus?.available ? [mailLink] : []), ...sideNavLinks];
+  }, [sideNavLinks, mailStatus?.available, navigate]);
 
   return links;
 }

@@ -4,7 +4,7 @@ export type MailFetch = (
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
 ) => ReturnType<typeof fetch>;
-export const MAIL_CONSENT_VERSION = '2026-10-25';
+export const MAIL_CONSENT_VERSION = '2026-10-27';
 export const MAIL_CATEGORIES: Record<MailPriority, string> = {
   important: 'KI: Wichtig',
   normal: 'KI: Normal',
@@ -38,6 +38,7 @@ export interface MailMessage {
   isDraft: boolean;
   sentByUser?: boolean;
   messageUrl?: string;
+  parentFolderId?: string;
 }
 
 export interface MailAnalysis {
@@ -57,7 +58,11 @@ export interface MailResult extends Omit<MailAnalysis, 'draft'> {
   draftStatus: 'none' | 'created' | 'stale' | 'uncertain' | 'existing' | 'error';
   messageUrl?: string;
   draftUrl?: string;
+  revision?: string;
+  draftWarnings?: string[];
   manualPriority?: boolean;
+  moveStatus?: 'completed' | 'uncertain';
+  doneFolder?: string;
 }
 
 export interface StoredMailResult extends MailResult {
@@ -67,6 +72,8 @@ export interface StoredMailResult extends MailResult {
   categoryApplied: boolean;
   draftId?: string;
   operationPending?: boolean;
+  moveDestination?: string;
+  editPending?: boolean;
 }
 
 export interface MailResultContent {
@@ -79,7 +86,13 @@ export interface MailResultContent {
     body: string;
     bodyTruncated: boolean;
   };
-  draft?: { subject: string; body: string; bodyTruncated: boolean };
+  draft?: {
+    subject: string;
+    body: string;
+    bodyTruncated: boolean;
+    revision?: string;
+    replyText?: string;
+  };
   draftUnavailable?: boolean;
 }
 
@@ -108,6 +121,7 @@ export interface MailJob {
   lastError?: string;
   leaseToken?: string;
   leaseUntil?: Date;
+  continuation?: { mode: 'manual' | 'scheduled'; revision: number; liveComplete: boolean } | null;
   checkpoint?: MailCheckpoint;
   history?: MailHistoryCheckpoint;
 }
@@ -119,7 +133,13 @@ export interface MailStore {
   purge(ownerId: string): Promise<void>;
   due(now: Date): Promise<string[]>;
   prune(now: Date): Promise<void>;
-  claim(ownerId: string, token: string, now: Date): Promise<MailJob | null>;
+  claim(
+    ownerId: string,
+    token: string,
+    now: Date,
+    manual?: boolean,
+    revision?: number,
+  ): Promise<MailJob | null>;
   update(ownerId: string, token: string, fields: Partial<MailJob>): Promise<boolean>;
   release(ownerId: string, token: string, fields: Partial<MailJob>): Promise<void>;
   results(ownerId: string): Promise<StoredMailResult[]>;
@@ -134,6 +154,7 @@ export interface MailStore {
     token: string,
     conversationKey: string,
     sourceHash: string,
+    retryFailed?: boolean,
   ): Promise<boolean>;
   finishDraft(
     ownerId: string,
@@ -141,6 +162,25 @@ export interface MailStore {
     sourceHash: string,
     state: 'completed' | 'failed',
   ): Promise<void>;
+}
+
+export interface MailFolder {
+  id: string;
+  displayName: string;
+  parentFolderId?: string;
+  childFolderCount: number;
+  canMoveTo: boolean;
+}
+
+export interface MailResultQuery {
+  cursor?: string;
+  search?: string;
+  priority?: MailPriority;
+  state?: 'open' | 'done' | 'all';
+}
+export interface MailResultPage {
+  results: MailResult[];
+  nextCursor?: string;
 }
 
 export interface MailGraph {
@@ -157,7 +197,15 @@ export interface MailGraph {
   message(id: string): Promise<MailMessage>;
   thread(id: string): Promise<{ messages: MailMessage[]; complete: boolean }>;
   categorize(id: string, categories: string[], etag?: string): Promise<void>;
-  createReply(id: string, text: string): Promise<{ id: string; url?: string }>;
+  createReply(
+    id: string,
+    text: string,
+  ): Promise<{ id: string; url?: string; warnings?: string[]; stop?: boolean }>;
+  folders(parentId?: string): Promise<MailFolder[]>;
+  folder(id: string): Promise<MailFolder>;
+  move(id: string, folderId: string, etag?: string): Promise<MailMessage>;
+  editableReply(id: string): Promise<{ text: string; etag: string }>;
+  editDraft(id: string, text: string, etag: string): Promise<void>;
 }
 
 export interface MailRuntimeAdapter {
@@ -189,6 +237,7 @@ export interface MailAssistantStatus {
   settings: MailSettings;
   activity: {
     running: boolean;
+    continuing?: boolean;
     lastRunAt?: string;
     nextRunAt?: string;
     lastError?: string;
@@ -215,6 +264,10 @@ export interface MailAssistantEngine {
   disconnect(owner: string): Promise<void>;
   priority(owner: string, id: string, priority: MailPriority): Promise<void>;
   content(owner: string, id: string): Promise<MailResultContent>;
+  results(owner: string, query: MailResultQuery): Promise<MailResultPage>;
+  folders(owner: string, parentId?: string): Promise<MailFolder[]>;
+  move(owner: string, id: string, folderId: string, revision: string): Promise<MailResult>;
+  editDraft(owner: string, id: string, body: string, revision: string): Promise<void>;
   tick(): Promise<void>;
   start(): void;
   stop(): void;
