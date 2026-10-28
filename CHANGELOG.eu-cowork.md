@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-28 — Persönliche Signaturen mit passenden Abständen und Logo
+
+- Markierte Signaturtexte behalten ihre eigenen Schriftgrössen. Eingefügte
+  Outlook-Pixelgrössen werden begrenzt in Punktgrössen umgerechnet; passive
+  Formatierung bleibt erhalten, aktive Inhalte und fremde Bilder bleiben gesperrt.
+- Das eigene Logo kann an der Cursorposition stehen. Seine Breite ist einstellbar;
+  kompakte Absatzabstände stimmen zwischen Editor und neuen Entwürfen überein.
+- Ein persönliches Logo wird vor dem HTML-Verweis als Inline-Anhang geprüft.
+  Fehler und konkurrierende Änderungen bleiben sichtbar, vorhandene Entwürfe
+  werden nicht nachträglich neu formatiert und Mails weiterhin nie versendet.
+
 ## 2026-10-27 — Vollständiger Posteingang, Mail-Chat und eigene Signatur
 
 - Die Übersicht lädt alle eigenen Inbox-Metadatenseiten und zeigt ungeprüfte Mails

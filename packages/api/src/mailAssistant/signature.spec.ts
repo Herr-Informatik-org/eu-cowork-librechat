@@ -1,4 +1,7 @@
 import sharp from 'sharp';
+
+const logoMarker = '<span data-kisuno-signature-logo="true">[Signatur-Logo]</span>';
+const logoCid = 'kisuno-signature-11111111-2222-3333-4444-555555555555';
 import {
   normalizeMailSignature,
   renderMailSignature,
@@ -80,6 +83,87 @@ describe('explicit personal mail signature', () => {
     expect(sanitizeSignatureHtml(safe)).toBe(safe);
     expect(safe).not.toContain('<img');
   });
+  it('preserves individual font sizes and normalizes Outlook pixel sizes with compact paragraphs', () => {
+    const html = sanitizeSignatureHtml(
+      '<p><span style="font-size:14.666667px">Name</span></p>' +
+        '<div style="margin:8pt 0"><span style="font-size:10.5pt">Role</span></div>' +
+        '<p style="font-size:8.0pt">Disclaimer</p>',
+    );
+    expect(html).toContain('<p style="margin:0"><span style="font-size:11pt">Name</span></p>');
+    expect(html).toContain('margin:8pt 0');
+    expect(html).toContain('font-size:10.5pt');
+    expect(html).toContain('font-size:8pt');
+    expect(sanitizeSignatureHtml(html)).toBe(html);
+    for (const size of [
+      '7pt',
+      '17pt',
+      '100px',
+      'var(--size)',
+      '12pt!important',
+      'calc(12pt)',
+      '1e2pt',
+    ]) {
+      expect(sanitizeSignatureHtml(`<span style="font-size:${size}">X</span>`)).not.toContain(
+        'font-size',
+      );
+    }
+  });
+  it('keeps one canonical logo marker and rejects forged slots and executable marker children', () => {
+    const html = sanitizeSignatureHtml(
+      '<div>Role' +
+        logoMarker +
+        '<span data-kisuno-signature-logo="true">duplicate<script>x()</script></span>Company</div>',
+    );
+    expect(html.match(/data-kisuno-signature-logo/g)).toHaveLength(1);
+    expect(html).not.toMatch(/duplicate|script|x\(\)|data-kisuno-signature-slot/);
+    expect(sanitizeSignatureHtml(html)).toBe(html);
+    expect(sanitizeSignatureHtml('<br data-kisuno-signature-slot="true">')).toBe('<br />');
+    expect(sanitizeSignatureHtml('<div data-kisuno-signature-logo="true">X</div>')).not.toContain(
+      'signature-logo',
+    );
+    const nested = sanitizeSignatureHtml(
+      '<span data-kisuno-signature-logo="true"><b>Safe child</b></span>',
+    );
+    expect(nested).toBe(logoMarker + '<b>Safe child</b>');
+    expect(sanitizeSignatureHtml(nested)).toBe(nested);
+  });
+  it('embeds a bounded logo at the selected position in paragraphs or tables without changing text sizes', async () => {
+    const input = await sharp({
+      create: { width: 320, height: 100, channels: 4, background: '#123456' },
+    })
+      .png()
+      .toBuffer();
+    for (const content of [
+      `<p>Role${logoMarker}Company</p>`,
+      `<table><tr><td>Role${logoMarker}Company</td></tr></table>`,
+    ]) {
+      const safe = await sanitizeMailSignature({
+        ...signature,
+        html: content,
+        logo: { contentBytes: input.toString('base64'), width: 120 },
+      });
+      expect(safe.logo!.width).toBe(120);
+      const rendered = renderMailSignature(safe, logoCid);
+      expect(rendered).toMatch(/Role<img[^>]+>Company/);
+      expect(rendered).toContain('width="120" height="38"');
+      expect(rendered).not.toContain('data-kisuno');
+      expect(rendered.match(/<img/g)).toHaveLength(1);
+    }
+    const legacy = await sanitizeMailSignature({
+      ...signature,
+      logo: { contentBytes: input.toString('base64') },
+    });
+    expect(renderMailSignature(legacy, logoCid)).toMatch(/<\/p><div><img/);
+    expect(renderMailSignature(legacy, logoCid)).toContain('width="160" height="50"');
+  });
+  it('removes an unused logo marker and does not accept it as visible signature text', () => {
+    expect(
+      renderMailSignature(
+        normalizeMailSignature({ ...signature, html: `Role${logoMarker}Company` }),
+      ),
+    ).not.toContain('Signatur-Logo');
+    expect(() => normalizeMailSignature({ ...signature, html: logoMarker })).toThrow();
+  });
   it('requires an explicit bounded configuration and visible signature text', () => {
     for (const invalid of [
       { ...signature, html: 'x'.repeat(20001) },
@@ -87,6 +171,7 @@ describe('explicit personal mail signature', () => {
       { ...signature, fontFamily: 'url(https://evil.test)' },
       { ...signature, fontSize: 99 },
       { ...signature, extra: true },
+      { ...signature, logo: { contentBytes: 'cGl4ZWxz', width: 10000 } },
       { ...signature, enabled: 'true' },
     ])
       expect(() => normalizeMailSignature(invalid)).toThrow();
@@ -98,6 +183,6 @@ describe('explicit personal mail signature', () => {
       sanitizeSignatureHtml(
         '<!-- kisuno-mail-reply:v2 --><p>Name</p><!-- /kisuno-mail-reply:v2 -->',
       ),
-    ).toBe('<p>Name</p>');
+    ).toBe('<p style="margin:0">Name</p>');
   });
 });

@@ -56,7 +56,7 @@ describe('personal mail durable lease and retention', () => {
     const s = store();
     const signature = {
       enabled: true,
-      html: '<p>Private Signature</p>',
+      html: '<p style="margin:0">Private Signature<span style="font-size:8pt">Legal</span></p>',
       fontFamily: 'Calibri' as const,
       fontSize: 11 as const,
     };

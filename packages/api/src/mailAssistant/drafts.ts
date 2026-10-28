@@ -102,6 +102,26 @@ function prependReply(body: string, text: string, signature: string, style: stri
   );
 }
 
+function signatureHasInlineImage(body: string, contentId: string): boolean {
+  const startMarker = '<!-- kisuno-mail-signature:v1 -->';
+  const endMarker = '<!-- /kisuno-mail-signature:v1 -->';
+  const start = body.indexOf(startMarker);
+  const end = body.indexOf(endMarker, start + startMarker.length);
+  if (start < 0 || end < 0) return false;
+  let references = 0;
+  sanitizeHtml(body.slice(start + startMarker.length, end), {
+    allowedTags: [],
+    allowedAttributes: {},
+    transformTags: {
+      img: (tagName, attribs) => {
+        if (attribs.src === `cid:${contentId}`) references += 1;
+        return { tagName, attribs: {} };
+      },
+    },
+  });
+  return references === 1;
+}
+
 function editableBlock(body: string): { start: number; end: number; text: string; style: string } {
   const starts = [body.indexOf(replyStart), body.indexOf(oldReplyStart)].filter(
     (value) => value >= 0,
@@ -504,24 +524,15 @@ export function createDraftOperations({
           throw new MailDraftError(
             'Der neue Entwurf wurde inzwischen verändert. Bitte bearbeite ihn in Outlook.',
           );
-        let expectedBody = prependReply(initial.body, text, signatureHtml, style);
-        const written = await call(
-          `/v1.0/me/messages/${id(created.id)}`,
-          'PATCH',
-          {
-            body: { contentType: 'HTML', content: expectedBody },
-            categories,
-          },
-          initial.etag,
-          'html',
-        );
-        if (written.id !== undefined) {
-          expectedBody = draftBody(written, created.id);
-          if (editableBlock(expectedBody).text !== normalizeReply(text))
-            throw new MailGraphError(502);
-        }
+        let current = initial;
+        let existing: Attachment[] | undefined;
         if (preparedSignature?.logo && signatureCid) {
-          await assertDraft(created.id, expectedBody, source.conversationId);
+          current = await assertDraft(created.id, initial.body, source.conversationId);
+          if (current.etag !== initial.etag)
+            throw new MailDraftError(
+              'Der neue Entwurf wurde inzwischen verändert. Bitte bearbeite ihn in Outlook.',
+            );
+          // Persist and verify the image before publishing any HTML reference to it.
           const logo = await call(`/v1.0/me/messages/${id(created.id)}/attachments`, 'POST', {
             '@odata.type': '#microsoft.graph.fileAttachment',
             name: 'signatur-logo.png',
@@ -531,8 +542,38 @@ export function createDraftOperations({
             contentBytes: preparedSignature.logo.contentBytes,
           });
           if (typeof logo.id !== 'string') throw new MailGraphError(502, true);
+          existing = await listAttachments(created.id);
+          const linked = existing.filter((item) => item.contentId === signatureCid);
+          if (
+            linked.length !== 1 ||
+            linked[0].id !== logo.id ||
+            linked[0].type !== 'microsoft.graph.fileAttachment' ||
+            !linked[0].inline ||
+            linked[0].contentType.toLowerCase() !== 'image/png'
+          )
+            throw new MailGraphError(502, true);
+          // An attachment changes the ETag. Refresh it without accepting a changed body.
+          current = await assertDraft(created.id, initial.body, source.conversationId);
         }
-        const existing = await listAttachments(created.id);
+        let expectedBody = prependReply(initial.body, text, signatureHtml, style);
+        const written = await call(
+          `/v1.0/me/messages/${id(created.id)}`,
+          'PATCH',
+          {
+            body: { contentType: 'HTML', content: expectedBody },
+            categories,
+          },
+          current.etag,
+          'html',
+        );
+        if (written.id !== undefined) {
+          expectedBody = draftBody(written, created.id);
+          if (editableBlock(expectedBody).text !== normalizeReply(text))
+            throw new MailGraphError(502);
+        }
+        if (signatureCid && !signatureHasInlineImage(expectedBody, signatureCid))
+          throw new MailGraphError(502);
+        existing ??= await listAttachments(created.id);
         let total = 0;
         for (const file of files) {
           if (file.type !== 'microsoft.graph.fileAttachment') {

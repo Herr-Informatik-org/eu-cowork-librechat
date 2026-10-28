@@ -3,7 +3,7 @@ export type MailSignature = {
   html: string;
   fontFamily: 'Aptos' | 'Calibri' | 'Arial';
   fontSize: 10 | 11 | 12 | 14;
-  logo?: { contentBytes: string };
+  logo?: { contentBytes: string; width?: number };
 };
 export type MailWorkspaceChatRequest = {
   revision: string;

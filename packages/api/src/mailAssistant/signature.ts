@@ -11,17 +11,37 @@ const signatureSchema = z
     fontFamily: z.enum(['Aptos', 'Calibri', 'Arial']),
     fontSize: z.union([z.literal(10), z.literal(11), z.literal(12), z.literal(14)]),
     logo: z
-      .object({ contentBytes: z.string().min(1).max(32768) })
+      .object({
+        contentBytes: z.string().min(1).max(32768),
+        width: z.number().int().min(80).max(320).optional(),
+      })
       .strict()
       .optional(),
   })
   .strict();
 const spacing =
   /^(?:0|(?:[0-9]|1[0-9]|2[0-4])(?:px|pt))(?: (?:0|(?:[0-9]|1[0-9]|2[0-4])(?:px|pt))){0,3}$/;
+const logoMarker = '<span data-kisuno-signature-logo="true">[Signatur-Logo]</span>';
+const logoSlot = '<br data-kisuno-signature-slot="true" />';
+
+function normalizeFontSizes(style: string): string {
+  return style
+    .split(';')
+    .map((declaration) => {
+      if (declaration.includes('!')) return '';
+      const match = declaration.match(/^\s*font-size\s*:\s*(\d{1,3}(?:\.\d{1,6})?)\s*(pt|px)\s*$/i);
+      if (!match) return declaration;
+      const size =
+        Math.round(Number(match[1]) * (match[2].toLowerCase() === 'px' ? 0.75 : 1) * 100) / 100;
+      return size >= 8 && size <= 16 ? `font-size:${size}pt` : '';
+    })
+    .join(';');
+}
 
 /** User-supplied signature markup remains passive data, including after rich-text paste. */
 export function sanitizeSignatureHtml(html: string): string {
   if (html.length > MAX_MAIL_SIGNATURE_HTML) throw new Error('Die Signatur ist zu lang.');
+  let markerSeen = false;
   return sanitizeHtml(html, {
     allowedTags: [
       'p',
@@ -44,6 +64,7 @@ export function sanitizeSignatureHtml(html: string): string {
       '*': ['style'],
       a: ['href', 'title'],
       td: ['colspan', 'rowspan'],
+      br: ['data-kisuno-signature-slot'],
     },
     allowedSchemes: ['https', 'http', 'mailto', 'tel'],
     allowProtocolRelative: false,
@@ -53,7 +74,7 @@ export function sanitizeSignatureHtml(html: string): string {
         'font-family': [
           /^(?:Aptos|Calibri|Arial|sans-serif)(?:,\s*(?:Aptos|Calibri|Arial|sans-serif))*$/i,
         ],
-        'font-size': [/^(?:[89]|1[0-6])pt$/],
+        'font-size': [/^(?:[89](?:\.\d{1,2})?|1[0-5](?:\.\d{1,2})?|16)pt$/],
         'font-weight': [/^(?:normal|bold|[1-9]00)$/],
         'font-style': [/^(?:normal|italic)$/],
         'text-decoration': [/^(?:none|underline|line-through)$/],
@@ -79,6 +100,33 @@ export function sanitizeSignatureHtml(html: string): string {
       'template',
     ],
     transformTags: {
+      '*': (name, attributes) => {
+        let style = normalizeFontSizes(attributes.style ?? '');
+        if (['p', 'div'].includes(name)) {
+          const hasMargin = style.split(';').some((declaration) => {
+            const match = declaration.match(/^\s*margin\s*:\s*(.*?)\s*$/i);
+            return match && spacing.test(match[1]);
+          });
+          if (!hasMargin) style = `margin:0;${style}`;
+        }
+        return { tagName: name, attribs: { ...attributes, style } };
+      },
+      span: (name, attributes): sanitizeHtml.Tag => {
+        const {
+          'data-kisuno-signature-logo': marker,
+          'data-kisuno-signature-slot': _slot,
+          ...rest
+        } = attributes;
+        if (marker !== 'true') return { tagName: name, attribs: rest };
+        if (markerSeen) return { tagName: name, attribs: {}, text: '' };
+        markerSeen = true;
+        // Replace marker contents with a canonical slot; any safe child tags remain outside it.
+        return { tagName: 'br', attribs: { 'data-kisuno-signature-slot': 'true' }, text: '' };
+      },
+      br: (name, attributes) => {
+        const { 'data-kisuno-signature-slot': _slot, ...rest } = attributes;
+        return { tagName: name, attribs: rest };
+      },
       a: (_name, attributes) => ({
         tagName: 'a',
         attribs: Object.fromEntries(
@@ -88,13 +136,18 @@ export function sanitizeSignatureHtml(html: string): string {
         ),
       }),
     },
-  }).trim();
+  })
+    .trim()
+    .replace(logoSlot, logoMarker);
 }
 
 export function normalizeMailSignature(value: unknown): MailSignature {
   const parsed = signatureSchema.parse(value);
   const html = sanitizeSignatureHtml(parsed.html);
-  const visible = sanitizeHtml(html, { allowedTags: [], allowedAttributes: {} }).trim();
+  const visible = sanitizeHtml(html.replace(logoMarker, ''), {
+    allowedTags: [],
+    allowedAttributes: {},
+  }).trim();
   if (parsed.enabled && !visible)
     throw new Error('Bitte gib den Text deiner persönlichen Signatur ein.');
   if (parsed.logo) logoBytes(parsed.logo.contentBytes);
@@ -153,7 +206,7 @@ export async function sanitizeMailSignature(value: unknown): Promise<MailSignatu
     if (metadata.format !== 'png' || (metadata.pages ?? 1) !== 1) throw new Error();
     const output = await image.png({ compressionLevel: 9 }).toBuffer();
     logoBytes(output.toString('base64'));
-    return { ...signature, logo: { contentBytes: output.toString('base64') } };
+    return { ...signature, logo: { ...signature.logo, contentBytes: output.toString('base64') } };
   } catch {
     throw new Error(
       'Das Signaturlogo konnte nicht sicher verarbeitet werden. Bitte wähle ein anderes PNG oder JPEG.',
@@ -169,7 +222,12 @@ export function renderMailSignature(value?: MailSignature, logoCid?: string): st
     if (!/^kisuno-signature-[a-f0-9-]{36}$/.test(logoCid))
       throw new Error('Ungültiger Signaturverweis.');
     const data = logoBytes(signature.logo.contentBytes);
-    logo = `<div><img src="cid:${logoCid}" alt="Signatur-Logo" width="${data.readUInt32BE(16)}" height="${data.readUInt32BE(20)}"></div>`;
+    const width = Math.min(signature.logo.width ?? 160, data.readUInt32BE(16));
+    const height = Math.max(1, Math.round((data.readUInt32BE(20) * width) / data.readUInt32BE(16)));
+    logo = `<img src="cid:${logoCid}" alt="Signatur-Logo" width="${width}" height="${height}" style="display:block;margin:8pt 0">`;
   }
-  return `<!-- kisuno-mail-signature:v1 --><div style="font-family:${signature.fontFamily},Arial,sans-serif;font-size:${signature.fontSize}pt;line-height:1.35;color:#000000;margin:0 0 16pt 0">${signature.html}${logo}</div><!-- /kisuno-mail-signature:v1 -->`;
+  const body = signature.html.includes(logoMarker)
+    ? signature.html.replace(logoMarker, logo)
+    : signature.html + (logo ? `<div>${logo}</div>` : '');
+  return `<!-- kisuno-mail-signature:v1 --><div style="font-family:${signature.fontFamily},Arial,sans-serif;font-size:${signature.fontSize}pt;line-height:1.2;color:#000000;margin:0 0 16pt 0">${body}</div><!-- /kisuno-mail-signature:v1 -->`;
 }

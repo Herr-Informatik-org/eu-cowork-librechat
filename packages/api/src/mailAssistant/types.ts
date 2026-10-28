@@ -16,7 +16,7 @@ export interface MailSignature {
   html: string;
   fontFamily: 'Aptos' | 'Calibri' | 'Arial';
   fontSize: 10 | 11 | 12 | 14;
-  logo?: { contentBytes: string };
+  logo?: { contentBytes: string; width?: number };
 }
 export interface MailDraftContext {
   sender: { name: string; address: string };

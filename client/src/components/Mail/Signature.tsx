@@ -1,33 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import DOMPurify from 'dompurify';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MailSignature } from 'librechat-data-provider';
 import { useLocalize } from '~/hooks';
+import {
+  sanitizeSignatureHtml as clean,
+  signatureFontSizes,
+  signatureLogoSelector,
+  isSignatureRange,
+  restoreSignatureRange,
+  formatSignatureSelection,
+  placeSignatureLogo,
+} from './formatting';
 
 const empty: MailSignature = { enabled: false, html: '', fontFamily: 'Calibri', fontSize: 11 };
-const clean = (html: string) =>
-  DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: [
-      'p',
-      'div',
-      'span',
-      'br',
-      'b',
-      'strong',
-      'i',
-      'em',
-      'u',
-      's',
-      'a',
-      'table',
-      'tbody',
-      'tr',
-      'td',
-    ],
-    ALLOWED_ATTR: ['href', 'title', 'colspan', 'rowspan'],
-    ALLOW_DATA_ATTR: false,
-    ALLOW_ARIA_ATTR: false,
-  });
-
 async function prepareLogo(file: File): Promise<string> {
   if (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 2_000_000) throw new Error();
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -95,6 +79,21 @@ export function MailSignatureSettings({
   const signature = value ?? empty;
   const editor = useRef<HTMLDivElement>(null);
   const last = useRef<string | null>(null);
+  const savedRange = useRef<Range | null>(null);
+  const [hasSelection, setHasSelection] = useState(false);
+  const [hasCursor, setHasCursor] = useState(false);
+  const rememberSelection = useCallback(() => {
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (!editor.current || !isSignatureRange(editor.current, range)) return;
+    savedRange.current = range.cloneRange();
+    setHasSelection(!range.collapsed && !!range.toString());
+    setHasCursor(true);
+  }, []);
+  useEffect(() => {
+    document.addEventListener('selectionchange', rememberSelection);
+    return () => document.removeEventListener('selectionchange', rememberSelection);
+  }, [rememberSelection]);
   const [tooLong, setTooLong] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
   const [logoError, setLogoError] = useState(false);
@@ -104,19 +103,35 @@ export function MailSignatureSettings({
     if (editor.current && signature.html !== last.current) {
       editor.current.innerHTML = clean(signature.html);
       last.current = signature.html;
+      savedRange.current = null;
+      setHasSelection(false);
+      setHasCursor(false);
     }
   }, [signature.html]);
   const publish = () => {
-    if (!editor.current) return;
+    if (!editor.current || disabled) return;
     const html = clean(editor.current.innerHTML);
     if (html.length > 20000) {
       setTooLong(true);
       editor.current.innerHTML = clean(signature.html);
+      savedRange.current = null;
+      setHasSelection(false);
+      setHasCursor(false);
       return;
     }
     setTooLong(false);
     last.current = html;
     onChange({ ...signature, html });
+    rememberSelection();
+  };
+  const applySelection = (operation: (element: HTMLElement, range: Range) => Range | undefined) => {
+    if (disabled || !editor.current || !isSignatureRange(editor.current, savedRange.current))
+      return;
+    const range = operation(editor.current, savedRange.current);
+    if (!range) return;
+    savedRange.current = range.cloneRange();
+    restoreSignatureRange(editor.current, range);
+    publish();
   };
   return (
     <fieldset className="mail-signature-settings" disabled={disabled} data-mail-shortcuts="off">
@@ -166,6 +181,39 @@ export function MailSignatureSettings({
           </select>
         </label>
       </div>
+      <div className="mail-draft-controls">
+        <label>
+          {t('com_ui_mail_signature_selection_size')}
+          <select
+            value=""
+            disabled={disabled || !hasSelection}
+            onMouseDown={rememberSelection}
+            onChange={(event) => {
+              const size = Number(event.target.value);
+              applySelection((element, range) => formatSignatureSelection(element, range, size));
+            }}
+          >
+            <option value="">{t('com_ui_mail_signature_selection_choose')}</option>
+            {signatureFontSizes.map((size) => (
+              <option key={size} value={size}>
+                {t('com_ui_mail_signature_size_value', { size })}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="mail-button"
+          disabled={disabled || !signature.logo || !hasCursor}
+          onMouseDown={(event) => {
+            rememberSelection();
+            event.preventDefault();
+          }}
+          onClick={() => applySelection(placeSignatureLogo)}
+        >
+          {t('com_ui_mail_signature_logo_place')}
+        </button>
+      </div>
       <p id="mail-signature-help" className="mail-muted">
         {t('com_ui_mail_signature_paste')}
       </p>
@@ -188,9 +236,12 @@ export function MailSignatureSettings({
           color: '#000',
           fontFamily: `${signature.fontFamily},Arial,sans-serif`,
           fontSize: `${signature.fontSize}pt`,
-          lineHeight: 1.35,
+          lineHeight: 1.2,
         }}
         onInput={publish}
+        onMouseUp={rememberSelection}
+        onKeyUp={rememberSelection}
+        onFocus={rememberSelection}
         onDrop={(event) => event.preventDefault()}
         onClick={(event) => {
           if ((event.target as HTMLElement).closest('a')) event.preventDefault();
@@ -205,13 +256,14 @@ export function MailSignatureSettings({
             return;
           }
           const selection = window.getSelection();
-          if (!selection?.rangeCount || !editor.current?.contains(selection.anchorNode)) return;
+          if (!selection?.rangeCount || !editor.current) return;
           const range = selection.getRangeAt(0);
+          if (!isSignatureRange(editor.current, range)) return;
           range.deleteContents();
           const fragment = document.createDocumentFragment();
           if (html) {
             const template = document.createElement('template');
-            template.innerHTML = clean(html);
+            template.innerHTML = clean(html, false);
             fragment.append(template.content);
           } else {
             raw.split(/\r?\n/).forEach((line, index) => {
@@ -249,7 +301,7 @@ export function MailSignatureSettings({
             setLogoError(false);
             try {
               const contentBytes = await prepareLogo(file);
-              onChange({ ...current.current, logo: { contentBytes } });
+              onChange({ ...current.current, logo: { ...current.current.logo, contentBytes } });
             } catch {
               setLogoError(true);
             } finally {
@@ -264,15 +316,47 @@ export function MailSignatureSettings({
           <img
             src={`data:image/png;base64,${signature.logo.contentBytes}`}
             alt={t('com_ui_mail_signature_logo')}
-            style={{ maxWidth: 320, maxHeight: 160 }}
+            style={{
+              width: 'auto',
+              maxWidth: `min(100%, ${signature.logo.width ?? 160}px)`,
+              height: 'auto',
+            }}
           />
+          <label>
+            {t('com_ui_mail_signature_logo_width')}
+            <select
+              value={signature.logo.width ?? 160}
+              disabled={disabled || logoBusy}
+              onChange={(event) =>
+                onChange({
+                  ...signature,
+                  logo: {
+                    contentBytes: signature.logo!.contentBytes,
+                    width: Number(event.target.value),
+                  },
+                })
+              }
+            >
+              {[80, 120, 160, 200, 240, 320].map((width) => (
+                <option key={width} value={width}>
+                  {t('com_ui_mail_signature_logo_width_value', { width })}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             className="mail-button"
             disabled={disabled || logoBusy}
             onClick={() => {
               const { logo: _logo, ...withoutLogo } = signature;
-              onChange(withoutLogo);
+              editor.current
+                ?.querySelectorAll(signatureLogoSelector)
+                .forEach((marker) => marker.remove());
+              const html = clean(editor.current?.innerHTML ?? withoutLogo.html);
+              last.current = html;
+              onChange({ ...withoutLogo, html });
+              rememberSelection();
             }}
           >
             {t('com_ui_mail_signature_logo_remove')}

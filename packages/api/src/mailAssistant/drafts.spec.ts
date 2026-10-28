@@ -102,7 +102,172 @@ function setup(options: { files?: object[]; bytes?: Uint8Array; quote?: string }
   };
 }
 
+async function logoSignature() {
+  const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: '#123456' } })
+    .png()
+    .toBuffer();
+  return {
+    enabled: true,
+    html: '<p>Eigener Name</p>',
+    fontFamily: 'Calibri' as const,
+    fontSize: 11 as const,
+    logo: { contentBytes: png.toString('base64') },
+  };
+}
+
 describe('complete, own reply drafts', () => {
+  test('uploads and verifies the signature logo before writing its CID and uses the current draft ETag', async () => {
+    const state = setup();
+    let uploaded = false;
+    let verified = false;
+    state.request.mockImplementation(async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      if (path === '/v1.0/me/messages/draft' && init?.method === 'PATCH') {
+        expect(uploaded).toBe(true);
+        expect(verified).toBe(true);
+        expect((init.headers as Record<string, string>)['If-Match']).toBe('W/"employee"');
+      }
+      const response = await state.implementation(url, init);
+      if (path === '/v1.0/me/messages/draft/attachments' && init?.method === 'POST') {
+        expect(state.body()).not.toContain('cid:kisuno-signature-');
+        uploaded = true;
+        state.alter(state.body());
+      }
+      if (path === '/v1.0/me/messages/draft/attachments' && init?.method !== 'POST') {
+        verified = uploaded;
+      }
+      return response;
+    });
+    await expect(
+      state.graph.createReply('original', 'Danke', await logoSignature()),
+    ).resolves.not.toHaveProperty('warnings');
+  });
+  test('does not leave an unattached signature CID when Graph normalizes the reply markup', async () => {
+    const state = setup();
+    state.request.mockImplementation(async (url, init) => {
+      const response = await state.implementation(url, init);
+      if (init?.method !== 'PATCH') return response;
+      const value = await response.json();
+      value.body.content = value.body.content.replace('<p style=', '<p class="MsoNormal" style=');
+      state.alter(value.body.content);
+      return json(value);
+    });
+    const result = await state.graph.createReply('original', 'Danke', await logoSignature());
+    expect(result.warnings?.join()).toContain('formatiert');
+    expect(state.copied).toHaveLength(1);
+    expect(state.body()).toContain(`cid:${(state.copied[0] as { contentId: string }).contentId}`);
+  });
+  test('detects a signature CID removed from the body by Graph instead of reporting a complete draft', async () => {
+    const state = setup();
+    state.request.mockImplementation(async (url, init) => {
+      const response = await state.implementation(url, init);
+      if (init?.method !== 'PATCH') return response;
+      const value = await response.json();
+      value.body.content = value.body.content.replace(/src="cid:kisuno-signature-[^"]+"/, 'src=""');
+      state.alter(value.body.content);
+      return json(value);
+    });
+    const result = await state.graph.createReply('original', 'Danke', await logoSignature());
+    expect(result.warnings?.join()).toContain('unvollständig');
+    expect(result.stop).toBe(true);
+    expect(state.copied).toHaveLength(1);
+    expect(state.request.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
+  });
+  test('a CID elsewhere in the quoted body cannot substitute the own signature image', async () => {
+    const state = setup();
+    state.request.mockImplementation(async (url, init) => {
+      const response = await state.implementation(url, init);
+      if (init?.method !== 'PATCH') return response;
+      const value = await response.json();
+      const logo = /<img\b[^>]*src="cid:kisuno-signature-[^"]+"[^>]*>/.exec(
+        value.body.content,
+      )?.[0];
+      value.body.content = value.body.content
+        .replace(logo, '')
+        .replace('</body>', `${logo}</body>`);
+      state.alter(value.body.content);
+      return json(value);
+    });
+    const result = await state.graph.createReply('original', 'Danke', await logoSignature());
+    expect(result.warnings?.join()).toContain('unvollständig');
+    expect(result.stop).toBe(true);
+    expect(state.copied).toHaveLength(1);
+    const contentId = (state.copied[0] as { contentId: string }).contentId;
+    expect(state.body()).toContain(`cid:${contentId}`);
+    expect(state.body().split('<!-- /kisuno-mail-signature:v1 -->')[0]).not.toContain(
+      `cid:${contentId}`,
+    );
+  });
+  test.each([
+    { isInline: false },
+    { contentId: 'different-cid' },
+    { contentId: undefined },
+    { contentType: 'text/plain' },
+    { id: 'different-attachment' },
+  ])(
+    'does not publish a signature CID when stored attachment metadata disagrees: %j',
+    async (changed) => {
+      const state = setup();
+      state.request.mockImplementation(async (url, init) => {
+        const response = await state.implementation(url, init);
+        if (
+          new URL(String(url)).pathname !== '/v1.0/me/messages/draft/attachments' ||
+          init?.method === 'POST'
+        )
+          return response;
+        const value = await response.json();
+        value.value = value.value.map((row: Record<string, unknown>) => ({ ...row, ...changed }));
+        return json(value);
+      });
+      const result = await state.graph.createReply('original', 'Danke', await logoSignature());
+      expect(result.warnings?.join()).toContain('unvollständig');
+      expect(result.stop).toBe(true);
+      expect(state.body()).not.toContain('cid:kisuno-signature-');
+      expect(state.request.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+    },
+  );
+  test('a failed signature upload leaves the native draft without an unresolved CID and is not retried', async () => {
+    const state = setup();
+    state.request.mockImplementation(async (url, init) =>
+      String(url).endsWith('/draft/attachments') && init?.method === 'POST'
+        ? Promise.reject(Error('private-content'))
+        : state.implementation(url, init),
+    );
+    const result = await state.graph.createReply('original', 'Danke', await logoSignature());
+    expect(result.warnings?.join()).toContain('unvollständig');
+    expect(result.stop).toBe(true);
+    expect(state.body()).toBe(quote);
+    expect(state.request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2);
+    expect(state.request.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+    expect(result.warnings?.join()).not.toContain('private-content');
+  });
+  test('employee changes made during signature upload cannot be replaced by the full generated body', async () => {
+    const state = setup();
+    state.request.mockImplementation(async (url, init) => {
+      const response = await state.implementation(url, init);
+      if (String(url).endsWith('/draft/attachments') && init?.method === 'POST')
+        state.alter('<html><body>Manuelle Antwort</body></html>');
+      return response;
+    });
+    const result = await state.graph.createReply('original', 'Danke', await logoSignature());
+    expect(result.warnings?.join()).toContain('inzwischen verändert');
+    expect(state.body()).toContain('Manuelle Antwort');
+    expect(state.request.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+  });
+  test('a final concurrent employee edit rejects the conditional signature body update', async () => {
+    const state = setup();
+    state.request.mockImplementation(async (url, init) => {
+      if (init?.method === 'PATCH')
+        state.alter('<html><body>Letzte manuelle Änderung</body></html>');
+      return state.implementation(url, init);
+    });
+    const result = await state.graph.createReply('original', 'Danke', await logoSignature());
+    expect(result.warnings?.join()).toContain('unvollständig');
+    expect(result.stop).toBe(true);
+    expect(state.body()).toContain('Letzte manuelle Änderung');
+    expect(state.request.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
+    expect(state.copied).toHaveLength(1);
+  });
   test('attaches an explicitly uploaded signature logo once using a fresh inline CID', async () => {
     const state = setup();
     const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: '#123456' } })
