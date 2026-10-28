@@ -82,6 +82,59 @@ describe('opaque mail preview frame', () => {
     expect(screen.queryByText('Mail body')).not.toBeInTheDocument();
     expect(screen.getByText('Sicherer Hinweis')).toBeInTheDocument();
   });
+  test('revalidates ERP links and replaces all navigation privileges with fixed new-tab attributes', () => {
+    const wrapped =
+      'https://che01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ferp.rzcloud.ch%2Fmail%2Fview%3Fres_id%3D4&reserved=0';
+    const output = createMailPreviewDocument(
+      `<a href="https://erp.rzcloud.ch/odoo" target="_top" rel="opener" ping="https://tracker.test" download onclick="alert(1)">ERP</a><a href="${wrapped}">Safe Links</a><a href="https://evil.test">Blocked</a><a href="https://erp.rzcloud.ch/r/code">Redirect</a><a href="javascript:alert(1)">Script</a>`,
+      true,
+    );
+    const doc = parse(output!);
+    const anchors = doc.body.querySelectorAll('a[href]');
+    expect(anchors).toHaveLength(2);
+    for (const anchor of anchors) {
+      expect(anchor.getAttribute('target')).toBe('_blank');
+      expect(anchor.getAttribute('rel')).toBe('noopener noreferrer');
+      expect(anchor.getAttribute('referrerpolicy')).toBe('no-referrer');
+      expect(anchor.getAttribute('title')).toContain('erp.rzcloud.ch');
+    }
+    expect(anchors[1].getAttribute('href')).toBe(wrapped);
+    expect(doc.body.innerHTML).not.toMatch(
+      /_top|ping=|download|onclick|evil.test|tracker|javascript:|\/r\/code/,
+    );
+    expect(doc.body.textContent).toContain('BlockedRedirectScript');
+  });
+  test('deployment opt-in grants only user-clicked popup navigation with no preview execution or fetches', () => {
+    render(
+      <SafeMailPreview
+        title="ERP Mail"
+        text="Fallback"
+        preview={{
+          html: '<a href="https://erp.rzcloud.ch/odoo">ERP</a><img src="https://erp.rzcloud.ch/pixel"><script>alert(1)</script><form action="https://erp.rzcloud.ch"><input name="x"></form>',
+          blockedImages: 1,
+          truncated: false,
+          warnings: [],
+          linksEnabled: true,
+        }}
+      />,
+    );
+    const frame = screen.getByTitle('ERP Mail');
+    expect(frame).toHaveAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
+    expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
+    const doc = parse(frame.getAttribute('srcdoc')!);
+    expect(doc.body.querySelector('a')?.getAttribute('href')).toBe('https://erp.rzcloud.ch/odoo');
+    expect(doc.body.querySelector('script,form,input,[src],[onclick]')).toBeNull();
+    expect(screen.getByText('com_ui_mail_preview_erp_links')).toBeInTheDocument();
+  });
+  test('mail-supplied attributes cannot enable links without the separate server flag', () => {
+    const doc = parse(
+      createMailPreviewDocument(
+        '<a href="https://erp.rzcloud.ch/odoo" data-links-enabled="true">ERP</a>',
+      )!,
+    );
+    expect(doc.body.querySelector('a,[href],[data-links-enabled]')).toBeNull();
+    expect(doc.body.textContent).toBe('ERP');
+  });
   test('large and pathological preview falls back to escaped text', () => {
     expect(createMailPreviewDocument('x'.repeat(4_000_001))).toBeUndefined();
     expect(createMailPreviewDocument('<p>x</p>'.repeat(20_001))).toBeUndefined();

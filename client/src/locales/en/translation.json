@@ -2517,6 +2517,7 @@
   "com_ui_mail_job_loading_error": "Der Auftragsstatus konnte nicht geladen werden. Bereits angenommene Aufträge können weiterhin laufen.",
   "com_ui_mail_job_uncertain": "Bitte zuerst in Outlook prüfen. Für diese Mail wird kein zweiter Versuch automatisch gestartet.",
   "com_ui_mail_analysis_progress": "Mailanalyse läuft; die Gesamtzahl steht nach dem vollständigen Durchlauf fest.",
+  "com_ui_mail_preview_erp_links": "Nur Links zu erp.rzcloud.ch öffnen sich auf deinen Klick in einem neuen Tab. Vorhandene Microsoft Safe Links bleiben erhalten. Andere Links und externe Bilder bleiben gesperrt.",
   "com_ui_mail_preview_safety": "Formatierte Vorschau. Externe Bilder und Links bleiben gesperrt.",
   "com_ui_mail_preview_blocked": "{{count}} Bilder wurden nicht geladen.",
   "com_ui_mail_preview_truncated": "Die Vorschau ist gekürzt. Die vollständige Mail bleibt in Outlook verfügbar.",

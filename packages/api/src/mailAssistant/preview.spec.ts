@@ -4,7 +4,7 @@ import { sanitizeMailPreview } from './preview';
 describe('isolated mail HTML preview', () => {
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ', 'base64');
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
-  function setup(html = '<p>Mail</p>') {
+  function setup(html = '<p>Mail</p>', erpLinksEnabled = false) {
     const request = jest
       .fn()
       .mockResolvedValue(json({ id: 'mail', body: { contentType: 'html', content: html } }));
@@ -16,6 +16,7 @@ describe('isolated mail HTML preview', () => {
         fetch: request,
         token: async () => 'private-fixture-token',
         beforeRequest: guard,
+        erpLinksEnabled,
       }),
     };
   }
@@ -91,6 +92,46 @@ describe('isolated mail HTML preview', () => {
     expect(url).toBe('https://graph.microsoft.com/v1.0/me/messages/mail?$select=id,body');
     expect(init).toMatchObject({ method: 'GET', redirect: 'error' });
     expect(init.headers.Prefer).toContain('outlook.body-content-type="html"');
+  });
+  test('enables only validated ERP anchors through the deployment policy and makes no link request', async () => {
+    const href = 'https://erp.rzcloud.ch/mail/view?model=sale.order&amp;res_id=4';
+    const { graph, request } = setup(
+      `<a href="${href}" target="_top" ping="https://tracker.test" download onclick="alert(1)">Abonnement ansehen</a><a href="https://evil.test">Blocked</a>`,
+      true,
+    );
+    const result = await graph.preview('mail');
+    expect(result.linksEnabled).toBe(true);
+    expect(result.html).toContain(
+      'href="https://erp.rzcloud.ch/mail/view?model=sale.order&amp;res_id=4"',
+    );
+    expect(result.html).toContain('target="_blank"');
+    expect(result.html).toContain('rel="noopener noreferrer"');
+    expect(result.html).toContain('referrerpolicy="no-referrer"');
+    expect(result.html).not.toMatch(/_top|ping=|download|onclick|evil.test|tracker/);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(String(request.mock.calls[0][0])).toMatch(/^https:\/\/graph.microsoft.com\//);
+  });
+  test('keeps approved ERP links inert without deployment opt-in', async () => {
+    const { graph } = setup(
+      '<a href="https://erp.rzcloud.ch/odoo" data-links-enabled="true">ERP</a>',
+    );
+    const result = await graph.preview('mail');
+    expect(result.linksEnabled).toBe(false);
+    expect(result.html).not.toMatch(/<a|href|data-links-enabled/);
+    expect(result.html).toContain('ERP');
+  });
+  test('preserves only a valid existing Safe Links wrapper and strips active content with links enabled', () => {
+    const href =
+      'https://che01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ferp.rzcloud.ch%2Fmail%2Fview%3Fres_id%3D4&amp;reserved=0';
+    const result = sanitizeMailPreview(
+      `<a href="${href}">ERP</a><a href="https://erp.rzcloud.ch/r/code">Redirect</a><script>alert(1)</script><img src="https://erp.rzcloud.ch/pixel"><iframe src="https://erp.rzcloud.ch"></iframe><form action="https://erp.rzcloud.ch"><button>Submit</button></form>`,
+      new Map(),
+      true,
+    );
+    expect(result.html).toContain(`href="${href}"`);
+    expect(result.html).toContain('über Microsoft Safe Links');
+    expect(result.html).not.toMatch(/<script|<iframe|<form|src=|action=|\/r\/code/);
+    expect(result.blockedImages).toBe(1);
   });
   test('bounds huge HTML and escapes plain text', async () => {
     const { graph, request } = setup('x'.repeat(1_000_001));

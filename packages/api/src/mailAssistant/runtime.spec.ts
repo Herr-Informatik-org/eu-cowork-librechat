@@ -228,6 +228,29 @@ describe('Mail assistant runtime boundaries', () => {
       expect(runtime.engine.requestDraft).toEqual(expect.any(Function));
     },
   );
+  it.each([undefined, 'false', '', 'TRUE', '1', 'true '])(
+    'keeps ERP preview links blocked without exact deployment opt-in (%s)',
+    (value) => {
+      const f = fixture();
+      if (value !== undefined) f.deps.env!.MAIL_ASSISTANT_ERP_LINKS_ENABLED = value;
+      expect(mailAssistantConfigurationStatus(f.deps.env).erpLinksEnabled).toBe(false);
+      expect(createMailAssistantRuntime(f.deps)).not.toBeNull();
+    },
+  );
+  it('enables ERP preview links only in an explicitly enabled valid CW01 runtime', () => {
+    const f = fixture();
+    f.deps.env!.MAIL_ASSISTANT_ERP_LINKS_ENABLED = 'true';
+    expect(mailAssistantConfigurationStatus(f.deps.env).erpLinksEnabled).toBe(true);
+    for (const override of [
+      { MAIL_ASSISTANT_ENABLED: 'false' },
+      { MAIL_ASSISTANT_INSTANCE: 'cw02' },
+      { MAIL_ASSISTANT_DATA_KEY: 'invalid' },
+    ]) {
+      const env = { ...f.deps.env, ...override };
+      expect(mailAssistantConfigurationStatus(env).erpLinksEnabled).toBe(false);
+      expect(createMailAssistantRuntime({ ...f.deps, env })).toBeNull();
+    }
+  });
   it('creates Odoo services only for an explicitly enabled valid CW01 runtime', () => {
     const f = fixture();
     f.deps.env!.MAIL_ASSISTANT_ODOO_ENABLED = 'true';
@@ -455,6 +478,7 @@ describe('Mail assistant runtime boundaries', () => {
       enabled: true,
       configured: false,
       odooEnabled: false,
+      erpLinksEnabled: false,
       reason: expect.any(String),
     });
     expect(createMailAssistantRuntime(f.deps)).toBeNull();
@@ -462,6 +486,7 @@ describe('Mail assistant runtime boundaries', () => {
       enabled: true,
       configured: true,
       odooEnabled: false,
+      erpLinksEnabled: false,
     });
   });
   it.each(['ban', 'deny', 'unverify', 'remove'] as const)(

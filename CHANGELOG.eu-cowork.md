@@ -1,5 +1,15 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-28 — Gezielte ERP-Links in der Mailvorschau auf CWV01
+
+- Nur mit `MAIL_ASSISTANT_ERP_LINKS_ENABLED=true` auf der freigegebenen CW01-Instanz
+  bleiben HTTPS-Links zu genau `erp.rzcloud.ch` anklickbar. Bestehende Microsoft
+  Safe Links bleiben erhalten, wenn ihr eingebettetes Ziel ebenfalls dieser Host ist.
+- Server und Browser prüfen dieselbe begrenzte Linkregel. Bekannte Weiterleitungswege,
+  fremde Hosts, uneindeutige URLs und aktive Mailinhalte bleiben gesperrt. Es findet
+  kein Vorabruf statt; der Benutzer öffnet einen getrennten Tab ohne Referrer oder
+  Zugriff auf Cowork. Die Freigabe ist keine zusätzliche Malwareprüfung.
+
 ## 2026-10-28 — Persönliche Signaturen mit passenden Abständen und Logo
 
 - Markierte Signaturtexte behalten ihre eigenen Schriftgrössen. Eingefügte

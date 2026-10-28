@@ -1,4 +1,5 @@
 import sanitizeHtml from 'sanitize-html';
+import { mailPreviewLink } from 'librechat-data-provider';
 import type { MailHtmlPreview } from './types';
 import { MailGraphError } from './errors';
 
@@ -44,6 +45,7 @@ for (const prefix of ['margin', 'padding']) {
   for (const side of ['top', 'right', 'bottom', 'left']) styles[`${prefix}-${side}`] = [spacing];
 }
 const tags = [
+  'a',
   'p',
   'div',
   'span',
@@ -102,7 +104,11 @@ function cid(value: string): string | undefined {
 }
 
 /** Parse hostile HTML with a maintained sanitizer before any image lookup. */
-export function sanitizeMailPreview(html: string, images: ReadonlyMap<string, string> = new Map()) {
+export function sanitizeMailPreview(
+  html: string,
+  images: ReadonlyMap<string, string> = new Map(),
+  linksEnabled = false,
+) {
   const references = new Set<string>();
   let blockedImages = 0;
   let nodes = 0;
@@ -113,6 +119,7 @@ export function sanitizeMailPreview(html: string, images: ReadonlyMap<string, st
     allowedAttributes: {
       '*': ['style', 'dir'],
       img: ['src', 'alt', 'width', 'height'],
+      a: ['href', 'target', 'rel', 'referrerpolicy', 'title'],
       td: ['colspan', 'rowspan', 'width', 'height', 'align', 'valign'],
       th: ['colspan', 'rowspan', 'width', 'height', 'align', 'valign'],
       table: ['width', 'height', 'cellpadding', 'cellspacing', 'border', 'align'],
@@ -120,7 +127,7 @@ export function sanitizeMailPreview(html: string, images: ReadonlyMap<string, st
     },
     allowedStyles: { '*': styles },
     allowedSchemes: [],
-    allowedSchemesByTag: { img: ['data'] },
+    allowedSchemesByTag: { img: ['data'], a: ['https'] },
     allowProtocolRelative: false,
     nestingLimit: 32,
     nonTextTags: [
@@ -161,7 +168,23 @@ export function sanitizeMailPreview(html: string, images: ReadonlyMap<string, st
           )
             delete attribs[key];
         }
-        if (name === 'a') return { tagName: 'span', attribs: { style: attribs.style || '' } };
+        if (name === 'a') {
+          const link = linksEnabled === true && mailPreviewLink(attribs.href || '');
+          if (!link) return { tagName: 'span', attribs: { style: attribs.style || '' } };
+          return {
+            tagName: 'a',
+            attribs: {
+              style: attribs.style || '',
+              href: link.href,
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              referrerpolicy: 'no-referrer',
+              title: link.viaSafeLinks
+                ? 'erp.rzcloud.ch über Microsoft Safe Links in neuem Tab öffnen'
+                : 'erp.rzcloud.ch in neuem Tab öffnen',
+            },
+          };
+        }
         if (name === 'font') {
           const legacy = [];
           if (attribs.face && styles['font-family'][0].test(attribs.face))
@@ -222,7 +245,9 @@ export function createPreviewOperation({
   call,
   id,
   beforeRequest,
+  linksEnabled = false,
 }: {
+  linksEnabled?: boolean;
   call: GraphCall;
   id: (value: string) => string;
   beforeRequest: () => Promise<void>;
@@ -253,14 +278,20 @@ export function createPreviewOperation({
     truncated ||= html.length > maxHtml;
     let first: ReturnType<typeof sanitizeMailPreview>;
     try {
-      first = sanitizeMailPreview(html);
+      first = sanitizeMailPreview(html, new Map(), linksEnabled);
     } catch {
       truncated = true;
       html =
         '<p>Diese Mail ist zu komplex für die sichere Vorschau. Bitte öffne sie in Outlook.</p>';
-      first = sanitizeMailPreview(html);
+      first = sanitizeMailPreview(html, new Map(), linksEnabled);
     }
     await beforeRequest();
-    return { html: first.html, blockedImages: first.blockedImages, truncated, warnings };
+    return {
+      html: first.html,
+      blockedImages: first.blockedImages,
+      truncated,
+      warnings,
+      linksEnabled: linksEnabled === true,
+    };
   };
 }

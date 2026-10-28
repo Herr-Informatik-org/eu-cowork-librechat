@@ -161,6 +161,7 @@ export interface MailDraftResponse {
 }
 
 export interface MailHtmlPreview {
+  linksEnabled?: boolean;
   html: string;
   blockedImages: number;
   truncated: boolean;

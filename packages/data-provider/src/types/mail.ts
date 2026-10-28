@@ -79,6 +79,7 @@ export type MailWorkspaceStatus = {
   results: MailWorkspaceResult[];
 };
 export type MailWorkspacePreview = {
+  linksEnabled?: boolean;
   html: string;
   blockedImages: number;
   truncated: boolean;

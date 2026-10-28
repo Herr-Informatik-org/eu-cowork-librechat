@@ -97,10 +97,12 @@ export function createMailGraph({
   token,
   beforeRequest,
   fetch: request = globalThis.fetch,
+  erpLinksEnabled = false,
 }: {
   token: () => Promise<string>;
   beforeRequest: () => Promise<void>;
   fetch?: MailFetch;
+  erpLinksEnabled?: boolean;
 }): MailGraph {
   async function raw(
     path: string,
@@ -460,6 +462,7 @@ export function createMailGraph({
       return { ...page, messages: selected };
     },
     preview: createPreviewOperation({
+      linksEnabled: erpLinksEnabled,
       call,
       id,
       beforeRequest,

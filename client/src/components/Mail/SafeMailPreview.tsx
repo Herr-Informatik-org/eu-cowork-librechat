@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import DOMPurify from 'dompurify';
+import { mailPreviewLink } from 'librechat-data-provider';
 import type { MailWorkspacePreview } from 'librechat-data-provider';
 import { useLocalize } from '~/hooks';
 
@@ -83,7 +84,7 @@ const policy =
   "default-src 'none'; script-src 'none'; connect-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 /** Server output remains untrusted: parse again before placing it in an opaque-origin frame. */
-export function createMailPreviewDocument(html: string): string | undefined {
+export function createMailPreviewDocument(html: string, linksEnabled = false): string | undefined {
   if (typeof html !== 'string' || html.length > 4_000_000) return;
   // Reject excessive markup before DOMPurify allocates its inert DOM; this is a size guard only.
   let marker = -1;
@@ -131,6 +132,21 @@ export function createMailPreviewDocument(html: string): string | undefined {
       )
         node.removeAttribute(name);
     }
+    if (node.tagName === 'A') {
+      const link = linksEnabled === true && mailPreviewLink(node.getAttribute('href') || '');
+      if (!link) {
+        node.removeAttribute('href');
+        return;
+      }
+      node.setAttribute('href', link.href);
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer');
+      node.setAttribute('referrerpolicy', 'no-referrer');
+      node.setAttribute(
+        'title',
+        link.viaSafeLinks ? 'erp.rzcloud.ch (Microsoft Safe Links)' : 'erp.rzcloud.ch',
+      );
+    }
     if (node.tagName === 'IMG') {
       const source = node.getAttribute('src') || '';
       if (
@@ -150,8 +166,9 @@ export function createMailPreviewDocument(html: string): string | undefined {
   let body: string;
   try {
     body = sanitizer.sanitize(html, {
-      ALLOWED_TAGS: allowedTags,
+      ALLOWED_TAGS: linksEnabled === true ? [...allowedTags, 'a'] : allowedTags,
       ALLOWED_ATTR: [
+        ...(linksEnabled === true ? ['href'] : []),
         'style',
         'dir',
         'src',
@@ -167,7 +184,8 @@ export function createMailPreviewDocument(html: string): string | undefined {
         'align',
         'valign',
       ],
-      ALLOWED_URI_REGEXP: png,
+      ALLOWED_URI_REGEXP:
+        linksEnabled === true ? /^(?:https:\/\/|data:image\/png;base64,iVBORw0KGgo)/i : png,
       ADD_URI_SAFE_ATTR: [
         'style',
         'dir',
@@ -215,12 +233,18 @@ export default function SafeMailPreview({
   title: string;
 }) {
   const t = useLocalize();
-  const document = useMemo(() => preview && createMailPreviewDocument(preview.html), [preview]);
+  const linksEnabled = preview?.linksEnabled === true;
+  const document = useMemo(
+    () => preview && createMailPreviewDocument(preview.html, linksEnabled),
+    [preview, linksEnabled],
+  );
   return (
     <div>
       {document ? (
         <>
-          <p className="mail-muted">{t('com_ui_mail_preview_safety')}</p>
+          <p className="mail-muted">
+            {t(linksEnabled ? 'com_ui_mail_preview_erp_links' : 'com_ui_mail_preview_safety')}
+          </p>
           {preview && preview.blockedImages > 0 && (
             <p className="mail-muted">
               {t('com_ui_mail_preview_blocked', { count: preview.blockedImages })}
@@ -235,7 +259,7 @@ export default function SafeMailPreview({
           <iframe
             title={title}
             srcDoc={document}
-            sandbox=""
+            sandbox={linksEnabled ? 'allow-popups allow-popups-to-escape-sandbox' : ''}
             referrerPolicy="no-referrer"
             style={{
               display: 'block',

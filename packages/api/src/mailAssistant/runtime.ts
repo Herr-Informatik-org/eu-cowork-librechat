@@ -96,6 +96,7 @@ export function mailAssistantConfigurationStatus(env: NodeJS.ProcessEnv = proces
   enabled: boolean;
   configured: boolean;
   odooEnabled: boolean;
+  erpLinksEnabled: boolean;
   reason?: string;
 } {
   const enabled = env.MAIL_ASSISTANT_ENABLED === 'true';
@@ -104,6 +105,7 @@ export function mailAssistantConfigurationStatus(env: NodeJS.ProcessEnv = proces
       enabled: false,
       configured: false,
       odooEnabled: false,
+      erpLinksEnabled: false,
       reason: 'Der Mail-Assistent ist deaktiviert.',
     };
   try {
@@ -114,12 +116,14 @@ export function mailAssistantConfigurationStatus(env: NodeJS.ProcessEnv = proces
       enabled: true,
       configured: true,
       odooEnabled: env.MAIL_ASSISTANT_ODOO_ENABLED === 'true',
+      erpLinksEnabled: env.MAIL_ASSISTANT_ERP_LINKS_ENABLED === 'true',
     };
   } catch {
     return {
       enabled: true,
       configured: false,
       odooEnabled: false,
+      erpLinksEnabled: false,
       reason: 'Die private CW01-Mail-Konfiguration ist unvollständig oder ungültig.',
     };
   }
@@ -155,7 +159,8 @@ export function createMailAssistantRuntime(
   deps: MailRuntimeDependencies,
 ): MailAssistantRuntime | null {
   const env = deps.env ?? process.env;
-  if (!mailAssistantConfigurationStatus(env).configured) return null;
+  const configuration = mailAssistantConfigurationStatus(env);
+  if (!configuration.configured) return null;
   const oauthConfig = readMailOAuthConfig(env);
   const codec = createMailCodec(env.MAIL_ASSISTANT_DATA_KEY ?? '');
   const request = deps.fetch ?? fetch;
@@ -575,7 +580,12 @@ export function createMailAssistantRuntime(
       };
     },
     graph: async (ownerId, beforeRequest) =>
-      createMailGraph({ token: () => oauth.token(ownerId), beforeRequest, fetch: request }),
+      createMailGraph({
+        token: () => oauth.token(ownerId),
+        beforeRequest,
+        fetch: request,
+        erpLinksEnabled: configuration.erpLinksEnabled,
+      }),
     analyze,
     chat: async (ownerId, messages, input, beforeRequest) =>
       (await analyze(ownerId, messages, beforeRequest, undefined, undefined, input)).draft,
