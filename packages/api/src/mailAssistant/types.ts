@@ -1,5 +1,7 @@
 export type MailPriority = 'important' | 'normal' | 'low';
 export type MailAction = 'reply' | 'review' | 'information';
+/** Last recorded Outlook action, not proof of delivery or a complete send history. */
+export type MailResponseAction = 'replied' | 'forwarded';
 export type MailFetch = (
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
@@ -59,6 +61,8 @@ export interface MailMessage {
   replyTo?: { name: string; address: string }[];
   isRead?: boolean;
   hasAttachments?: boolean;
+  responseAction?: MailResponseAction;
+  responseActionAt?: string;
   receivedAt: string;
   sentAt?: string;
   body: string;
@@ -85,6 +89,8 @@ export interface MailResult extends Omit<MailAnalysis, 'draft'> {
   analysisStatus?: 'pending' | 'complete';
   isRead?: boolean;
   hasAttachments?: boolean;
+  responseAction?: MailResponseAction;
+  responseActionAt?: string;
   id: string;
   subject: string;
   sender: string;
@@ -116,6 +122,8 @@ export interface MailResultContent {
   resultId: string;
   mailbox: string;
   message: {
+    responseAction?: MailResponseAction;
+    responseActionAt?: string;
     replyRecipients?: { name: string; address: string }[];
     subject: string;
     sender: string;

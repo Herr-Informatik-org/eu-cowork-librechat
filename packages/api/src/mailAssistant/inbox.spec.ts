@@ -128,6 +128,39 @@ describe('owner-bound complete inbox metadata view', () => {
     });
     expect(f.rows.size).toBe(2);
   });
+  test('refreshes Outlook action metadata without changing analysis, drafts or result revision', async () => {
+    const f = setup();
+    f.graph.inboxPage.mockResolvedValueOnce({
+      messages: [
+        { ...mail(), responseAction: 'replied', responseActionAt: '2026-10-27T10:10:00.000Z' },
+      ],
+      hasMore: false,
+    });
+    const first = (await f.service.inbox('alice')).results[0];
+    expect(first.responseAction).toBe('replied');
+    const initial = structuredClone([...f.rows.values()]);
+    f.graph.inboxPage.mockResolvedValueOnce({
+      messages: [
+        { ...mail(), responseAction: 'forwarded', responseActionAt: '2026-10-27T10:20:00.000Z' },
+      ],
+      hasMore: false,
+    });
+    const refreshed = (await f.service.inbox('alice')).results[0];
+    expect(refreshed).toMatchObject({
+      responseAction: 'forwarded',
+      responseActionAt: '2026-10-27T10:20:00.000Z',
+      revision: first.revision,
+      draftStatus: first.draftStatus,
+    });
+    f.graph.inboxPage.mockResolvedValueOnce({ messages: [mail()], hasMore: false });
+    const unknown = (await f.service.inbox('alice')).results[0];
+    expect(unknown.responseAction).toBeUndefined();
+    expect(unknown.responseActionAt).toBeUndefined();
+    expect(unknown.revision).toBe(first.revision);
+    expect([...f.rows.values()]).toEqual(initial);
+    expect(f.adapter.analyze).not.toHaveBeenCalled();
+    expect(f.adapter.analyzeDraft).not.toHaveBeenCalled();
+  });
   test('encrypted cursor follows metadata and is bound to owner, scope, generation and expiry', async () => {
     const f = setup();
     const link = 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skip=50';

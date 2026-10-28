@@ -960,3 +960,97 @@ it('preserves per-mail chat during navigation and ignores a late response after 
   expect(screen.queryByText('Private verspätete Antwort')).not.toBeInTheDocument();
   expect(screen.queryByText('Private Frage zur ersten Mail')).not.toBeInTheDocument();
 });
+
+it.each([
+  ['replied', 'beantwortet'],
+  ['forwarded', 'weitergeleitet'],
+] as const)(
+  'shows the recorded %s action compactly in the list and open message',
+  (action, label) => {
+    mockRows = [
+      { ...mockRows[0], responseAction: action, responseActionAt: '2026-10-28T08:30:00Z' },
+    ];
+    mockContent.message = {
+      ...mockContent.message,
+      responseAction: action,
+      responseActionAt: '2026-10-28T08:30:00Z',
+    };
+    mount();
+    chooseMail();
+    const icons = screen.getAllByRole('img', {
+      name: `Letzte in Outlook gespeicherte Aktion: ${label} · 28.10.26, 09:30`,
+    });
+    expect(icons).toHaveLength(2);
+    for (const icon of icons) {
+      expect(icon).toHaveAttribute('title', icon.getAttribute('aria-label'));
+      expect(icon.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    }
+    expect(icons[0].closest('.mail-row-top')).not.toBeNull();
+    expect(icons[1].closest('.mail-detail-kicker')).not.toBeNull();
+  },
+);
+
+it.each(['AW: Termin', 'WG: Termin'])(
+  'never derives a response status from subject %s or a saved draft',
+  (subject) => {
+    mockRows = [{ ...mockRows[0], subject, draftStatus: 'created' }];
+    mount();
+    chooseMail();
+    expect(
+      screen.queryByRole('img', { name: /Letzte in Outlook gespeicherte Aktion/ }),
+    ).not.toBeInTheDocument();
+  },
+);
+
+it('refreshes response metadata in list and detail without replacing an unsaved reply or retaining unknown status', () => {
+  mockRows = [{ ...mockRows[0], responseAction: 'replied' }];
+  mockContent.message = { ...mockContent.message, responseAction: 'replied' };
+  const view = mount();
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Antwort bearbeiten' }));
+  fireEvent.change(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ }), {
+    target: { value: 'Meine ungespeicherte Antwort' },
+  });
+  mockRows = [{ ...mockRows[0], responseAction: 'forwarded' }];
+  mockContent = {
+    ...mockContent,
+    message: { ...mockContent.message, responseAction: 'forwarded' },
+  };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  expect(
+    screen.getAllByRole('img', { name: 'Letzte in Outlook gespeicherte Aktion: weitergeleitet' }),
+  ).toHaveLength(2);
+  expect(screen.queryByRole('img', { name: /beantwortet/ })).not.toBeInTheDocument();
+  expect(screen.getByDisplayValue('Meine ungespeicherte Antwort')).toBeVisible();
+  mockRows = [{ ...mockRows[0], responseAction: undefined }];
+  mockContent = { ...mockContent, message: { ...mockContent.message, responseAction: undefined } };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  expect(
+    screen.queryByRole('img', { name: /Letzte in Outlook gespeicherte Aktion/ }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByDisplayValue('Meine ungespeicherte Antwort')).toBeVisible();
+});
+
+it('prefers current detail metadata over an older list marker and does not claim unknown means unanswered', () => {
+  mockRows = [{ ...mockRows[0], responseAction: 'replied' }];
+  mount();
+  chooseMail();
+  expect(
+    screen.getAllByRole('img', { name: /Letzte in Outlook gespeicherte Aktion/ }),
+  ).toHaveLength(1);
+  expect(
+    within(screen.getByRole('article', { name: mockTranslations.com_ui_mail_detail })).queryByRole(
+      'img',
+    ),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText(/unbeantwortet/i)).not.toBeInTheDocument();
+});

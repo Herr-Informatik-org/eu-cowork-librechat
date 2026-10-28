@@ -15,6 +15,8 @@ import {
   FileText,
   Loader2,
   Keyboard,
+  Reply,
+  Forward,
 } from 'lucide-react';
 import type {
   MailWorkspaceResult,
@@ -75,6 +77,34 @@ function date(value?: string, timeZone = 'Europe/Zurich') {
 function failure(error: Error | null | undefined, fallback: string): string {
   const response = error as (Error & { response?: { data?: { error?: string } } }) | null;
   return response?.response?.data?.error || fallback;
+}
+
+function ResponseAction({
+  value,
+  timeZone,
+}: {
+  value: Pick<MailWorkspaceResult, 'responseAction' | 'responseActionAt'>;
+  timeZone: string;
+}) {
+  const t = useLocalize();
+  if (value.responseAction !== 'replied' && value.responseAction !== 'forwarded') return null;
+  const label = t(
+    value.responseAction === 'replied' ? 'com_ui_mail_replied' : 'com_ui_mail_forwarded',
+  );
+  const timestamp = value.responseActionAt;
+  const description =
+    timestamp && Number.isFinite(Date.parse(timestamp))
+      ? `${label} · ${date(timestamp, timeZone)}`
+      : label;
+  return (
+    <span className="mail-response-action" role="img" aria-label={description} title={description}>
+      {value.responseAction === 'replied' ? (
+        <Reply size={14} aria-hidden="true" />
+      ) : (
+        <Forward size={14} aria-hidden="true" />
+      )}
+    </span>
+  );
 }
 
 function PersonalSettings({
@@ -378,6 +408,11 @@ const Detail = forwardRef<
   useEffect(() => {
     if (editing && tab === 'draft') editorInput.current?.focus();
   }, [editing, tab]);
+  const currentContent =
+    content.data?.resultId === result.id &&
+    content.data.mailbox.toLowerCase() === status.connection.mailbox?.toLowerCase()
+      ? content.data
+      : undefined;
   const displayedContent = editor?.content || content.data;
   const data =
     displayedContent?.resultId === result.id &&
@@ -446,6 +481,10 @@ const Detail = forwardRef<
     >
       <header className="mail-detail-heading">
         <div className="mail-detail-kicker">
+          <ResponseAction
+            value={currentContent ? currentContent.message : result}
+            timeZone={status.settings.timeZone}
+          />
           <span className={`mail-priority ${result.priority}`}>
             {t(
               result.analysisStatus === 'pending'
@@ -1276,6 +1315,7 @@ function MailWorkspace() {
                     >
                       <div className="mail-row-top">
                         <span className="mail-row-sender">{row.sender}</span>
+                        <ResponseAction value={row} timeZone={status.settings.timeZone} />
                         <time>{date(row.receivedAt, status.settings.timeZone)}</time>
                       </div>
                       <div className="mail-row-subject">

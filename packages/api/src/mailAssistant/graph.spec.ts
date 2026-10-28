@@ -49,6 +49,95 @@ describe('fixed personal Graph adapter', () => {
       'thread',
     ]);
   });
+  test.each([
+    ['102', 'replied'],
+    ['103', 'replied'],
+    ['104', 'forwarded'],
+  ])('reads the last Outlook action %s in the existing message request', async (verb, expected) => {
+    const { graph, request } = setup();
+    request.mockResolvedValueOnce(
+      response({
+        ...row,
+        singleValueExtendedProperties: [
+          { id: 'Integer 0x1081', value: verb },
+          { id: 'SystemTime 0x1082', value: '2026-10-28T09:23:45.1234567Z' },
+        ],
+      }),
+    );
+    const actual = await graph.message(row.id);
+    expect(actual.responseAction).toBe(expected);
+    expect(actual.responseActionAt).toBe('2026-10-28T09:23:45.123Z');
+    expect(actual).not.toHaveProperty('singleValueExtendedProperties');
+    expect(request).toHaveBeenCalledTimes(1);
+    const [url, init] = request.mock.calls[0];
+    expect(init.method).toBe('GET');
+    expect(new URL(url).searchParams.get('$expand')).toBe(
+      "singleValueExtendedProperties($filter=id eq 'Integer 0x1081' or id eq 'SystemTime 0x1082')",
+    );
+  });
+  test.each([
+    undefined,
+    [],
+    [{ id: 'Integer 0x1081', value: '0' }],
+    [{ id: 'Integer 0x1081', value: '105' }],
+    [{ id: 'Integer 0x1081', value: '106' }],
+    [{ id: 'Integer 0x1081', value: '0x105' }],
+    [{ id: 'Integer 0x1081', value: 102 }],
+    [{ id: 'Integer 0x1081', value: '102junk' }],
+    [{ id: 'String 0x1081', value: '102' }],
+    [
+      { id: 'Integer 0x1081', value: '102' },
+      { id: 'INTEGER 0X1081', value: '104' },
+    ],
+    [{ id: 'SystemTime 0x1082', value: '2026-10-28T09:23:45Z' }],
+    [null, 'invalid', { id: 'Integer 0x1081', value: '500' }],
+  ])('keeps absent, unsupported or ambiguous last verbs unknown: %j', async (properties) => {
+    const { graph, request } = setup();
+    request.mockResolvedValueOnce(
+      response({
+        ...row,
+        subject: 'AW: WG: RE: FWD: Important mail',
+        singleValueExtendedProperties: properties,
+      }),
+    );
+    const actual = await graph.message(row.id);
+    expect(actual.responseAction).toBeUndefined();
+    expect(actual.responseActionAt).toBeUndefined();
+  });
+  test.each(['invalid', '2026-02-31T09:23:45Z', '2026-10-28', '2026-10-28T25:23:45Z'])(
+    'does not expose invalid action time %s',
+    async (time) => {
+      const { graph, request } = setup();
+      request.mockResolvedValueOnce(
+        response({
+          ...row,
+          singleValueExtendedProperties: [
+            { id: 'Integer 0x1081', value: '104' },
+            { id: 'SystemTime 0x1082', value: time },
+          ],
+        }),
+      );
+      const actual = await graph.message(row.id);
+      expect(actual.responseAction).toBe('forwarded');
+      expect(actual.responseActionAt).toBeUndefined();
+    },
+  );
+  test('never marks a draft as replied and drops ambiguous action times', async () => {
+    const { graph, request } = setup();
+    const properties = [
+      { id: 'Integer 0x1081', value: '102' },
+      { id: 'SystemTime 0x1082', value: '2026-10-28T09:23:45Z' },
+      { id: 'SystemTime 0x1082', value: '2026-10-28T10:23:45Z' },
+    ];
+    request.mockResolvedValueOnce(
+      response({ ...row, isDraft: true, singleValueExtendedProperties: properties }),
+    );
+    expect((await graph.message(row.id)).responseAction).toBeUndefined();
+    request.mockResolvedValueOnce(response({ ...row, singleValueExtendedProperties: properties }));
+    const actual = await graph.message(row.id);
+    expect(actual.responseAction).toBe('replied');
+    expect(actual.responseActionAt).toBeUndefined();
+  });
   test('attachment listing returns bounded metadata and never reads bytes or follows links', async () => {
     const { graph, request } = setup();
     request.mockResolvedValueOnce(
@@ -326,12 +415,46 @@ describe('metadata-only inbox and correspondence pages', () => {
     }
     expect(new URL(request.mock.calls[2][0]).searchParams.get('$skiptoken')).toBe('opaque+page');
   });
+  test('returns reply and forward markers for a whole metadata page without per-message reads', async () => {
+    const expand =
+      "singleValueExtendedProperties($filter=id eq 'Integer 0x1081' or id eq 'SystemTime 0x1082')";
+    const next = `https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?${new URLSearchParams({ $skip: '50', $expand: expand })}`;
+    const { graph, request } = fixture([
+      {
+        value: ['102', '103', '104'].map((verb) => ({
+          ...row(),
+          id: `mail-${verb}`,
+          singleValueExtendedProperties: [{ id: 'Integer 0x1081', value: verb }],
+        })),
+        '@odata.nextLink': next,
+      },
+      { value: [row()] },
+    ]);
+    expect((await graph.inboxPage!()).messages.map((item) => item.responseAction)).toEqual([
+      'replied',
+      'replied',
+      'forwarded',
+    ]);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect((await graph.inboxPage!(next)).messages[0].responseAction).toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(3);
+    for (const [url, init] of request.mock.calls.slice(1)) {
+      const query = new URL(url).searchParams;
+      expect(query.get('$expand')).toBe(expand);
+      expect(query.get('$select')?.split(',')).toContain('singleValueExtendedProperties');
+      expect(query.get('$select')?.split(',')).not.toContain('body');
+      expect(query.get('$select')?.split(',')).not.toContain('uniqueBody');
+      expect(init.method).toBe('GET');
+    }
+  });
   test.each([
     'https://evil.invalid/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50',
     'https://graph.microsoft.com/v1.0/users/other/mailFolders/immutable-inbox/messages?$skip=50',
     'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-sent/messages?$skip=50',
     'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$select=body',
     'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$expand=attachments',
+    "https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$expand=singleValueExtendedProperties($filter=id%20eq%20'Integer%200x1081'%20or%20id%20eq%20'String%200x1000')",
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$expand=singleValueExtendedProperties',
     'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$filter=other',
     'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$skip=100',
     'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50#other',

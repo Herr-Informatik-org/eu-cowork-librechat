@@ -242,6 +242,8 @@ export function createMailAssistantEngine({
       mailboxLocation: 'inbox',
       isRead: mail.isRead,
       hasAttachments: mail.hasAttachments,
+      responseAction: latestMail.responseAction,
+      responseActionAt: latestMail.responseActionAt,
       messageId: mail.id,
       conversationId: mail.conversationId,
       sourceHash: sourceHash(mail),
@@ -592,6 +594,8 @@ export function createMailAssistantEngine({
         resultId: id,
         mailbox: connection.mailbox,
         message: {
+          responseAction: message.responseAction,
+          responseActionAt: message.responseActionAt,
           replyRecipients: message.replyTo?.length
             ? message.replyTo
             : [{ name: message.senderName ?? '', address: message.sender }],

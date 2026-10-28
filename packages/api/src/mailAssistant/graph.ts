@@ -7,6 +7,8 @@ export { MailGraphError } from './errors';
 const origin = 'https://graph.microsoft.com';
 const fields =
   'id,conversationId,changeKey,subject,from,replyTo,receivedDateTime,sentDateTime,categories,isDraft,webLink,parentFolderId,isRead,hasAttachments';
+const responseActionExpand =
+  "singleValueExtendedProperties($filter=id eq 'Integer 0x1081' or id eq 'SystemTime 0x1082')";
 const otherFolderAliases = new Set([
   'archive',
   'clutter',
@@ -54,6 +56,40 @@ export function safeOutlookUrl(value: unknown): string | undefined {
   return undefined;
 }
 
+/** MS-OXOMSG 2.2.1.14: only the last verb, never an inference from drafts or subjects. */
+function responseAction(
+  value: Record<string, unknown>,
+): Pick<MailMessage, 'responseAction' | 'responseActionAt'> {
+  const properties = value.singleValueExtendedProperties;
+  if (value.isDraft === true || !Array.isArray(properties) || properties.length > 8) return {};
+  const matching = (id: string) =>
+    properties.filter(
+      (property) =>
+        property &&
+        typeof property === 'object' &&
+        !Array.isArray(property) &&
+        typeof property.id === 'string' &&
+        property.id.toLowerCase() === id,
+    );
+  const verbs = matching('integer 0x1081');
+  if (verbs.length !== 1) return {};
+  let action: MailMessage['responseAction'];
+  if (verbs[0].value === '102' || verbs[0].value === '103') action = 'replied';
+  else if (verbs[0].value === '104') action = 'forwarded';
+  if (!action) return {};
+  const times = matching('systemtime 0x1082');
+  const time = times.length === 1 ? times[0].value : undefined;
+  const parsed =
+    typeof time === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z$/.test(time)
+      ? Date.parse(time)
+      : NaN;
+  const iso = Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
+  return {
+    responseAction: action,
+    ...(iso && iso.slice(0, 19) === time.slice(0, 19) && { responseActionAt: iso }),
+  };
+}
+
 function message(value: Record<string, unknown>): MailMessage {
   const from = value.from as { emailAddress?: { address?: string; name?: string } } | undefined;
   const body = value.body as { content?: string; contentType?: string } | undefined;
@@ -75,6 +111,7 @@ function message(value: Record<string, unknown>): MailMessage {
       : [],
     isRead: value.isRead === true,
     hasAttachments: value.hasAttachments === true,
+    ...responseAction(value),
     receivedAt: text(value.receivedDateTime, 40),
     sentAt: text(value.sentDateTime, 40),
     body: text(body?.content, 12_000),
@@ -352,7 +389,7 @@ export function createMailGraph({
       throw new MailGraphError(400);
     }
   }
-  const metadataFields = `${fields},toRecipients,ccRecipients`;
+  const metadataFields = `${fields},toRecipients,ccRecipients,singleValueExtendedProperties`;
   const metadataFolders = new Map<string, Promise<string>>();
   async function metadataFolder(alias: 'inbox' | 'sentitems'): Promise<string> {
     if (!metadataFolders.has(alias))
@@ -372,6 +409,7 @@ export function createMailGraph({
       $select: metadataFields,
       $orderby: 'receivedDateTime desc',
       $top: '50',
+      $expand: responseActionExpand,
     });
     if (link) {
       if (link.length > 20_000) throw new MailGraphError(400);
@@ -388,6 +426,7 @@ export function createMailGraph({
         )
           continue;
         else if (key === '$orderby' && value === 'receivedDateTime desc') continue;
+        else if (key === '$expand' && value === responseActionExpand) continue;
         else if (key === '$top' && /^\d+$/.test(value) && Number(value) > 0 && Number(value) <= 50)
           continue;
         else throw new MailGraphError(400);
@@ -613,7 +652,11 @@ export function createMailGraph({
       };
     },
     async message(value) {
-      return message(await call(`/v1.0/me/messages/${id(value)}?$select=${fields},body`));
+      const query = new URLSearchParams({
+        $select: `${fields},body,singleValueExtendedProperties`,
+        $expand: responseActionExpand,
+      });
+      return message(await call(`/v1.0/me/messages/${id(value)}?${query}`));
     },
     async thread(value) {
       id(value);

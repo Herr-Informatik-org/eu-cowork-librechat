@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Copy, Loader2, MessageSquare, Search } from 'lucide-react';
 import type { MailWorkspaceResult } from 'librechat-data-provider';
 import { useMailChat, useMailCorrespondence } from '~/data-provider/Mail';
@@ -45,6 +45,7 @@ export function MailChat({
   const t = useLocalize();
   const mutation = useMailChat(result.id);
   const input = useRef<HTMLTextAreaElement>(null);
+  const shortcutHint = useId();
   const messageList = useRef<HTMLDivElement>(null);
   const submitting = useRef(false);
   const confirm = useRef<HTMLElement>(null);
@@ -67,7 +68,14 @@ export function MailChat({
   }, [state.messages.length, state.pending]);
   const submit = async () => {
     const message = state.input.trim();
-    if (!message || state.pending || submitting.current) return;
+    if (
+      !message ||
+      state.pending ||
+      mutation.isLoading ||
+      submitting.current ||
+      replacement !== undefined
+    )
+      return;
     submitting.current = true;
     onChange((previous) => ({
       ...previous,
@@ -258,6 +266,22 @@ export function MailChat({
             ref={input}
             rows={3}
             maxLength={4000}
+            aria-describedby={shortcutHint}
+            aria-keyshortcuts="Control+Enter Meta+Enter"
+            onKeyDown={(event) => {
+              if (
+                event.key !== 'Enter' ||
+                (!event.ctrlKey && !event.metaKey) ||
+                event.shiftKey ||
+                event.altKey ||
+                event.repeat ||
+                event.nativeEvent.isComposing
+              )
+                return;
+              event.preventDefault();
+              event.stopPropagation();
+              void submit();
+            }}
             value={state.input}
             disabled={state.pending}
             placeholder={t('com_ui_mail_chat_inline_placeholder')}
@@ -283,11 +307,14 @@ export function MailChat({
           <button
             type="submit"
             className="mail-button primary"
-            disabled={!state.input.trim() || state.pending}
+            disabled={!state.input.trim() || state.pending || mutation.isLoading}
           >
             {t('com_ui_mail_chat_inline_send')}
           </button>
         </div>
+        <p id={shortcutHint} className="mail-muted">
+          {t('com_ui_mail_chat_submit_shortcut')}
+        </p>
       </form>
     </section>
   );

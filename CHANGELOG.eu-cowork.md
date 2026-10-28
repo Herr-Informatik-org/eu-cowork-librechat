@@ -1,5 +1,14 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-28 — Outlook-Aktionsstatus und Tastenkürzel im Mail-Chat
+
+- Kompakte Symbole zeigen die letzte von Outlook gespeicherte Antwort oder
+  Weiterleitung in Liste und Mailkopf. Fehlende Kennzeichnungen bleiben unbekannt;
+  Betreff und vorhandene Entwürfe werden nicht als Antwortnachweis verwendet.
+- Ctrl+Enter und Cmd+Enter senden Fragen im Mail-Chat ab. Enter bleibt ein
+  Zeilenumbruch; laufende, leere oder doppelte Anfragen werden abgefangen.
+  Das Kürzel versendet keine Mail und speichert keinen Outlook-Entwurf.
+
 ## 2026-10-28 — Eingebettete Mailbilder bewusst laden und direkt verschieben
 
 - Auf ausdrücklichen Klick erscheinen eingebettete PNG-/JPEG-Bilder derselben Mail.

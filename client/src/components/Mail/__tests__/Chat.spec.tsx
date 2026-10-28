@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { MailWorkspaceResult } from 'librechat-data-provider';
 import mockTranslations from '~/locales/en/translation.json';
 import { MailChat, MailCorrespondence, emptyMailChat } from '../Chat';
 import type { MailChatState } from '../Chat';
 
 const mockChat = jest.fn();
+let mockLoading = false;
 const mockCorrespondence = jest.fn();
 const mockOpen = jest.fn();
 const mockApply = jest.fn();
@@ -36,7 +37,7 @@ jest.mock('../Followup', () => ({
   mailActionError: (_error: Error, fallback: string) => fallback,
 }));
 jest.mock('~/data-provider/Mail', () => ({
-  useMailChat: () => ({ mutateAsync: mockChat }),
+  useMailChat: () => ({ mutateAsync: mockChat, isLoading: mockLoading }),
   useMailCorrespondence: (id: string, search: string, enabled: boolean) => {
     mockCorrespondence(id, search, enabled);
     return { data: { pages: [{ results: [result] }] }, hasNextPage: true, fetchNextPage: mockNext };
@@ -57,6 +58,7 @@ function Harness({ initial = emptyMailChat() }: { initial?: MailChatState }) {
 }
 beforeEach(() => {
   jest.clearAllMocks();
+  mockLoading = false;
   mockChat.mockResolvedValue({ answer: 'Das Zeitfenster ist offen.', sources: [result] });
 });
 
@@ -179,4 +181,82 @@ it('retains the question and skips the request if its serialized payload cannot 
   expect(await screen.findByRole('alert')).toBeVisible();
   expect(screen.getByRole('textbox')).toHaveValue(input);
   expect(mockChat).not.toHaveBeenCalled();
+});
+
+it.each([{ ctrlKey: true }, { metaKey: true }])(
+  'asks the same explicit chat question using Enter with %j',
+  async (modifier) => {
+    render(<Harness />);
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveAttribute('aria-keyshortcuts', 'Control+Enter Meta+Enter');
+    expect(input).toHaveAccessibleDescription(
+      'Strg/Cmd + Enter: Frage abschicken · Enter: neue Zeile',
+    );
+    fireEvent.change(input, { target: { value: 'Welche Rückfrage ist noch offen?' } });
+    expect(fireEvent.keyDown(input, { key: 'Enter', ...modifier })).toBe(false);
+    await screen.findByText('Das Zeitfenster ist offen.');
+    expect(mockChat).toHaveBeenCalledTimes(1);
+    expect(mockChat).toHaveBeenCalledWith({
+      revision: 'revision',
+      message: 'Welche Rückfrage ist noch offen?',
+      history: [],
+      draft: 'Meine vorhandene Antwort',
+      includeCorrespondence: false,
+    });
+    expect(mockApply).not.toHaveBeenCalled();
+    expect(mockOpen).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  {},
+  { shiftKey: true },
+  { ctrlKey: true, shiftKey: true },
+  { ctrlKey: true, altKey: true },
+  { ctrlKey: true, isComposing: true },
+  { ctrlKey: true, repeat: true },
+])('does not submit plain Enter, composition or unsupported key combinations %j', (options) => {
+  render(<Harness initial={{ ...emptyMailChat(), input: 'Zeile eins' }} />);
+  const input = screen.getByRole('textbox');
+  expect(fireEvent.keyDown(input, { key: 'Enter', ...options })).toBe(true);
+  expect(mockChat).not.toHaveBeenCalled();
+  expect(mockApply).not.toHaveBeenCalled();
+});
+
+it.each(['empty', 'pending', 'loading'] as const)(
+  'blocks the chat keyboard action when %s',
+  (mode) => {
+    mockLoading = mode === 'loading';
+    render(
+      <Harness
+        initial={{
+          ...emptyMailChat(),
+          input: mode === 'empty' ? '  ' : 'Frage',
+          pending: mode === 'pending',
+        }}
+      />,
+    );
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
+    expect(screen.getByRole('button', { name: 'Fragen' })).toBeDisabled();
+    expect(mockChat).not.toHaveBeenCalled();
+  },
+);
+
+it('suppresses repeated shortcuts and button clicks during the same question', async () => {
+  let resolve!: (value: { answer: string }) => void;
+  mockChat.mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  render(<Harness initial={{ ...emptyMailChat(), input: 'Offene Frage' }} />);
+  const input = screen.getByRole('textbox');
+  fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+  fireEvent.click(screen.getByRole('button', { name: 'Fragen' }));
+  expect(mockChat).toHaveBeenCalledTimes(1);
+  await act(async () => resolve({ answer: 'Antwort' }));
+  expect(screen.getByRole('textbox')).toHaveValue('');
+  expect(mockApply).not.toHaveBeenCalled();
 });

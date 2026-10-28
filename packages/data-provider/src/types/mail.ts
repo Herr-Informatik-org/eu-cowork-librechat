@@ -18,6 +18,8 @@ export type MailWorkspaceChatResponse = {
   sources?: MailWorkspaceResult[];
 };
 export type MailWorkspacePriority = 'important' | 'normal' | 'low';
+/** Last recorded Outlook action; absence means unknown, not unanswered. */
+export type MailWorkspaceResponseAction = 'replied' | 'forwarded';
 export type MailWorkspaceSettings = {
   signature?: MailSignature;
   enabled: boolean;
@@ -35,6 +37,8 @@ export type MailWorkspaceResult = {
   analysisStatus?: 'pending' | 'complete';
   isRead?: boolean;
   hasAttachments?: boolean;
+  responseAction?: MailWorkspaceResponseAction;
+  responseActionAt?: string;
   id: string;
   revision: string;
   subject: string;
@@ -95,6 +99,8 @@ export type MailWorkspaceContent = {
   resultId: string;
   mailbox: string;
   message: {
+    responseAction?: MailWorkspaceResponseAction;
+    responseActionAt?: string;
     replyRecipients?: { name: string; address: string }[];
     subject: string;
     sender: string;

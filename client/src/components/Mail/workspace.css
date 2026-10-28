@@ -192,6 +192,12 @@
   white-space: nowrap;
   flex: 1;
 }
+.mail-response-action {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
 .mail-row-top time {
   flex-shrink: 0;
   font-size: 10px;

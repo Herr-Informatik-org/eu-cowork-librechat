@@ -694,6 +694,22 @@ describe('mail assistant deterministic safety boundary', () => {
     expect(f.adapter.analyze).toHaveBeenCalledTimes(1);
     expect(f.graph.createReply).not.toHaveBeenCalled();
   });
+  test('a changed Outlook action marker does not reanalyse, create a draft or change revision', async () => {
+    const f = fixture();
+    await f.engine.run(f.owner);
+    const first = (await f.engine.status(f.owner)).results[0];
+    f.message.responseAction = 'forwarded';
+    f.message.responseActionAt = '2026-10-26T08:01:00.000Z';
+    f.message.changeKey = 'new-outlook-status';
+    await f.engine.run(f.owner);
+    const refreshed = (await f.engine.status(f.owner)).results[0];
+    expect(refreshed.revision).toBe(first.revision);
+    expect(refreshed.action).toBe(first.action);
+    expect(f.adapter.analyze).toHaveBeenCalledTimes(1);
+    expect(f.graph.categorize).toHaveBeenCalledTimes(1);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    expect(f.graph.move).not.toHaveBeenCalled();
+  });
   test('records manual Outlook category changes without reclassification', async () => {
     const f = fixture();
     await f.engine.run(f.owner);
@@ -1174,6 +1190,8 @@ describe('mail result content boundary', () => {
   }
   it('reads only the owner-selected original and current draft while paused without invoking model or mutations', async () => {
     const f = preview();
+    f.message.responseAction = 'replied';
+    f.message.responseActionAt = '2026-10-26T07:45:00.000Z';
     f.jobs.get(f.owner)!.settings.enabled = false;
     const content = await f.engine.content(f.owner, f.id);
     expect(content).toMatchObject({
@@ -1185,6 +1203,8 @@ describe('mail result content boundary', () => {
         receivedAt: f.message.receivedAt,
         body: f.message.body,
         bodyTruncated: false,
+        responseAction: 'replied',
+        responseActionAt: '2026-10-26T07:45:00.000Z',
       },
       draft: { subject: f.draft.subject, body: f.draft.body, bodyTruncated: false },
     });
