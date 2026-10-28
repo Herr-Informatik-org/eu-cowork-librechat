@@ -463,6 +463,7 @@ export function createMailGraph({
     },
     preview: createPreviewOperation({
       linksEnabled: erpLinksEnabled,
+      raw: (path, timeout) => raw(path, 'GET', undefined, undefined, 'text', timeout),
       call,
       id,
       beforeRequest,

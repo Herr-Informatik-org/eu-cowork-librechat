@@ -190,3 +190,188 @@ describe('isolated mail HTML preview', () => {
     await expect(graph.preview('mail')).rejects.toMatchObject({ status: 403 });
   });
 });
+
+describe('explicit embedded mail image boundary', () => {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWP4//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC',
+    'base64',
+  );
+  const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
+  const file = (overrides: Record<string, unknown> = {}) => ({
+    '@odata.type': '#microsoft.graph.fileAttachment',
+    id: 'image-id',
+    contentId: 'logo',
+    isInline: true,
+    contentType: 'image/png',
+    size: png.length,
+    ...overrides,
+  });
+  function setup(
+    rows: Record<string, unknown>[] = [file()],
+    html = '<p>Mail</p><img src="cid:logo"><img src="https://tracker.test/pixel">',
+  ) {
+    const request = jest.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.endsWith('/$value'))
+        return new Response(new Uint8Array(png), {
+          headers: { 'content-length': String(png.length) },
+        });
+      if (url.includes('/attachments?')) return json({ value: rows });
+      return json({ id: 'mail', body: { contentType: 'html', content: html } });
+    });
+    const guard = jest.fn().mockResolvedValue(undefined);
+    return {
+      request,
+      guard,
+      graph: createMailGraph({
+        fetch: request,
+        token: async () => 'fixture-only',
+        beforeRequest: guard,
+      }),
+    };
+  }
+  test('loads only an explicitly requested referenced inline image and returns fresh PNG', async () => {
+    const { graph, request } = setup([
+      file(),
+      file({ id: 'document', contentId: 'unrelated', contentType: 'application/pdf' }),
+    ]);
+    const result = await graph.preview('mail', true);
+    expect(result).toMatchObject({
+      embeddedImagesAvailable: true,
+      imagesLoaded: true,
+      blockedImages: 1,
+    });
+    expect(result.html).toMatch(/src="data:image\/png;base64,iVBORw0KGgo/);
+    expect(result.html).not.toContain('tracker.test');
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(String(request.mock.calls[2][0])).toBe(
+      'https://graph.microsoft.com/v1.0/me/messages/mail/attachments/image-id/$value',
+    );
+  });
+  test('normal previews discover references without metadata or byte reads', async () => {
+    const { graph, request } = setup();
+    expect(await graph.preview('mail')).toMatchObject({
+      embeddedImagesAvailable: true,
+      imagesLoaded: false,
+      blockedImages: 2,
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+  test.each([
+    [file({ contentId: 'other' })],
+    [file({ isInline: false })],
+    [file({ '@odata.type': '#microsoft.graph.referenceAttachment' })],
+    [file({ contentType: 'image/svg+xml' })],
+    [file({ contentType: 'application/pdf' })],
+    [file({ size: 2_000_001 })],
+    [file({ size: -1 })],
+    [file(), file({ id: 'duplicate' })],
+  ])('never reads ambiguous or disallowed attachment bytes (case %#)', async (...rows) => {
+    const { graph, request } = setup(rows);
+    const result = await graph.preview('mail', true);
+    expect(result.html).not.toContain('<img');
+    expect(result.warnings).toHaveLength(1);
+    expect(request.mock.calls.some(([url]) => String(url).endsWith('/$value'))).toBe(false);
+  });
+  test('does not follow metadata pages or trust an incomplete CID uniqueness check', async () => {
+    const { graph, request } = setup();
+    const implementation = request.getMockImplementation()!;
+    request.mockImplementation(async (url) =>
+      String(url).includes('/attachments?')
+        ? json({ value: [file()], '@odata.nextLink': 'https://evil.test/private' })
+        : implementation(url),
+    );
+    const result = await graph.preview('mail', true);
+    expect(result.html).not.toContain('<img');
+    expect(result.warnings).toHaveLength(1);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+  test('streams with an actual byte cap even when metadata understates size', async () => {
+    const { graph, request } = setup();
+    const implementation = request.getMockImplementation()!;
+    const cancelled = jest.fn();
+    request.mockImplementation(async (url) =>
+      String(url).endsWith('/$value')
+        ? new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new Uint8Array(2_000_001));
+              },
+              cancel: cancelled,
+            }),
+          )
+        : implementation(url),
+    );
+    const result = await graph.preview('mail', true);
+    expect(result.html).not.toContain('<img');
+    expect(cancelled).toHaveBeenCalled();
+  });
+  test('rejects active bytes disguised by MIME and leaves other attachments unopened', async () => {
+    const { graph, request } = setup();
+    const implementation = request.getMockImplementation()!;
+    request.mockImplementation(async (url) =>
+      String(url).endsWith('/$value')
+        ? new Response('<svg onload="alert(1)">')
+        : implementation(url),
+    );
+    expect((await graph.preview('mail', true)).html).not.toMatch(/<img|svg|onload/);
+  });
+  test('revocation after byte download is fatal and not converted into an image warning', async () => {
+    const { graph, request, guard } = setup();
+    const implementation = request.getMockImplementation()!;
+    request.mockImplementation(async (url) => {
+      const response = await implementation(url);
+      if (String(url).endsWith('/$value')) guard.mockRejectedValue(new Error('revoked'));
+      return response;
+    });
+    await expect(graph.preview('mail', true)).rejects.toThrow('revoked');
+  });
+  test('limits concurrent explicit image previews and releases slots after failures', async () => {
+    const a = setup();
+    const b = setup();
+    const c = setup();
+    let rejectFirst!: (reason: Error) => void;
+    let rejectSecond!: (reason: Error) => void;
+    a.request.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFirst = reject;
+        }),
+    );
+    b.request.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSecond = reject;
+        }),
+    );
+    const first = a.graph.preview('mail', true).catch(() => undefined);
+    const second = b.graph.preview('mail', true).catch(() => undefined);
+    await expect(c.graph.preview('mail', true)).rejects.toMatchObject({ status: 429 });
+    expect(c.request).not.toHaveBeenCalled();
+    while (!rejectFirst || !rejectSecond) await Promise.resolve();
+    rejectFirst(new Error('fixture failure'));
+    rejectSecond(new Error('fixture failure'));
+    await Promise.all([first, second]);
+    await expect(c.graph.preview('mail', true)).resolves.toMatchObject({ imagesLoaded: true });
+  });
+  test('cancels an unread byte response when authorization is revoked immediately after fetch', async () => {
+    const { graph, request, guard } = setup();
+    const implementation = request.getMockImplementation()!;
+    const cancelled = jest.fn();
+    request.mockImplementation(async (url) => {
+      if (!String(url).endsWith('/$value')) return implementation(url);
+      guard.mockRejectedValue(new Error('revoked'));
+      return new Response(new ReadableStream({ cancel: cancelled }));
+    });
+    await expect(graph.preview('mail', true)).rejects.toThrow('revoked');
+    expect(cancelled).toHaveBeenCalled();
+  });
+  test('Graph authorization failures are fatal rather than partial success', async () => {
+    const { graph, request } = setup();
+    const implementation = request.getMockImplementation()!;
+    request.mockImplementation(async (url) =>
+      String(url).endsWith('/$value') ? json({}, 403) : implementation(url),
+    );
+    await expect(graph.preview('mail', true)).rejects.toMatchObject({ status: 403 });
+  });
+});

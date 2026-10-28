@@ -55,7 +55,11 @@ describe('opaque mail preview frame', () => {
   test('accepts only a bounded count of server-reencoded PNG sources', () => {
     const png =
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6kAAAAABJRU5ErkJggg==';
-    const output = createMailPreviewDocument(`<img src="${png}" alt="Logo">`.repeat(12))!;
+    const output = createMailPreviewDocument(
+      `<img src="${png}" alt="Logo">`.repeat(12),
+      false,
+      true,
+    )!;
     const doc = parse(output);
     expect(doc.body.querySelectorAll('img[src]')).toHaveLength(8);
     expect(doc.body.querySelector('img')?.getAttribute('src')).toBe(png);

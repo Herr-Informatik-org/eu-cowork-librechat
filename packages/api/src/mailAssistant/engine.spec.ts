@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createMailAssistantEngine } from './engine';
+import { createMailAssistantEngine, resultRevision } from './engine';
 import { createMailGraph, MailGraphError } from './graph';
 import { defaultMailSettings } from './schedule';
 import { activeMoveJob, summarizeMove } from './moves';
@@ -1199,6 +1199,54 @@ describe('mail result content boundary', () => {
     expect(f.adapter.audit).toHaveBeenNthCalledWith(1, f.owner, 'result_content_requested', f.id);
     expect(f.adapter.audit).toHaveBeenNthCalledWith(2, f.owner, 'result_content_read', f.id);
     expect((await f.engine.status(f.owner)).connection).not.toHaveProperty('generation');
+  });
+  it('loads embedded images only on explicit owner request without models or mail writes', async () => {
+    const f = preview();
+    const result = await f.engine.images(f.owner, f.id, 'original', resultRevision(f.result));
+    expect(result.html).toContain('Safe preview');
+    expect(f.graph.preview).toHaveBeenCalledWith('mail', true);
+    expect(f.graph.message.mock.calls.map(([id]) => id)).toEqual(['mail', 'mail']);
+    expect(f.adapter.analyze).not.toHaveBeenCalled();
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    expect(f.store.putResult).not.toHaveBeenCalled();
+    expect(f.adapter.audit).toHaveBeenNthCalledWith(1, f.owner, 'embedded_images_requested', f.id);
+    expect(f.adapter.audit).toHaveBeenNthCalledWith(2, f.owner, 'embedded_images_read', f.id);
+  });
+  it('requires matching result revision, owner and a still-existing draft for images', async () => {
+    const f = preview();
+    await expect(f.engine.images(f.owner, f.id, 'original', '0'.repeat(64))).rejects.toThrow(
+      'verändert',
+    );
+    f.jobs.set('bob', { ...f.jobs.get(f.owner)!, ownerId: 'bob' });
+    await expect(
+      f.engine.images('bob', f.id, 'original', resultRevision(f.result)),
+    ).rejects.toThrow('Mail-Vorgang nicht gefunden');
+    f.draft.isDraft = false;
+    await expect(f.engine.images(f.owner, f.id, 'draft', resultRevision(f.result))).rejects.toThrow(
+      'passt nicht',
+    );
+    expect(f.graph.preview).not.toHaveBeenCalled();
+  });
+  it('rejects changed or sent messages after image processing and never returns their bytes', async () => {
+    const f = preview();
+    f.graph.preview.mockImplementation(async () => {
+      f.draft.isDraft = false;
+      return { html: '<p>Image bytes</p>', blockedImages: 0, truncated: false, warnings: [] };
+    });
+    await expect(f.engine.images(f.owner, f.id, 'draft', resultRevision(f.result))).rejects.toThrow(
+      'während des Ladens',
+    );
+    expect(f.adapter.audit).not.toHaveBeenCalledWith(f.owner, 'embedded_images_read', f.id);
+  });
+  it('does not return image content if consent or connection changes during loading', async () => {
+    const f = preview();
+    f.graph.preview.mockImplementation(async () => {
+      f.jobs.get(f.owner)!.revision++;
+      return { html: '<p>Image bytes</p>', blockedImages: 0, truncated: false, warnings: [] };
+    });
+    await expect(
+      f.engine.images(f.owner, f.id, 'original', resultRevision(f.result)),
+    ).rejects.toThrow('Freigabe');
   });
   it('cannot select another owner result or supply a Graph URL', async () => {
     const f = preview();

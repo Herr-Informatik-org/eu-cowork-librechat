@@ -55,6 +55,7 @@ describe('Personal mail HTTP boundary', () => {
       '/results/result-1/followup/prepare',
       '/results/result-1/draft-request',
       '/results/result-1/chat',
+      '/results/result-1/images',
     ])
       expect((await request(app).post(`/api/agents/office/mail-assistant${path}`)).status).toBe(
         401,
@@ -65,6 +66,36 @@ describe('Personal mail HTTP boundary', () => {
     expect(
       (await request(app).get('/api/agents/office/mail-assistant/results/result-1/content')).status,
     ).toBe(401);
+  });
+  it('binds explicit image loading to the authenticated owner and rejects arbitrary resource selectors', async () => {
+    const images = jest.fn(async () => ({
+      html: '<p>Preview</p>',
+      blockedImages: 0,
+      truncated: false,
+      warnings: [],
+    }));
+    const app = setup({ engine: { images } } as unknown as MailAssistantRuntime);
+    const path = '/api/agents/office/mail-assistant/results/result-1/images';
+    const body = { kind: 'original', revision: 'a'.repeat(64) };
+    const response = await request(app)
+      .post(path)
+      .set('Authorization', 'Bearer fixture')
+      .send(body);
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(images).toHaveBeenCalledWith(owner, 'result-1', 'original', body.revision);
+    for (const invalid of [
+      { kind: 'external', revision: body.revision },
+      { kind: 'original' },
+      { ...body, url: 'https://evil.test' },
+      { ...body, owner: 'other' },
+      { ...body, attachmentId: 'other' },
+    ]) {
+      expect(
+        (await request(app).post(path).set('Authorization', 'Bearer fixture').send(invalid)).status,
+      ).toBe(400);
+    }
+    expect(images).toHaveBeenCalledTimes(1);
   });
   it('requires authentication for inbox and correspondence pages', async () => {
     const app = setup();
@@ -139,6 +170,7 @@ describe('Personal mail HTTP boundary', () => {
         editDraft: jest.fn(),
         requestDraft: jest.fn(),
         attachments: jest.fn(),
+        images: jest.fn(),
         status: jest.fn(),
         settings: jest.fn(),
         run: jest.fn(),

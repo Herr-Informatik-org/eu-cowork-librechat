@@ -2,10 +2,12 @@ import sanitizeHtml from 'sanitize-html';
 import { mailPreviewLink } from 'librechat-data-provider';
 import type { MailHtmlPreview } from './types';
 import { MailGraphError } from './errors';
+import { reencodeMailImage, MAX_MAIL_IMAGE_INPUT, MAX_MAIL_IMAGE_TOTAL_INPUT } from './images';
 
 const maxHtml = 1_000_000;
 const maxNodes = 20_000;
 const maxImages = 8;
+let activeImagePreviews = 0;
 const color = /^(?:#[a-f0-9]{3,8}|[a-z]{1,24}|rgba?\([0-9.,% ]{1,48}\))$/i;
 const length = '(?:0|[0-9]{1,2}(?:\\.[0-9]{1,2})?(?:px|pt)|[0-4](?:\\.[0-9]{1,2})?em)';
 const spacing = new RegExp(`^${length}(?: ${length}){0,3}$`);
@@ -92,12 +94,16 @@ const escape = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+function cidKey(value: string): string | undefined {
+  const key = value.replace(/^<(.+)>$/, '$1');
+  // eslint-disable-next-line no-control-regex -- CID references cannot contain whitespace or control bytes.
+  if (key && key.length <= 255 && !/[\u0000-\u0020\u007f]/.test(key)) return key;
+}
+
 function cid(value: string): string | undefined {
   if (!/^cid:/i.test(value)) return;
   try {
-    const key = decodeURIComponent(value.slice(4)).replace(/^<(.+)>$/, '$1');
-    // eslint-disable-next-line no-control-regex -- CID references cannot contain whitespace or control bytes.
-    if (key && key.length <= 255 && !/[\u0000-\u0020\u007f]/.test(key)) return key;
+    return cidKey(decodeURIComponent(value.slice(4)));
   } catch {
     /* Invalid references stay blocked. */
   }
@@ -243,16 +249,18 @@ type GraphCall = (
 
 export function createPreviewOperation({
   call,
+  raw,
   id,
   beforeRequest,
   linksEnabled = false,
 }: {
   linksEnabled?: boolean;
   call: GraphCall;
+  raw: (path: string, timeout: number) => Promise<Response>;
   id: (value: string) => string;
   beforeRequest: () => Promise<void>;
 }) {
-  return async (value: string): Promise<MailHtmlPreview> => {
+  const operation = async (value: string, loadImages: boolean): Promise<MailHtmlPreview> => {
     const deadline = Date.now() + 25_000;
     const remaining = () => {
       const budget = deadline - Date.now();
@@ -285,6 +293,90 @@ export function createPreviewOperation({
         '<p>Diese Mail ist zu komplex für die sichere Vorschau. Bitte öffne sie in Outlook.</p>';
       first = sanitizeMailPreview(html, new Map(), linksEnabled);
     }
+    if (loadImages && first.references.size) {
+      const images = new Map<string, string>();
+      const metadata = await call(
+        `${path}/attachments?$select=id,contentType,size,isInline,microsoft.graph.fileAttachment/contentId&$top=100`,
+        'GET',
+        undefined,
+        undefined,
+        'text',
+        remaining(),
+      );
+      await beforeRequest();
+      if (!Array.isArray(metadata.value) || metadata.value.length > 100)
+        throw new MailGraphError(502);
+      const candidates = new Map<string, Record<string, unknown>[]>();
+      for (const row of metadata.value) {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) throw new MailGraphError(502);
+        const key = typeof row.contentId === 'string' && cidKey(row.contentId);
+        if (key && first.references.has(key))
+          candidates.set(key, [...(candidates.get(key) ?? []), row]);
+      }
+      let inputBytes = 0;
+      let outputBytes = 0;
+      if (!metadata['@odata.nextLink']) {
+        for (const reference of first.references) {
+          const entries = candidates.get(reference);
+          if (!entries || entries.length !== 1) continue;
+          const file = entries[0];
+          if (
+            file['@odata.type'] !== '#microsoft.graph.fileAttachment' ||
+            file.isInline !== true ||
+            typeof file.id !== 'string' ||
+            !file.id ||
+            file.id.length > 2048 ||
+            !['image/png', 'image/jpeg'].includes(String(file.contentType)) ||
+            !Number.isSafeInteger(file.size) ||
+            Number(file.size) <= 0 ||
+            Number(file.size) > MAX_MAIL_IMAGE_INPUT ||
+            Number(file.size) + inputBytes > MAX_MAIL_IMAGE_TOTAL_INPUT
+          )
+            continue;
+          const response = await raw(`${path}/attachments/${id(file.id)}/$value`, remaining());
+          if (!response.body) throw new MailGraphError(502);
+          const limit = Math.min(MAX_MAIL_IMAGE_INPUT, MAX_MAIL_IMAGE_TOTAL_INPUT - inputBytes);
+          const declaredSize = response.headers.get('content-length');
+          const reader = response.body.getReader();
+          const chunks: Buffer[] = [];
+          let size = 0;
+          let oversized =
+            declaredSize !== null && (!/^\d+$/.test(declaredSize) || Number(declaredSize) > limit);
+          try {
+            await beforeRequest();
+            while (!oversized) {
+              remaining();
+              const part = await reader.read();
+              if (part.done) break;
+              size += part.value.byteLength;
+              if (size > limit) {
+                oversized = true;
+                break;
+              }
+              chunks.push(Buffer.from(part.value));
+            }
+          } finally {
+            await reader.cancel().catch(() => undefined);
+            reader.releaseLock();
+          }
+          inputBytes += Math.min(size, limit);
+          await beforeRequest();
+          remaining();
+          if (oversized) continue;
+          const image = await reencodeMailImage(Buffer.concat(chunks), String(file.contentType));
+          await beforeRequest();
+          remaining();
+          if (!image || outputBytes + image.length > 3_000_000) continue;
+          images.set(reference, image);
+          outputBytes += image.length;
+        }
+      }
+      first = sanitizeMailPreview(html, images, linksEnabled);
+      if (first.blockedImages)
+        warnings.push(
+          'Einige Bilder bleiben gesperrt. Nur eindeutig zugeordnete eingebettete PNG- und JPEG-Bilder innerhalb der Sicherheitsgrenzen werden geladen.',
+        );
+    }
     await beforeRequest();
     return {
       html: first.html,
@@ -292,6 +384,18 @@ export function createPreviewOperation({
       truncated,
       warnings,
       linksEnabled: linksEnabled === true,
+      embeddedImagesAvailable: first.references.size > 0,
+      imagesLoaded: loadImages,
     };
+  };
+  return async (value: string, loadImages = false): Promise<MailHtmlPreview> => {
+    if (loadImages !== true) return operation(value, false);
+    if (activeImagePreviews >= 2) throw new MailGraphError(429);
+    activeImagePreviews++;
+    try {
+      return await operation(value, true);
+    } finally {
+      activeImagePreviews--;
+    }
   };
 }

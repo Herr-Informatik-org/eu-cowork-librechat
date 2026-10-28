@@ -5,6 +5,8 @@ import type {
   MailWorkspaceStatus,
   MailWorkspaceSettings,
   MailWorkspaceContent,
+  MailWorkspacePreview,
+  MailWorkspaceImagesRequest,
   MailWorkspaceFolder,
   MailWorkspaceParams,
   MailWorkspacePage,
@@ -93,6 +95,11 @@ export const getMailWorkspaceContent = (
   signal?: AbortSignal,
 ): Promise<MailWorkspaceContent> =>
   request.get(endpoints.mailWorkspaceResult(id, 'content'), { signal });
+export const loadMailWorkspaceImages = (
+  id: string,
+  input: MailWorkspaceImagesRequest,
+): Promise<MailWorkspacePreview> =>
+  request.post(endpoints.mailWorkspaceResult(id, 'images'), input);
 export const getMailWorkspaceFolders = (
   parentId?: string,
   signal?: AbortSignal,

@@ -42,9 +42,8 @@ import { MailChat, MailCorrespondence, emptyMailChat } from './Chat';
 import type { MailChatState } from './Chat';
 import { MailSignatureSettings } from './Signature';
 import { FolderPicker, useDoneFolder } from './Folders';
-import SafeMailPreview from './SafeMailPreview';
-import { MoveDialog, MoveProgress, isMoveActive } from './Operations';
-import type { MoveSelection } from './Operations';
+import MailImages from './Images';
+import { MoveProgress, isMoveActive } from './Operations';
 import './workspace.css';
 
 const consentVersion = '2026-10-27';
@@ -669,7 +668,11 @@ const Detail = forwardRef<
               </div>
             </>
           ) : (
-            <SafeMailPreview
+            <MailImages
+              key={`${data?.mailbox}:${result.id}:${result.revision}:${tab}:${data?.draft?.revision || ''}`}
+              id={result.id}
+              revision={result.revision}
+              kind={tab === 'draft' ? 'draft' : 'original'}
               preview={selectedBody.preview}
               text={selectedBody.body || t('com_ui_mail_empty_body')}
               title={tab === 'draft' ? t('com_ui_mail_draft') : t('com_ui_mail_original')}
@@ -731,10 +734,13 @@ function MailWorkspace() {
   const [folderPicker, setFolderPicker] = useState(false);
   const [moveFolderItems, setMoveFolderItems] = useState<MailWorkspaceResult[] | null>(null);
   const { folder, chooseFolder } = useDoneFolder(user?.id, status?.connection.mailbox);
-  const [moveSelection, setMoveSelection] = useState<MoveSelection | null>(null);
   const jobsQuery = useMailMoveJobs(!!status?.available && !!status.connection.connected);
   const jobs = jobsQuery.data?.jobs || [];
-  const moveUnavailable = !!jobsQuery.isLoading || !!jobsQuery.isError || jobs.some(isMoveActive);
+  const moveUnavailable =
+    actions.enqueueMove.isLoading ||
+    !!jobsQuery.isLoading ||
+    !!jobsQuery.isError ||
+    jobs.some(isMoveActive);
   const mailboxAvailable = !!status?.available && !!status.connection.connected;
   const inboxMode = state === 'open';
   const inboxQuery = useMailInbox(mailboxAvailable && inboxMode);
@@ -778,7 +784,7 @@ function MailWorkspace() {
   const eligible = rows.filter((row) => !row.moveStatus && row.mailboxLocation !== 'sent');
   const selectable = eligible.slice(0, 100);
   const allSelected = selectable.length > 0 && selectable.every((row) => checked.has(row.id));
-  const requestMove = (items: MailWorkspaceResult[], target = folder, immediately = false) => {
+  const requestMove = (items: MailWorkspaceResult[], target = folder) => {
     if (
       !target ||
       moveUnavailable ||
@@ -791,21 +797,13 @@ function MailWorkspace() {
       status?.settings.consentVersion !== consentVersion
     )
       return;
-    const selection = {
-      request: {
-        requestId: crypto.randomUUID(),
-        folderId: target.id,
-        items: items.map(({ id, revision }) => ({ id, revision })),
-      },
-      folderName: target.path || target.displayName,
-      subjects: items.map((item) => item.subject),
+    const request = {
+      requestId: crypto.randomUUID(),
+      folderId: target.id,
+      items: items.map(({ id, revision }) => ({ id, revision })),
     };
-    if (!immediately) {
-      setMoveSelection(selection);
-      return;
-    }
     moveSubmitting.current = true;
-    actions.enqueueMove.mutate(selection.request, {
+    actions.enqueueMove.mutate(request, {
       onSuccess: () => {
         setChecked((previous) => {
           const next = new Map(previous);
@@ -897,7 +895,6 @@ function MailWorkspace() {
           !status.connection.connected ||
           settingsOpen ||
           folderPicker ||
-          moveSelection ||
           shortcutsOpen
         )
           return;
@@ -929,7 +926,7 @@ function MailWorkspace() {
         if (key === 'e' || key === 'Shift+e') {
           const items = checked.size ? Array.from(checked.values()) : [];
           if (!items.length && selected) items.push(selected);
-          if (key === 'e') requestMove(items, folder, true);
+          if (key === 'e') requestMove(items, folder);
           else if (
             items.length &&
             !moveUnavailable &&
@@ -1391,6 +1388,7 @@ function MailWorkspace() {
           <div className="mail-move-dialog">
             <FolderPicker
               active
+              moveCount={moveFolderItems?.length}
               chosen={folder}
               onChoose={(chosen) => {
                 if (moveFolderItems) requestMove(moveFolderItems, chosen);
@@ -1403,21 +1401,6 @@ function MailWorkspace() {
             />
           </div>
         </div>
-      )}
-      {moveSelection && (
-        <MoveDialog
-          key={moveSelection.request.requestId}
-          selection={moveSelection}
-          onClose={() => setMoveSelection(null)}
-          onAccepted={() => {
-            setChecked((previous) => {
-              const next = new Map(previous);
-              for (const item of moveSelection.request.items) next.delete(item.id);
-              return next;
-            });
-            setMoveSelection(null);
-          }}
-        />
       )}
       {settingsOpen && status && (
         <div className="mail-settings-overlay">

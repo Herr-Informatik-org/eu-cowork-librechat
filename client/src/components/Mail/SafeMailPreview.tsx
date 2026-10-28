@@ -84,7 +84,11 @@ const policy =
   "default-src 'none'; script-src 'none'; connect-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 /** Server output remains untrusted: parse again before placing it in an opaque-origin frame. */
-export function createMailPreviewDocument(html: string, linksEnabled = false): string | undefined {
+export function createMailPreviewDocument(
+  html: string,
+  linksEnabled = false,
+  imagesEnabled = false,
+): string | undefined {
   if (typeof html !== 'string' || html.length > 4_000_000) return;
   // Reject excessive markup before DOMPurify allocates its inert DOM; this is a size guard only.
   let marker = -1;
@@ -150,6 +154,7 @@ export function createMailPreviewDocument(html: string, linksEnabled = false): s
     if (node.tagName === 'IMG') {
       const source = node.getAttribute('src') || '';
       if (
+        imagesEnabled !== true ||
         source.length > 1_400_000 ||
         imageBytes + source.length > 3_000_000 ||
         images >= 8 ||
@@ -235,7 +240,9 @@ export default function SafeMailPreview({
   const t = useLocalize();
   const linksEnabled = preview?.linksEnabled === true;
   const document = useMemo(
-    () => preview && createMailPreviewDocument(preview.html, linksEnabled),
+    () =>
+      preview &&
+      createMailPreviewDocument(preview.html, linksEnabled, preview.imagesLoaded === true),
     [preview, linksEnabled],
   );
   return (

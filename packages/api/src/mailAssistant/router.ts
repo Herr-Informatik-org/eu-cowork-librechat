@@ -342,6 +342,23 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
       res.json(await runtime!.engine.requestDraft(owner(req), id, body));
     }),
   );
+  router.post(
+    '/results/:id/images',
+    safeRoute(async (req, res) => {
+      const id = z
+        .string()
+        .regex(/^[a-zA-Z0-9_-]{1,128}$/)
+        .parse(req.params.id);
+      const body = z
+        .object({
+          kind: z.enum(['original', 'draft']),
+          revision: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .strict()
+        .parse(req.body);
+      res.json(await runtime!.engine.images(owner(req), id, body.kind, body.revision));
+    }),
+  );
   router.get(
     '/results/:id/attachments',
     safeRoute(async (req, res) => {

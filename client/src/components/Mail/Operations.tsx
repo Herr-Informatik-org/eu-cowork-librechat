@@ -1,16 +1,10 @@
-import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { Check, FolderCheck, Loader2 } from 'lucide-react';
-import type { MailWorkspaceMoveJob, MailWorkspaceMoveRequest } from 'librechat-data-provider';
+import { Check, Loader2 } from 'lucide-react';
+import type { MailWorkspaceMoveJob } from 'librechat-data-provider';
 import { useMailActions, useMailPendingActions } from '~/data-provider/Mail';
 import { useLocalize } from '~/hooks';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 
-export type MoveSelection = {
-  request: MailWorkspaceMoveRequest;
-  folderName: string;
-  subjects: string[];
-};
 const jobLabels: Record<MailWorkspaceMoveJob['status'], TranslationKeys> = {
   queued: 'com_ui_mail_job_queued',
   running: 'com_ui_mail_job_running',
@@ -209,98 +203,5 @@ export function MoveProgress({
         </p>
       )}
     </section>
-  );
-}
-
-export function MoveDialog({
-  selection,
-  onClose,
-  onAccepted,
-}: {
-  selection: MoveSelection;
-  onClose: () => void;
-  onAccepted: () => void;
-}) {
-  const t = useLocalize();
-  const actions = useMailActions();
-  const cancel = useRef<HTMLButtonElement>(null);
-  const container = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement;
-    const workspace = container.current?.closest<HTMLElement>('.mail-workspace');
-    cancel.current?.focus();
-    return () => {
-      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
-      else if (workspace?.isConnected) workspace.focus();
-    };
-  }, []);
-  return (
-    <div className="mail-move-overlay">
-      <div
-        className="mail-move-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="mail-move-title"
-        ref={container}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape' && !actions.enqueueMove.isLoading) onClose();
-          if (event.key !== 'Tab') return;
-          const buttons = Array.from(
-            container.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || [],
-          );
-          const first = buttons.at(0);
-          const last = buttons.at(-1);
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last?.focus();
-          }
-          if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first?.focus();
-          }
-        }}
-      >
-        <h2 id="mail-move-title">
-          {t('com_ui_mail_bulk_title', { count: selection.request.items.length })}
-        </h2>
-        <p>
-          {t('com_ui_mail_bulk_confirm', {
-            count: selection.request.items.length,
-            folder: selection.folderName,
-          })}
-        </p>
-        <ul className="mail-move-items">
-          {selection.subjects.map((subject, i) => (
-            <li key={selection.request.items[i].id}>{subject || t('com_ui_mail_no_subject')}</li>
-          ))}
-        </ul>
-        <p className="mail-muted">{t('com_ui_mail_bulk_hint')}</p>
-        {actions.enqueueMove.isError && (
-          <p className="mail-error" role="alert">
-            {t('com_ui_mail_job_submit_error')}
-          </p>
-        )}
-        <div className="mail-detail-tools">
-          <button
-            className="mail-button primary"
-            disabled={actions.enqueueMove.isLoading}
-            onClick={() => actions.enqueueMove.mutate(selection.request, { onSuccess: onAccepted })}
-          >
-            <FolderCheck size={16} />
-            {actions.enqueueMove.isLoading
-              ? t('com_ui_mail_job_submitting')
-              : t('com_ui_mail_move_now')}
-          </button>
-          <button
-            ref={cancel}
-            className="mail-button"
-            disabled={actions.enqueueMove.isLoading}
-            onClick={onClose}
-          >
-            {t('com_ui_mail_cancel')}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

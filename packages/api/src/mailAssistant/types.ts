@@ -161,6 +161,8 @@ export interface MailDraftResponse {
 }
 
 export interface MailHtmlPreview {
+  embeddedImagesAvailable?: boolean;
+  imagesLoaded?: boolean;
   linksEnabled?: boolean;
   html: string;
   blockedImages: number;
@@ -323,7 +325,7 @@ export interface MailGraph {
     url?: string,
   ): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }>;
   message(id: string): Promise<MailMessage>;
-  preview(id: string): Promise<MailHtmlPreview>;
+  preview(id: string, loadImages?: boolean): Promise<MailHtmlPreview>;
   attachments(id: string): Promise<MailAttachments>;
   thread(id: string): Promise<{ messages: MailMessage[]; complete: boolean }>;
   categorize(id: string, categories: string[], etag?: string): Promise<void>;
@@ -408,6 +410,12 @@ export interface MailAssistantEngine {
   disconnect(owner: string): Promise<void>;
   priority(owner: string, id: string, priority: MailPriority): Promise<void>;
   content(owner: string, id: string): Promise<MailResultContent>;
+  images(
+    owner: string,
+    id: string,
+    kind: 'original' | 'draft',
+    revision: string,
+  ): Promise<MailHtmlPreview>;
   results(owner: string, query: MailResultQuery): Promise<MailResultPage>;
   folders(owner: string, parentId?: string): Promise<MailFolder[]>;
   move(owner: string, id: string, folderId: string, revision: string): Promise<MailResult>;

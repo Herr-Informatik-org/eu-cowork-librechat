@@ -6,16 +6,21 @@ import { useLocalize } from '~/hooks';
 
 export function FolderPicker({
   active,
+  moveCount = 0,
   chosen,
   onChoose,
   onClose,
 }: {
   active: boolean;
+  moveCount?: number;
   chosen: MailWorkspaceFolder | null;
   onChoose: (folder: MailWorkspaceFolder) => void;
   onClose: () => void;
 }) {
   const t = useLocalize();
+  const title = moveCount
+    ? t('com_ui_mail_bulk_title', { count: moveCount })
+    : t('com_ui_mail_choose_folder');
   const [parents, setParents] = useState<MailWorkspaceFolder[]>([]);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -31,7 +36,7 @@ export function FolderPicker({
       className="mail-folder-picker"
       role="dialog"
       aria-modal="true"
-      aria-label={t('com_ui_mail_choose_folder')}
+      aria-label={title}
       ref={container}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
@@ -55,12 +60,14 @@ export function FolderPicker({
       }}
     >
       <div className="mail-settings-heading">
-        <h3>{t('com_ui_mail_choose_folder')}</h3>
+        <h3>{title}</h3>
         <button className="mail-button" onClick={onClose}>
           {t('com_ui_mail_close')}
         </button>
       </div>
-      <p className="mail-muted">{t('com_ui_mail_folder_hint')}</p>
+      <p className="mail-muted">
+        {t(moveCount ? 'com_ui_mail_folder_move_hint' : 'com_ui_mail_folder_hint')}
+      </p>
       <div className="mail-folder-path">
         <button
           className="mail-button"

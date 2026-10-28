@@ -1,5 +1,15 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-28 — Eingebettete Mailbilder bewusst laden und direkt verschieben
+
+- Auf ausdrücklichen Klick erscheinen eingebettete PNG-/JPEG-Bilder derselben Mail.
+  Begrenzte Downloads, Dateityp- und Pixelprüfung sowie neu erzeugte PNG-Bilder
+  härten die isolierte Vorschau. Externe Bilder, aktive Formate und Animationen
+  bleiben gesperrt; die Bilddaten werden weder gespeichert noch ans Modell gegeben.
+- Einzel- und Mehrfachauswahlen starten den Verschiebeauftrag direkt. Der zusätzliche
+  Bestätigungsdialog entfällt; Zielordner, Versionsprüfung und Doppelklickschutz
+  bleiben erhalten. Laufende Aufträge blockieren die weitere Mailbearbeitung nicht.
+
 ## 2026-10-28 — Gezielte ERP-Links in der Mailvorschau auf CWV01
 
 - Nur mit `MAIL_ASSISTANT_ERP_LINKS_ENABLED=true` auf der freigegebenen CW01-Instanz

@@ -80,6 +80,13 @@ jest.mock('../Signature', () => ({ MailSignatureSettings: () => null }));
 jest.mock('../Attachments', () => ({ MailAttachments: () => null }));
 jest.mock('~/data-provider/Mail', () => ({
   useMailPendingActions: () => mockPending,
+  useMailImages: () => ({
+    preview: undefined,
+    isLoading: false,
+    isError: false,
+    load: jest.fn(),
+    hide: jest.fn(),
+  }),
   useMailStatus: () => ({ data: mockStatus }),
   useMailMoveJobs: () => ({ data: { jobs: mockJobs }, isError: mockJobsError }),
   useMailChat: () => ({ mutateAsync: mockChat }),
@@ -203,15 +210,14 @@ it('automatically loads the next inbox page without triggering analysis', () => 
   fireEvent.click(screen.getByRole('button', { name: 'Jetzt prüfen' }));
   expect(mockRun).toHaveBeenCalledTimes(1);
 });
-it('requires a folder selection and explicit confirmation before moving', () => {
+it('moves once on the first click after the user chooses a folder', () => {
   mount();
   chooseMail();
   expect(screen.getByRole('button', { name: 'In Erledigt verschieben' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Erledigt-Ordner wählen' }));
   fireEvent.click(screen.getByRole('button', { name: '00_erledigt' }));
   fireEvent.click(screen.getByRole('button', { name: 'In Erledigt verschieben' }));
-  expect(mockMove).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(mockMove).toHaveBeenCalledWith(
     {
       requestId: '00000000-0000-4000-8000-000000000001',
@@ -220,6 +226,19 @@ it('requires a folder selection and explicit confirmation before moving', () => 
     },
     expect.any(Object),
   );
+});
+it('suppresses duplicate move clicks while the request is pending and leaves reading usable', () => {
+  mount();
+  chooseMail();
+  chooseFolder();
+  const button = screen.getByRole('button', { name: 'In Erledigt verschieben' });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  fireEvent.keyDown(screen.getByRole('main'), { key: 'e' });
+  expect(mockMove).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
+  expect(screen.getByRole('button', { name: 'Antwort bearbeiten' })).toBeEnabled();
 });
 it('saves only the edited reply with the original revision on user click', () => {
   mount();
@@ -310,7 +329,7 @@ const exampleJob = (status: MailWorkspaceMoveJob['status'] = 'running'): MailWor
     },
   ],
 });
-it('selects only loaded open messages and confirms exact snapshots and folder', () => {
+it('moves only explicitly selected loaded open messages with exact snapshots and folder', () => {
   mockRows = [
     mockRows[0],
     { ...mockRows[0], id: 'second', revision: 'second-revision', subject: 'Zweite Mail' },
@@ -322,11 +341,7 @@ it('selects only loaded open messages and confirms exact snapshots and folder', 
   );
   chooseFolder();
   fireEvent.click(screen.getByRole('button', { name: 'Auswahl verschieben' }));
-  expect(screen.getByRole('alertdialog')).toHaveTextContent(
-    '2 ausgewählte Originalmails in «00_erledigt»',
-  );
-  expect(mockMove).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(mockMove).toHaveBeenCalledWith(
     {
       requestId: expect.any(String),
@@ -359,7 +374,7 @@ it('limits select-all to 100 loaded messages and does not select unseen pages', 
   ).toBeDisabled();
   expect(mockNext).not.toHaveBeenCalled();
 });
-it('releases the confirmation after acceptance without claiming the mails have moved', () => {
+it('shows accepted jobs without claiming the mails have moved', () => {
   mockMove.mockImplementation((_request, options: { onSuccess: () => void }) => {
     mockJobs = [exampleJob('queued')];
     options.onSuccess();
@@ -370,7 +385,6 @@ it('releases the confirmation after acceptance without claiming the mails have m
   );
   chooseFolder();
   fireEvent.click(screen.getByRole('button', { name: 'Auswahl verschieben' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(
     within(screen.getByRole('status', { name: 'Verschiebeaufträge' })).getByText(
@@ -521,7 +535,7 @@ it('shows per-message uncertainty and never automatically retries the operation'
   expect(screen.getByText(/Für diese Mail wird kein zweiter Versuch/)).toBeVisible();
   expect(mockMove).not.toHaveBeenCalled();
 });
-it('keeps confirmation snapshots unchanged when a newer revision arrives', () => {
+it('keeps submitted snapshots unchanged when a newer revision arrives', () => {
   const view = mount();
   chooseMail();
   chooseFolder();
@@ -532,7 +546,6 @@ it('keeps confirmation snapshots unchanged when a newer revision arrives', () =>
       <Workspace />
     </MemoryRouter>,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
   expect(mockMove.mock.calls[0][0].items).toEqual([{ id: 'result', revision: 'result-revision' }]);
 });
 it('clears selection when the result filter changes', () => {
@@ -642,22 +655,26 @@ it('never uses shortcuts to move an edited or unconfigured mail', () => {
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(mockMove).not.toHaveBeenCalled();
 });
-it('returns focus to the mail after cancelling a keyboard move confirmation', () => {
+it('chooses another folder with Shift+E and queues immediately without another confirmation', () => {
   mount();
   chooseFolder();
   chooseMail();
   const row = screen.getByRole('button', { name: /kunde@example.test/ });
   row.focus();
   fireEvent.keyDown(row, { key: 'E', shiftKey: true });
+  expect(screen.getByRole('dialog', { name: '1 Mails verschieben' })).toHaveTextContent(
+    'Klicke den Zielordner an',
+  );
   expect(mockMove).not.toHaveBeenCalled();
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '00_erledigt' }));
-  const dialog = screen.getByRole('alertdialog');
-  fireEvent.keyDown(dialog, { key: 'Escape' });
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(row).toHaveFocus();
-  fireEvent.keyDown(row, { key: 'x' });
-  expect(screen.getByText('1 ausgewählt')).toBeVisible();
-  expect(mockMove).not.toHaveBeenCalled();
+  expect(mockMove).toHaveBeenCalledTimes(1);
+  expect(mockMove.mock.calls[0][0]).toMatchObject({
+    folderId: 'done',
+    items: [{ id: 'result', revision: 'result-revision' }],
+  });
 });
 it('does not hijack text input, modifiers, repeats, composing or other dialogs', () => {
   mockRows.push({

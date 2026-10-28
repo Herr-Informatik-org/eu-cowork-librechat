@@ -78,7 +78,13 @@ export type MailWorkspaceStatus = {
   };
   results: MailWorkspaceResult[];
 };
+export type MailWorkspaceImagesRequest = {
+  kind: 'original' | 'draft';
+  revision: string;
+};
 export type MailWorkspacePreview = {
+  embeddedImagesAvailable?: boolean;
+  imagesLoaded?: boolean;
   linksEnabled?: boolean;
   html: string;
   blockedImages: number;

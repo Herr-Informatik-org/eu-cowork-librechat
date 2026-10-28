@@ -21,6 +21,7 @@ import type {
   MailDraftRequest,
   MailDraftResponse,
   MailAttachments,
+  MailHtmlPreview,
 } from './types';
 import { MAIL_CATEGORIES, MAIL_CONSENT_VERSION } from './types';
 import {
@@ -656,6 +657,55 @@ export function createMailAssistantEngine({
       }
       throw error;
     }
+  }
+  async function images(
+    owner: string,
+    id: string,
+    kind: 'original' | 'draft',
+    revision: string,
+  ): Promise<MailHtmlPreview> {
+    const { result, guard } = await readContext(owner, id);
+    if (!['original', 'draft'].includes(kind) || revision !== resultRevision(result))
+      throw new MailAssistantError('Die Mail wurde verändert. Bitte die Übersicht aktualisieren.');
+    const draft = kind === 'draft';
+    if (
+      draft &&
+      (!result.draftId ||
+        !['created', 'existing', 'stale'].includes(result.draftStatus) ||
+        result.operationPending ||
+        result.editPending)
+    )
+      throw new MailAssistantError('Der Entwurf ist nicht verfügbar. Bitte erneut öffnen.');
+    const messageId = draft ? result.draftId! : result.messageId;
+    await adapter.audit(owner, 'embedded_images_requested', id);
+    const graph = await adapter.graph(owner, guard);
+    const message = await graph.message(messageId);
+    await guard();
+    if (
+      message.id !== messageId ||
+      message.conversationId !== result.conversationId ||
+      message.isDraft !== draft ||
+      !message.changeKey
+    )
+      throw new MailAssistantError(
+        'Die Mail passt nicht mehr zum Mail-Vorgang. Bitte erneut öffnen.',
+      );
+    const preview = await graph.preview(messageId, true);
+    await guard();
+    const current = await graph.message(messageId);
+    await guard();
+    if (
+      current.id !== messageId ||
+      current.conversationId !== message.conversationId ||
+      current.isDraft !== draft ||
+      current.changeKey !== message.changeKey
+    )
+      throw new MailAssistantError(
+        'Die Mail wurde während des Ladens verändert. Bitte erneut öffnen.',
+      );
+    await adapter.audit(owner, 'embedded_images_read', id);
+    await guard();
+    return preview;
   }
   async function attachments(owner: string, id: string): Promise<MailAttachments> {
     const { result, guard } = await readContext(owner, id);
@@ -1415,6 +1465,7 @@ export function createMailAssistantEngine({
     editDraft,
     requestDraft,
     attachments,
+    images,
     async status(owner: string) {
       await adapter.authorize(owner);
       const availability = await adapter.availability(owner);
