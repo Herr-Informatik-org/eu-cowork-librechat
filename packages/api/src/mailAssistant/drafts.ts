@@ -89,6 +89,16 @@ function draftEtag(value: Record<string, unknown>): string {
   return etag;
 }
 
+function messageCategories(value: unknown): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > 100 ||
+    value.some((category) => typeof category !== 'string' || category.length > 255)
+  )
+    throw new MailGraphError(502);
+  return value;
+}
+
 function prependReply(body: string, text: string, signature: string, style: string): string {
   const opening = /<body\b[^>]*>/i.exec(body);
   const position = opening ? opening.index + opening[0].length : 0;
@@ -338,17 +348,33 @@ export function createDraftOperations({
   }
   async function readDraft(draftId: string) {
     const result = await call(
-      `/v1.0/me/messages/${id(draftId)}?$select=id,isDraft,body,conversationId,changeKey`,
+      `/v1.0/me/messages/${id(draftId)}?$select=id,isDraft,body,conversationId,changeKey,categories`,
       'GET',
       undefined,
       undefined,
       'html',
     );
-    return { result, body: draftBody(result, draftId), etag: draftEtag(result) };
+    return {
+      result,
+      body: draftBody(result, draftId),
+      etag: draftEtag(result),
+      categories: messageCategories(result.categories),
+    };
   }
-  async function assertDraft(draftId: string, expectedBody: string, conversationId: string) {
+  async function assertDraft(
+    draftId: string,
+    expectedBody: string,
+    conversationId: string,
+    expectedCategories?: readonly string[],
+  ) {
     const current = await readDraft(draftId);
-    if (current.body !== expectedBody || current.result.conversationId !== conversationId)
+    if (
+      current.body !== expectedBody ||
+      current.result.conversationId !== conversationId ||
+      (expectedCategories &&
+        JSON.stringify([...current.categories].sort()) !==
+          JSON.stringify([...expectedCategories].sort()))
+    )
       throw new MailDraftError(
         'Der Entwurf wurde inzwischen verändert. Bitte ergänze die übrigen Anhänge selbst in Outlook.',
       );
@@ -491,13 +517,7 @@ export function createDraftOperations({
         typeof source.conversationId !== 'string'
       )
         throw new MailGraphError(409);
-      const categories = source.categories;
-      if (
-        !Array.isArray(categories) ||
-        categories.length > 100 ||
-        categories.some((category) => typeof category !== 'string' || category.length > 255)
-      )
-        throw new MailGraphError(502);
+      const categories = messageCategories(source.categories);
       const files = await listAttachments(sourceId);
       const created = await call(
         `/v1.0/me/messages/${id(sourceId)}/createReply`,
@@ -527,7 +547,12 @@ export function createDraftOperations({
         let current = initial;
         let existing: Attachment[] | undefined;
         if (preparedSignature?.logo && signatureCid) {
-          current = await assertDraft(created.id, initial.body, source.conversationId);
+          current = await assertDraft(
+            created.id,
+            initial.body,
+            source.conversationId,
+            initial.categories,
+          );
           if (current.etag !== initial.etag)
             throw new MailDraftError(
               'Der neue Entwurf wurde inzwischen verändert. Bitte bearbeite ihn in Outlook.',
@@ -542,6 +567,13 @@ export function createDraftOperations({
             contentBytes: preparedSignature.logo.contentBytes,
           });
           if (typeof logo.id !== 'string') throw new MailGraphError(502, true);
+          // Capture the post-upload version before verifying its attachment collection.
+          current = await assertDraft(
+            created.id,
+            initial.body,
+            source.conversationId,
+            initial.categories,
+          );
           existing = await listAttachments(created.id);
           const linked = existing.filter((item) => item.contentId === signatureCid);
           if (
@@ -552,8 +584,7 @@ export function createDraftOperations({
             linked[0].contentType.toLowerCase() !== 'image/png'
           )
             throw new MailGraphError(502, true);
-          // An attachment changes the ETag. Refresh it without accepting a changed body.
-          current = await assertDraft(created.id, initial.body, source.conversationId);
+          // Keep this ETag: a later attachment deletion must reject the body update.
         }
         let expectedBody = prependReply(initial.body, text, signatureHtml, style);
         const written = await call(

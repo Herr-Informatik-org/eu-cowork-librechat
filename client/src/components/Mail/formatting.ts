@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify';
 
 export const signatureLogoAttribute = 'data-kisuno-signature-logo';
+export const signatureLogoWidthAttribute = 'data-kisuno-signature-width';
 export const signatureLogoSelector = `[${signatureLogoAttribute}="true"]`;
 const logoText = '[Signatur-Logo]';
 export const signatureFontSizes = [8, 9, 10, 11, 12, 14, 16] as const;
@@ -96,8 +97,10 @@ export function sanitizeSignatureHtml(html: string, preserveLogo = true): string
       !preserveLogo ||
       node.tagName !== 'SPAN' ||
       node.getAttribute(signatureLogoAttribute) !== 'true'
-    )
+    ) {
       node.removeAttribute(signatureLogoAttribute);
+      node.removeAttribute(signatureLogoWidthAttribute);
+    }
   });
   const fragment = sanitizer.sanitize(html, {
     RETURN_DOM_FRAGMENT: true,
@@ -118,7 +121,15 @@ export function sanitizeSignatureHtml(html: string, preserveLogo = true): string
       'tr',
       'td',
     ],
-    ALLOWED_ATTR: ['style', 'href', 'title', 'colspan', 'rowspan', signatureLogoAttribute],
+    ALLOWED_ATTR: [
+      'style',
+      'href',
+      'title',
+      'colspan',
+      'rowspan',
+      signatureLogoAttribute,
+      signatureLogoWidthAttribute,
+    ],
     ALLOW_DATA_ATTR: false,
     ALLOW_ARIA_ATTR: false,
     FORBID_TAGS: [
@@ -144,13 +155,46 @@ export function sanitizeSignatureHtml(html: string, preserveLogo = true): string
       marker.remove();
       return;
     }
+    const width = validSignatureLogoWidth(marker.getAttribute(signatureLogoWidthAttribute));
     for (const attribute of [...marker.attributes]) marker.removeAttribute(attribute.name);
     marker.setAttribute(signatureLogoAttribute, 'true');
+    if (width !== undefined) marker.setAttribute(signatureLogoWidthAttribute, String(width));
     marker.textContent = logoText;
   });
   const container = document.createElement('div');
   container.append(fragment);
   return container.innerHTML;
+}
+
+function validSignatureLogoWidth(value: string | null): number | undefined {
+  if (!value || !/^\d{2,3}$/.test(value)) return;
+  const width = Number(value);
+  if (width >= 80 && width <= 320) return width;
+}
+
+export function signatureLogoWidth(html: string): number {
+  const template = document.createElement('template');
+  template.innerHTML = sanitizeSignatureHtml(html);
+  return (
+    validSignatureLogoWidth(
+      template.content
+        .querySelector(signatureLogoSelector)
+        ?.getAttribute(signatureLogoWidthAttribute) ?? null,
+    ) ?? 160
+  );
+}
+
+export function setSignatureLogoWidth(editor: HTMLElement, width: number): boolean {
+  if (validSignatureLogoWidth(String(width)) === undefined) return false;
+  let marker = editor.querySelector(signatureLogoSelector);
+  if (!marker) {
+    marker = document.createElement('span');
+    marker.setAttribute(signatureLogoAttribute, 'true');
+    marker.textContent = logoText;
+    editor.append(marker);
+  }
+  marker.setAttribute(signatureLogoWidthAttribute, String(width));
+  return true;
 }
 
 export function isSignatureRange(editor: HTMLElement, range?: Range | null): range is Range {
@@ -213,9 +257,13 @@ export function placeSignatureLogo(editor: HTMLElement, range: Range): Range | u
   if (!isSignatureRange(editor, range)) return;
   const position = range.cloneRange();
   position.collapse(false);
+  const width = validSignatureLogoWidth(
+    editor.querySelector(signatureLogoSelector)?.getAttribute(signatureLogoWidthAttribute) ?? null,
+  );
   editor.querySelectorAll(signatureLogoSelector).forEach((marker) => marker.remove());
   const marker = document.createElement('span');
   marker.setAttribute(signatureLogoAttribute, 'true');
+  if (width !== undefined) marker.setAttribute(signatureLogoWidthAttribute, String(width));
   marker.textContent = logoText;
   position.insertNode(marker);
   position.setStartAfter(marker);

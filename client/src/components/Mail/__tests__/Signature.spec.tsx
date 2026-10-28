@@ -228,3 +228,32 @@ test('disables formatting and logo placement while settings are read only', () =
   expect(screen.getByLabelText('Grösse des markierten Texts')).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Logo hier einfügen / verschieben' })).toBeDisabled();
 });
+
+test('changes a legacy logo width through HTML without adding unsupported settings fields', () => {
+  render(
+    <ControlledSignature
+      initial={{
+        ...signature,
+        html: '<p>Role</p><p>Company</p>',
+        logo: { contentBytes: 'cGl4ZWxz' },
+      }}
+    />,
+  );
+  const editor = screen.getByRole('textbox');
+  expect(editor.querySelector('[data-kisuno-signature-logo]')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Logobreite'), { target: { value: '200' } });
+  const saved = JSON.parse(screen.getByTestId('saved-signature').textContent!);
+  expect(saved.logo).toEqual({ contentBytes: 'cGl4ZWxz' });
+  expect(saved.html).toContain(
+    '<span data-kisuno-signature-logo="true" data-kisuno-signature-width="200">[Signatur-Logo]</span>',
+  );
+  expect(editor.lastChild).toBe(editor.querySelector('[data-kisuno-signature-logo]'));
+  selectText(editor.querySelector('p')!.firstChild!, 4);
+  fireEvent.click(screen.getByRole('button', { name: 'Logo hier einfügen / verschieben' }));
+  expect(editor.textContent).toBe('Role[Signatur-Logo]Company');
+  expect(editor.querySelector('[data-kisuno-signature-logo]')).toHaveAttribute(
+    'data-kisuno-signature-width',
+    '200',
+  );
+  expect(screen.getByLabelText('Logobreite')).toHaveValue('200');
+});

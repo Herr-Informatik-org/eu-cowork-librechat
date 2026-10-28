@@ -139,10 +139,10 @@ describe('explicit personal mail signature', () => {
     ]) {
       const safe = await sanitizeMailSignature({
         ...signature,
-        html: content,
-        logo: { contentBytes: input.toString('base64'), width: 120 },
+        html: content.replace('="true"', '="true" data-kisuno-signature-width="120"'),
+        logo: { contentBytes: input.toString('base64') },
       });
-      expect(safe.logo!.width).toBe(120);
+      expect(safe.html).toContain('data-kisuno-signature-width="120"');
       const rendered = renderMailSignature(safe, logoCid);
       expect(rendered).toMatch(/Role<img[^>]+>Company/);
       expect(rendered).toContain('width="120" height="38"');
@@ -155,6 +155,19 @@ describe('explicit personal mail signature', () => {
     });
     expect(renderMailSignature(legacy, logoCid)).toMatch(/<\/p><div><img/);
     expect(renderMailSignature(legacy, logoCid)).toContain('width="160" height="50"');
+  });
+  it('stores display width only in passive HTML and drops invalid width or forged attributes', () => {
+    const sized = logoMarker.replace('="true"', '="true" data-kisuno-signature-width="120"');
+    const html = sanitizeSignatureHtml(`Name${sized}`);
+    expect(html).toContain(sized);
+    expect(sanitizeSignatureHtml(html)).toBe(html);
+    for (const width of ['0', '79', '321', '-80', '120.5', '80px', '1e2']) {
+      const value = logoMarker.replace('="true"', `="true" data-kisuno-signature-width="${width}"`);
+      expect(sanitizeSignatureHtml(value)).toBe(logoMarker);
+    }
+    expect(sanitizeSignatureHtml('<p data-kisuno-signature-width="120">Name</p>')).not.toContain(
+      'signature-width',
+    );
   });
   it('removes an unused logo marker and does not accept it as visible signature text', () => {
     expect(

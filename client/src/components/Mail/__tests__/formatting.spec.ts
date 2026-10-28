@@ -2,6 +2,8 @@ import {
   sanitizeSignatureHtml,
   signatureFontSize,
   signatureLogoSelector,
+  signatureLogoWidth,
+  setSignatureLogoWidth,
   formatSignatureSelection,
   placeSignatureLogo,
   restoreSignatureRange,
@@ -149,4 +151,44 @@ test('inserts the logo after the selected role, before company, and moves the si
   expect(editor.textContent).toBe('Name[Signatur-Logo]Head of Sec OpsCompany');
   expect(editor.querySelectorAll(signatureLogoSelector)).toHaveLength(1);
   expect(editor.querySelector('p > span')).toHaveAttribute('data-kisuno-signature-logo', 'true');
+});
+
+test('stores a bounded width only on the canonical logo marker and removes it from clipboard data', () => {
+  const html =
+    '<p>Role</p><span data-kisuno-signature-logo="true" data-kisuno-signature-width="120">Logo</span><p>Company</p>';
+  const safe = sanitizeSignatureHtml(html);
+  expect(safe).toContain(
+    '<span data-kisuno-signature-logo="true" data-kisuno-signature-width="120">[Signatur-Logo]</span>',
+  );
+  expect(signatureLogoWidth(safe)).toBe(120);
+  expect(sanitizeSignatureHtml(html, false)).not.toContain('data-kisuno');
+  expect(
+    sanitizeSignatureHtml('<span data-kisuno-signature-width="120">Text</span>'),
+  ).not.toContain('data-kisuno');
+  for (const invalid of ['79', '321', '120px', '120.5', 'url(https://tracker.test)']) {
+    const dirty = `<span data-kisuno-signature-logo="true" data-kisuno-signature-width="${invalid}">Logo</span>`;
+    expect(sanitizeSignatureHtml(dirty)).not.toContain('data-kisuno-signature-width');
+    expect(signatureLogoWidth(dirty)).toBe(160);
+  }
+});
+
+test('keeps the width while moving the logo and creates a legacy end marker when changing its width', () => {
+  const editor = editable('<p>Name</p><p>Role</p><p>Company</p>');
+  expect(setSignatureLogoWidth(editor, 120)).toBe(true);
+  const marker = editor.querySelector(signatureLogoSelector)!;
+  expect(editor.lastChild).toBe(marker);
+  expect(marker).toHaveAttribute('data-kisuno-signature-width', '120');
+  const role = editor.querySelectorAll('p')[1].firstChild!;
+  const range = document.createRange();
+  range.setStart(role, 4);
+  range.collapse(true);
+  placeSignatureLogo(editor, range);
+  expect(editor.textContent).toBe('NameRole[Signatur-Logo]Company');
+  expect(editor.querySelectorAll(signatureLogoSelector)).toHaveLength(1);
+  expect(editor.querySelector(signatureLogoSelector)).toHaveAttribute(
+    'data-kisuno-signature-width',
+    '120',
+  );
+  expect(setSignatureLogoWidth(editor, 321)).toBe(false);
+  expect(signatureLogoWidth(editor.innerHTML)).toBe(120);
 });

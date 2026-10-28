@@ -13,7 +13,6 @@ const signatureSchema = z
     logo: z
       .object({
         contentBytes: z.string().min(1).max(32768),
-        width: z.number().int().min(80).max(320).optional(),
       })
       .strict()
       .optional(),
@@ -22,6 +21,13 @@ const signatureSchema = z
 const spacing =
   /^(?:0|(?:[0-9]|1[0-9]|2[0-4])(?:px|pt))(?: (?:0|(?:[0-9]|1[0-9]|2[0-4])(?:px|pt))){0,3}$/;
 const logoMarker = '<span data-kisuno-signature-logo="true">[Signatur-Logo]</span>';
+const logoPattern =
+  /<span data-kisuno-signature-logo="true"(?: data-kisuno-signature-width="(\d{2,3})")?>\[Signatur-Logo\]<\/span>/;
+function sizedLogoMarker(width?: string): string {
+  return width
+    ? logoMarker.replace('="true"', `="true" data-kisuno-signature-width="${width}"`)
+    : logoMarker;
+}
 const logoSlot = '<br data-kisuno-signature-slot="true" />';
 
 function normalizeFontSizes(style: string): string {
@@ -42,6 +48,7 @@ function normalizeFontSizes(style: string): string {
 export function sanitizeSignatureHtml(html: string): string {
   if (html.length > MAX_MAIL_SIGNATURE_HTML) throw new Error('Die Signatur ist zu lang.');
   let markerSeen = false;
+  let markerWidth: string | undefined;
   return sanitizeHtml(html, {
     allowedTags: [
       'p',
@@ -115,11 +122,14 @@ export function sanitizeSignatureHtml(html: string): string {
         const {
           'data-kisuno-signature-logo': marker,
           'data-kisuno-signature-slot': _slot,
+          'data-kisuno-signature-width': width,
           ...rest
         } = attributes;
         if (marker !== 'true') return { tagName: name, attribs: rest };
         if (markerSeen) return { tagName: name, attribs: {}, text: '' };
         markerSeen = true;
+        if (/^\d{2,3}$/.test(width ?? '') && Number(width) >= 80 && Number(width) <= 320)
+          markerWidth = String(Number(width));
         // Replace marker contents with a canonical slot; any safe child tags remain outside it.
         return { tagName: 'br', attribs: { 'data-kisuno-signature-slot': 'true' }, text: '' };
       },
@@ -138,13 +148,13 @@ export function sanitizeSignatureHtml(html: string): string {
     },
   })
     .trim()
-    .replace(logoSlot, logoMarker);
+    .replace(logoSlot, sizedLogoMarker(markerWidth));
 }
 
 export function normalizeMailSignature(value: unknown): MailSignature {
   const parsed = signatureSchema.parse(value);
   const html = sanitizeSignatureHtml(parsed.html);
-  const visible = sanitizeHtml(html.replace(logoMarker, ''), {
+  const visible = sanitizeHtml(html.replace(logoPattern, ''), {
     allowedTags: [],
     allowedAttributes: {},
   }).trim();
@@ -217,17 +227,18 @@ export async function sanitizeMailSignature(value: unknown): Promise<MailSignatu
 export function renderMailSignature(value?: MailSignature, logoCid?: string): string {
   if (!value?.enabled) return '';
   const signature = normalizeMailSignature(value);
+  const marker = logoPattern.exec(signature.html);
   let logo = '';
   if (signature.logo && logoCid) {
     if (!/^kisuno-signature-[a-f0-9-]{36}$/.test(logoCid))
       throw new Error('Ungültiger Signaturverweis.');
     const data = logoBytes(signature.logo.contentBytes);
-    const width = Math.min(signature.logo.width ?? 160, data.readUInt32BE(16));
+    const width = Math.min(marker?.[1] ? Number(marker[1]) : 160, data.readUInt32BE(16));
     const height = Math.max(1, Math.round((data.readUInt32BE(20) * width) / data.readUInt32BE(16)));
     logo = `<img src="cid:${logoCid}" alt="Signatur-Logo" width="${width}" height="${height}" style="display:block;margin:8pt 0">`;
   }
-  const body = signature.html.includes(logoMarker)
-    ? signature.html.replace(logoMarker, logo)
+  const body = marker
+    ? signature.html.replace(logoPattern, logo)
     : signature.html + (logo ? `<div>${logo}</div>` : '');
   return `<!-- kisuno-mail-signature:v1 --><div style="font-family:${signature.fontFamily},Arial,sans-serif;font-size:${signature.fontSize}pt;line-height:1.2;color:#000000;margin:0 0 16pt 0">${body}</div><!-- /kisuno-mail-signature:v1 -->`;
 }

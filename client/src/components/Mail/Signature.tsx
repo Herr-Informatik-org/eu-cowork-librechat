@@ -5,6 +5,8 @@ import {
   sanitizeSignatureHtml as clean,
   signatureFontSizes,
   signatureLogoSelector,
+  signatureLogoWidth,
+  setSignatureLogoWidth,
   isSignatureRange,
   restoreSignatureRange,
   formatSignatureSelection,
@@ -77,6 +79,7 @@ export function MailSignatureSettings({
 }) {
   const t = useLocalize();
   const signature = value ?? empty;
+  const logoWidth = signatureLogoWidth(signature.html);
   const editor = useRef<HTMLDivElement>(null);
   const last = useRef<string | null>(null);
   const savedRange = useRef<Range | null>(null);
@@ -318,24 +321,19 @@ export function MailSignatureSettings({
             alt={t('com_ui_mail_signature_logo')}
             style={{
               width: 'auto',
-              maxWidth: `min(100%, ${signature.logo.width ?? 160}px)`,
+              maxWidth: `min(100%, ${logoWidth}px)`,
               height: 'auto',
             }}
           />
           <label>
             {t('com_ui_mail_signature_logo_width')}
             <select
-              value={signature.logo.width ?? 160}
+              value={logoWidth}
               disabled={disabled || logoBusy}
-              onChange={(event) =>
-                onChange({
-                  ...signature,
-                  logo: {
-                    contentBytes: signature.logo!.contentBytes,
-                    width: Number(event.target.value),
-                  },
-                })
-              }
+              onChange={(event) => {
+                if (disabled || !editor.current) return;
+                if (setSignatureLogoWidth(editor.current, Number(event.target.value))) publish();
+              }}
             >
               {[80, 120, 160, 200, 240, 320].map((width) => (
                 <option key={width} value={width}>

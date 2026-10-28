@@ -25,6 +25,7 @@ function setup(options: { files?: object[]; bytes?: Uint8Array; quote?: string }
   let body = options.quote ?? quote;
   let etag = 'W/"created"';
   let exists = false;
+  let categories: string[] = [];
   const sourceFiles = options.files ?? [];
   const copied: object[] = [];
   const beforeRequest = jest.fn().mockResolvedValue(undefined);
@@ -33,6 +34,7 @@ function setup(options: { files?: object[]; bytes?: Uint8Array; quote?: string }
     id: 'draft',
     isDraft: true,
     conversationId: 'thread',
+    categories,
     '@odata.etag': etag,
     body: { contentType: 'html', content: body },
     webLink: 'https://outlook.office.com/mail/draft',
@@ -63,6 +65,7 @@ function setup(options: { files?: object[]; bytes?: Uint8Array; quote?: string }
       if ((init?.headers as Record<string, string>)['If-Match'] !== etag) return json({}, 412);
       const patch = JSON.parse(String(init?.body));
       body = patch.body.content;
+      if (patch.categories) categories = patch.categories;
       etag = 'W/"patched"';
       return json(draft());
     }
@@ -95,8 +98,13 @@ function setup(options: { files?: object[]; bytes?: Uint8Array; quote?: string }
     copied,
     graph: createMailGraph({ fetch: request, beforeRequest, token }),
     body: () => body,
+    categories: () => categories,
     alter: (nextBody: string) => {
       body = nextBody;
+      etag = 'W/"employee"';
+    },
+    alterCategories: (next: string[]) => {
+      categories = next;
       etag = 'W/"employee"';
     },
   };
@@ -116,6 +124,41 @@ async function logoSignature() {
 }
 
 describe('complete, own reply drafts', () => {
+  test('a logo removed after metadata verification invalidates the existing ETag before body publication', async () => {
+    const state = setup();
+    state.request.mockImplementation(async (url, init) => {
+      const response = await state.implementation(url, init);
+      if (
+        new URL(String(url)).pathname === '/v1.0/me/messages/draft/attachments' &&
+        init?.method !== 'POST' &&
+        state.copied.length
+      ) {
+        state.copied.length = 0;
+        state.alter(state.body());
+      }
+      return response;
+    });
+    const result = await state.graph.createReply('original', 'Danke', await logoSignature());
+    expect(result.warnings?.join()).toContain('unvollständig');
+    expect(result.stop).toBe(true);
+    expect(state.body()).not.toContain('cid:kisuno-signature-');
+    expect(state.body() === quote).toBe(true);
+    expect(state.request.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
+  });
+  test('employee categories changed during logo upload are not replaced by source categories', async () => {
+    const state = setup();
+    state.request.mockImplementation(async (url, init) => {
+      const response = await state.implementation(url, init);
+      if (String(url).endsWith('/draft/attachments') && init?.method === 'POST')
+        state.alterCategories(['Manuell zugeordnet']);
+      return response;
+    });
+    const result = await state.graph.createReply('original', 'Danke', await logoSignature());
+    expect(result.warnings?.join()).toContain('inzwischen verändert');
+    expect(state.categories()).toEqual(['Manuell zugeordnet']);
+    expect(state.body()).not.toContain('cid:kisuno-signature-');
+    expect(state.request.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+  });
   test('uploads and verifies the signature logo before writing its CID and uses the current draft ETag', async () => {
     const state = setup();
     let uploaded = false;
