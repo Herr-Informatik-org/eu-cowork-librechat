@@ -1,6 +1,7 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import {
   Constants,
+  ApprovalEvents,
   ContentTypes,
   LocalStorageKeys,
   QueryKeys,
@@ -167,7 +168,13 @@ jest.mock('~/store', () => ({
 }));
 
 jest.mock('~/hooks/AuthContext', () => ({
-  useAuthContext: () => ({ token: 'test-token', isAuthenticated: true }),
+  useAuthContext: () => ({ token: 'test-token', isAuthenticated: true, user: { id: 'user' } }),
+}));
+
+let mockLocalFoldersEnabled = false;
+const mockHandleLocalFolderAction = jest.fn();
+jest.mock('~/localFolders/bridge', () => ({
+  handleLocalFolderAction: (...args: unknown[]) => mockHandleLocalFolderAction(...args),
 }));
 
 const mockFetchStreamStatus = jest.fn();
@@ -176,7 +183,9 @@ const mockConvertSteersToQueued = jest.fn();
 const mockPostGenerationRequest = jest.fn();
 
 jest.mock('~/data-provider', () => ({
-  useGetStartupConfig: () => ({ data: { balance: { enabled: false } } }),
+  useGetStartupConfig: () => ({
+    data: { balance: { enabled: false }, localFoldersEnabled: mockLocalFoldersEnabled },
+  }),
   useGetUserBalance: () => ({ refetch: jest.fn() }),
   queueTitleGeneration: jest.fn(),
   streamStatusQueryKey: (conversationId: string) => ['streamStatus', conversationId],
@@ -341,6 +350,8 @@ const advanceRetryTimer = async (ms: number) => {
 
 describe('useResumableSSE', () => {
   beforeEach(() => {
+    mockLocalFoldersEnabled = false;
+    mockHandleLocalFolderAction.mockClear();
     mockSSEInstances.length = 0;
     localStorage.clear();
     mockErrorHandler.mockClear();
@@ -809,6 +820,58 @@ describe('useResumableSSE', () => {
     );
     expect(mockFindAll).toHaveBeenCalledWith([QueryKeys.allConversations], { exact: false });
 
+    unmount();
+  });
+
+  it('keeps the new-chat Stop alias for a local pause after optimistic hydration and before CREATED', async () => {
+    mockLocalFoldersEnabled = true;
+    const submission = buildSubmission({
+      conversation: {},
+      userMessage: {
+        messageId: 'local-user',
+        conversationId: null,
+        text: 'Read my local folder',
+        isCreatedByUser: true,
+        sender: 'User',
+        parentMessageId: Constants.NO_PARENT,
+      },
+      initialResponse: {
+        messageId: 'local-response',
+        conversationId: null,
+        text: '',
+        isCreatedByUser: false,
+        sender: 'Assistant',
+      },
+    });
+    const chatHelpers = buildChatHelpers();
+    const { unmount } = renderHook(() => useResumableSSE(submission, chatHelpers));
+    await flushMicrotasks();
+    expect(mockSetQueryData).toHaveBeenCalledWith(
+      [QueryKeys.conversation, 'stream-123'],
+      expect.any(Function),
+    );
+    await act(async () => {
+      getLastSSE()._emit('message', {
+        data: JSON.stringify({
+          event: ApprovalEvents.ON_PENDING_ACTION,
+          data: {
+            actionId: 'local-action',
+            streamId: 'stream-123',
+            conversationId: 'stream-123',
+            payload: { type: 'tool_approval', action_requests: [], review_configs: [] },
+          },
+        }),
+      });
+    });
+    expect(mockHandleLocalFolderAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originConversationId: String(Constants.NEW_CONVO),
+        fields: expect.objectContaining({
+          conversationId: 'stream-123',
+          generationCreatedAt: 1000,
+        }),
+      }),
+    );
     unmount();
   });
 

@@ -40,6 +40,7 @@ const MARKDOWN_REPLY_MARKER = 'E2E_MARKDOWN_REPLY';
 const BACKGROUND_DISPATCH_MARKER = 'E2E_BACKGROUND_DISPATCH:';
 const BACKGROUND_COLLECT_MARKER = 'E2E_BACKGROUND_COLLECT:';
 const TOOL_APPROVAL_MARKER = 'E2E_TOOL_APPROVAL:';
+const LOCAL_FOLDER_MARKER = 'E2E_LOCAL_FOLDER:';
 const TOOL_APPROVAL_BATCH_MARKER = 'E2E_TOOL_APPROVAL_BATCH:';
 const TOOL_APPROVAL_RESTRICTED_MARKER = 'E2E_TOOL_APPROVAL_RESTRICTED:';
 const TOOL_APPROVAL_REWRITE_MARKER = 'E2E_TOOL_APPROVAL_REWRITE:';
@@ -1809,6 +1810,28 @@ function buildHandoffResponses(graph, parsed) {
 }
 
 function resolveResponses({ graph, messages, text, toolNames }) {
+  const localPath = getMarkerValue(text, LOCAL_FOLDER_MARKER);
+  if (localPath) {
+    const local = [...(graph?.agentContexts?.values?.() ?? [])]
+      .map((agentContext) => getGraphTools(agentContext).get('local_folder'))
+      .find(Boolean);
+    const match = local?.description?.match(/Available folders \(untrusted labels\): (\[.*?\])\./);
+    const grants = match ? JSON.parse(match[1]) : [];
+    if (!local || !grants[0]?.id) {
+      return { responses: ['E2E local folder unavailable'] };
+    }
+    return {
+      responses: ['', ''],
+      toolCalls: [
+        {
+          id: `${APPROVAL_TOOL_CALL_PREFIX}local_folder`,
+          name: 'local_folder',
+          args: { folderId: grants[0].id, operation: 'read', path: localPath },
+          type: 'tool_call',
+        },
+      ],
+    };
+  }
   const batchApprovalLabel = getMarkerValue(text, TOOL_APPROVAL_BATCH_MARKER);
   if (batchApprovalLabel) {
     return batchApprovalToolResponses(batchApprovalLabel, toolNames);

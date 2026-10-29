@@ -42,6 +42,8 @@ const {
   pickResumeContext,
   getApprovalTtlMs,
   isHITLEnabled,
+  hasLocalFolderAccess,
+  recordLocalFolderCalls,
   captureAgentCheckpointGeneration,
   deleteAgentCheckpoint,
   LIBRECHAT_CHECKPOINT_NAMESPACE_KEY,
@@ -2160,6 +2162,18 @@ class AgentClient extends BaseClient {
     );
   }
 
+  /** Remaining context after output usage and the next response reserve. */
+  localFolderRemainingTokens() {
+    const snapshot = this.contextUsageSink?.latest;
+    if (typeof snapshot?.remainingContextTokens !== 'number') return undefined;
+    const usage = this.usageEmitSink?.slice(this.contextUsageSink.latestUsageIndex ?? 0) ?? [];
+    const outputTokens = usage.reduce(
+      (total, entry) => total + (entry.usage_type ? 0 : entry.output_tokens || 0),
+      0,
+    );
+    return Math.max(0, snapshot.remainingContextTokens - outputTokens - 2048);
+  }
+
   /**
    * Surface any human-in-the-loop interrupt the SDK captured during the most
    * recent `processStream` / `resume`. When the run paused for tool approval (or
@@ -2194,6 +2208,11 @@ class AgentClient extends BaseClient {
     // (apiKey, credentials) and gateway config — resume re-resolves those server-side.
     // (Saved agents source params from the DB record, so this is belt-and-suspenders.)
     const resumeContext = pickResumeContext(this.options.req?.body);
+    const folderCalls = recordLocalFolderCalls(
+      this.options.req?._localFolderCalls,
+      interrupt.payload,
+    );
+    if (folderCalls.length > 0) resumeContext.localFolderCalls = folderCalls;
     const resumeModelParameters = captureResumeModelParameters(
       this.options.req?.body,
       this.options.agent?.model_parameters,
@@ -2579,7 +2598,9 @@ class AgentClient extends BaseClient {
         // below still guarantees it completes before the graph is exposed or run.
         const shouldPruneCheckpoint =
           streamId &&
-          (isHITLEnabled(agentsEConfig?.toolApproval) || agents.some(agentRequestsAskUserQuestion));
+          (isHITLEnabled(agentsEConfig?.toolApproval) ||
+            agents.some(agentRequestsAskUserQuestion) ||
+            hasLocalFolderAccess(this.options.req?.body?.ephemeralAgent?.localFolders));
         let checkpointPrunePromise = Promise.resolve();
         if (shouldPruneCheckpoint && this.checkpointNamespace !== '') {
           checkpointPrunePromise = deleteAgentCheckpoint(
@@ -2628,6 +2649,11 @@ class AgentClient extends BaseClient {
           // opts into the tool-approval wiring. Non-resumable callers (OpenAI-compat, Responses)
           // leave this off so an approval-gated tool can't pause where there's no resume path.
           hitlCapable: true,
+          localFolders: {
+            grants: this.options.req?.body?.ephemeralAgent?.localFolders,
+            history: this.options.req?._localFolderCalls,
+            getRemainingTokens: () => this.localFolderRemainingTokens(),
+          },
           toolInputValidationErrors: this.toolInputValidationErrors,
           // Mid-run steering: drain queued user messages at each tool-batch
           // boundary and inject them into graph state. The offset wrapper
@@ -3036,6 +3062,11 @@ class AgentClient extends BaseClient {
         // The resumed run can pause AGAIN (another tool, a follow-up question), and this
         // controller owns that lifecycle, so it must keep the HITL wiring on the rebuilt run.
         hitlCapable: true,
+        localFolders: {
+          grants: this.options.req?.body?.ephemeralAgent?.localFolders,
+          history: this.options.req?._localFolderCalls,
+          getRemainingTokens: () => this.localFolderRemainingTokens(),
+        },
         toolInputValidationErrors: this.toolInputValidationErrors,
         // Steering stays live across a pause/resume cycle: steers queued while
         // the resumed segment runs drain at its tool-batch boundaries.

@@ -9,6 +9,7 @@ const {
   findUndecidedToolCalls,
   findDisallowedDecisions,
   findIncompleteDecisions,
+  validateLocalFolderResolutions,
   computeAgentRequestFingerprint,
   captureAgentCheckpointGeneration,
   deleteAgentCheckpoint,
@@ -208,6 +209,12 @@ function resolveResumeValue(pendingAction, body) {
   const payload = pendingAction.payload;
   if (payload?.type === 'tool_approval') {
     const resolutions = Array.isArray(body.decisions) ? body.decisions : [];
+    const folderError = validateLocalFolderResolutions(
+      payload,
+      resolutions,
+      pendingAction.resumeContext?.ephemeralAgent?.localFolders,
+    );
+    if (folderError) return { status: 400, error: folderError };
     const undecided = findUndecidedToolCalls(payload, resolutions);
     if (undecided.length > 0) {
       return { status: 400, error: 'Every paused tool call must be decided', undecided };
@@ -583,7 +590,7 @@ const ResumeAgentController = async (req, res, next, initializeClient, addTitle)
   }
 
   const pendingAction = job.metadata?.pendingAction;
-  if (job.status !== 'requires_action') {
+  if (job.status !== 'requires_action' || job.abortController?.signal.aborted) {
     return sendGenerationJson(
       res,
       409,
@@ -787,6 +794,8 @@ const ResumeAgentController = async (req, res, next, initializeClient, addTitle)
   // request-scoped connections. Pre-seeding with a null `res` + `cleanupOnResponse:false`
   // mirrors the normal stream path (request.js); torn down in the `finally` below.
   req._resumableStreamId = streamId;
+  // Only the owned, current pause may restore this budget; ignore all client JSON counters.
+  req._localFolderCalls = pendingAction.resumeContext?.localFolderCalls;
   getMCPRequestContext(req, undefined, { cleanupOnResponse: false });
 
   // ACK immediately; the continuation streams over the client's existing SSE.

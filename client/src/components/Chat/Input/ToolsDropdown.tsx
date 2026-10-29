@@ -1,7 +1,15 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { TooltipAnchor, DropdownPopup, PinIcon, VectorIcon } from '@librechat/client';
-import { Brain, Globe, ScrollText, Settings, Settings2, TerminalSquareIcon } from 'lucide-react';
+import {
+  Brain,
+  FolderOpen,
+  Globe,
+  ScrollText,
+  Settings,
+  Settings2,
+  TerminalSquareIcon,
+} from 'lucide-react';
 import {
   AuthType,
   Permissions,
@@ -23,6 +31,7 @@ import { useGetStartupConfig } from '~/data-provider';
 import { useBrainStatusQuery } from '~/data-provider/Brain';
 import { useBadgeRowContext } from '~/Providers';
 import { cn } from '~/utils';
+import { useFolderPicker } from '~/localFolders/useFolders';
 
 interface ToolsDropdownProps {
   disabled?: boolean;
@@ -33,6 +42,7 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
   const { user } = useAuthContext();
   const context = useBadgeRowContext();
   const { data: startupConfig } = useGetStartupConfig();
+  const folderPicker = useFolderPicker(context?.conversationId);
 
   const {
     codeEnabled,
@@ -163,6 +173,23 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
   const mcpPlaceholder = startupConfig?.interface?.mcpServers?.placeholder;
 
   const dropdownItems: MenuItemProps[] = [];
+
+  if (startupConfig?.localFoldersEnabled === true) {
+    dropdownItems.push({
+      onClick: () => {
+        void folderPicker.connect();
+      },
+      render: (props) => (
+        <div {...props} data-testid="tools-menu-local-folder">
+          <FolderOpen className="size-5 shrink-0" aria-hidden="true" />
+          <div className="max-w-72">
+            <span>{localize('com_ui_local_folders_connect')}</span>
+            <p className="text-xs text-text-secondary">{localize('com_ui_local_folders_hint')}</p>
+          </div>
+        </div>
+      ),
+    });
+  }
 
   if (fileSearchEnabled && canUseFileSearch) {
     dropdownItems.push({
@@ -401,17 +428,25 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
   );
 
   return (
-    <DropdownPopup
-      itemClassName="flex w-full cursor-pointer rounded-lg items-center justify-between hover:bg-surface-hover gap-5"
-      menuId="tools-dropdown-menu"
-      isOpen={isPopoverActive}
-      setIsOpen={setIsPopoverActive}
-      modal={true}
-      unmountOnHide={true}
-      trigger={menuTrigger}
-      items={dropdownItems}
-      iconClassName="mr-0"
-    />
+    <>
+      {folderPicker.input}
+      {folderPicker.message && (
+        <span role="status" className="text-xs text-text-secondary">
+          {folderPicker.message}
+        </span>
+      )}
+      <DropdownPopup
+        itemClassName="flex w-full cursor-pointer rounded-lg items-center justify-between hover:bg-surface-hover gap-5"
+        menuId="tools-dropdown-menu"
+        isOpen={isPopoverActive}
+        setIsOpen={setIsPopoverActive}
+        modal={true}
+        unmountOnHide={true}
+        trigger={menuTrigger}
+        items={dropdownItems}
+        iconClassName="mr-0"
+      />
+    </>
   );
 };
 
