@@ -4,6 +4,8 @@ import type { Collection } from 'mongodb';
 import type {
   MailResearchJob,
   MailResearchSkill,
+  MailResearchSkillInput,
+  MailResearchCustomer,
   MailResearchSettings,
   MailResearchRunRequest,
   MailResearchEvidence,
@@ -25,7 +27,7 @@ const literal = z
   .min(2)
   .max(120)
   .regex(/^[^%_*\r\n\x00-\x1f]+$/); // eslint-disable-line no-control-regex
-export const researchSkillSchema = z
+export const researchSkillSchema: z.ZodType<MailResearchSkillInput> = z
   .object({
     expectedRevision: z.union([revision, z.literal('')]),
     name: z.string().trim().min(1).max(100),
@@ -40,7 +42,7 @@ export const researchSkillSchema = z
     consentVersion: z.literal(MAIL_RESEARCH_CONSENT_VERSION),
   })
   .strict();
-export const researchRunSchema = z
+export const researchRunSchema: z.ZodType<MailResearchRunRequest> = z
   .object({
     requestId: z.string().uuid(),
     revision,
@@ -114,8 +116,25 @@ const denied = () =>
   );
 const active = (job: StoredJob) => ['queued', 'running'].includes(job.view.status);
 
+export interface MailResearchService {
+  settings(owner: string): Promise<MailResearchSettings>;
+  saveSkill(owner: string, id: string, input: unknown): Promise<MailResearchSkill>;
+  customers(
+    owner: string,
+    selectedProfile: unknown,
+    search: unknown,
+  ): Promise<MailResearchCustomer[]>;
+  enqueue(owner: string, id: string, input: unknown): Promise<MailResearchJob>;
+  jobs(owner: string): Promise<MailResearchJob[]>;
+  job(owner: string, id: string): Promise<MailResearchJob>;
+  cancel(owner: string, id: string): Promise<MailResearchJob>;
+  start(): void;
+  stop(): void;
+  tick(): Promise<void>;
+}
+
 /** Personal encrypted snapshots, lease-fenced jobs and fixed source reads. Mail text grants no authority. */
-export function createMailResearch(deps: Dependencies) {
+export function createMailResearch(deps: Dependencies): MailResearchService {
   const now = deps.now ?? (() => new Date());
   const running = new Set<string>();
   let timer: ReturnType<typeof setInterval> | undefined;

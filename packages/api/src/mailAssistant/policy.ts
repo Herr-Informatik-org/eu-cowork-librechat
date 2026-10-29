@@ -15,10 +15,15 @@ export interface MailSecurityPolicy {
   updatedAt?: string;
 }
 
+export interface MailSecurityPolicyStore {
+  read(): Promise<MailSecurityPolicy>;
+  write(revision: string, trustedOrigins: string[]): Promise<MailSecurityPolicy>;
+}
+
 export function createMailSecurityPolicy(
   collection: () => Collection<MailSecurityPolicy>,
   env: NodeJS.ProcessEnv = process.env,
-) {
+): MailSecurityPolicyStore {
   const defaults =
     env.MAIL_ASSISTANT_INSTANCE === 'cw01' && env.MAIL_ASSISTANT_ERP_LINKS_ENABLED === 'true'
       ? ['https://erp.rzcloud.ch']

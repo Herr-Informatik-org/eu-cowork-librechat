@@ -1,7 +1,7 @@
 import { createConnection } from 'node:net';
 import { MailDraftError } from './errors';
 
-export const MAX_SCANNED_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+export const MAX_SCANNED_ATTACHMENT_BYTES: number = 20 * 1024 * 1024;
 const maxConcurrentScans = 2;
 let activeScans = 0;
 
