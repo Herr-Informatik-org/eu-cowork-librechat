@@ -30,6 +30,8 @@ const vanillaOverrides = {
   ALLOW_SOCIAL_LOGIN: 'false',
   ALLOW_SOCIAL_REGISTRATION: 'false',
   STREAM_KEEP_COMPLETED_JOBS: 'true',
+  // Exercise the opt-in browser bridge in the isolated mock suite, including CI.
+  EUCOWORK_LOCAL_FOLDERS: 'true',
   /** A local `.env` may enable balance enforcement, which `neutralizeCredentialEnv`
    *  does not blank (not credential-shaped); the fresh e2e user has no balance
    *  record, so every streaming spec would be refused with a token_balance

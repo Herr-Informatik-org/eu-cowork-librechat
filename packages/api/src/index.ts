@@ -45,6 +45,7 @@ export * from './brain';
 export * from './modelSpecs';
 export * from './office';
 export * from './mailAssistant';
+export * from './localFolders';
 /* Agents */
 export * from './agents';
 /* Actions */

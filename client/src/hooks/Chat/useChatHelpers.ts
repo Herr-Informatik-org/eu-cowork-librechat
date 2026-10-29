@@ -7,6 +7,7 @@ import { useLatestMessage, useLatestMessageId } from '~/hooks/Messages/useLatest
 import { supportsGenerationProtocolV2, useAbortStreamMutation } from '~/data-provider';
 import useChatFunctions from '~/hooks/Chat/useChatFunctions';
 import useSteerConvert from '~/hooks/Chat/useSteerConvert';
+import { cancelLocalFolderGeneration } from '~/localFolders/bridge';
 import { resolveAbortSteerTarget } from '~/utils';
 import useNewConvo from '~/hooks/useNewConvo';
 import { getMessageCacheIds } from './cache';
@@ -215,6 +216,7 @@ export default function useChatHelpers(index = 0, paramId?: string) {
       if (activeGenerationCreatedAt == null) {
         return;
       }
+      cancelLocalFolderGeneration(conversationId, activeGenerationCreatedAt);
       // The aborted run's final SSE can land (and the interrupt drain can
       // start the NEXT submission) while the abort response is in flight —
       // the fallback clear below must not tear down that new run.

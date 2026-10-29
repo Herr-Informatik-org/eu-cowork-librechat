@@ -42,6 +42,7 @@ import { startupConfigKey } from '~/data-provider';
 import useUserKey from '~/hooks/Input/useUserKey';
 import { useAuthContext } from '~/hooks';
 import { hasReadyImageAttachments } from '~/utils/imageAttachments';
+import { withLocalFolders } from '~/localFolders/store';
 
 /** A revalidating cache younger than this is locally authoritative (the run
  * that just streamed wrote it) and stays sendable; older ones wait for the
@@ -367,7 +368,13 @@ export default function useChatFunctions({
 
     setShowStopButton(false);
 
-    const ephemeralAgent = getEphemeralAgent(conversationId ?? Constants.NEW_CONVO);
+    const ephemeralAgent = withLocalFolders(
+      getEphemeralAgent(conversationId ?? Constants.NEW_CONVO),
+      user?.id,
+      conversationId,
+      queryClient.getQueryData<TStartupConfig>(startupConfigKey(true))?.localFoldersEnabled ===
+        true,
+    );
     /**
      * Manual skill selection resolution:
      *  - Explicit `overrideManualSkills` wins (regenerate / save-and-submit
