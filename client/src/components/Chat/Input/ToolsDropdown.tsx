@@ -182,10 +182,7 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
       render: (props) => (
         <div {...props} data-testid="tools-menu-local-folder">
           <FolderOpen className="size-5 shrink-0" aria-hidden="true" />
-          <div className="max-w-72">
-            <span>{localize('com_ui_local_folders_connect')}</span>
-            <p className="text-xs text-text-secondary">{localize('com_ui_local_folders_hint')}</p>
-          </div>
+          <span>{localize('com_ui_local_folders_open')}</span>
         </div>
       ),
     });

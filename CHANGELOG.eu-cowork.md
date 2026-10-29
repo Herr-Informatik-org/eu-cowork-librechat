@@ -1,5 +1,14 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-29 — Kompakte lokale Ordnerauswahl
+
+- Ein kleiner Ordnerknopf zeigt den gewählten Namen und öffnet eine kompakte Liste
+  mit verbundenen Ordnern, «Kein Ordner» und «Ordner öffnen…».
+- Der lange Hinweis unter dem Eingabefeld und im Werkzeugmenü entfällt. Laufender
+  Zugriff und Zugriffsfehler bleiben über Symbol und zugängliche Statusmeldung sichtbar.
+- Entfernen einzelner Freigaben oder aller Freigaben des aktuellen Chats bleibt
+  unmittelbar wirksam. Dateiverarbeitung, Berechtigungen und Grenzen bleiben erhalten.
+
 ## 2026-10-29 — Lokale Ordner im Chat lesen
 
 - Hinter `EUCOWORK_LOCAL_FOLDERS=true` lassen sich bis zu drei lokale Ordner

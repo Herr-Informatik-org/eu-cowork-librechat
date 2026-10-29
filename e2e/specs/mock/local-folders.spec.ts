@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -13,9 +13,11 @@ import {
 
 test('reads a selected local folder through the real pause and resume path without uploading', async ({
   page,
-}) => {
+}, testInfo) => {
   test.setTimeout(90000);
-  const directory = await mkdtemp(path.join(tmpdir(), 'local-folder-e2e-'));
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'local-folder-e2e-'));
+  const directory = path.join(fixtureRoot, 'Projektunterlagen');
+  await mkdir(directory);
   const marker = 'LOCAL_FOLDER_BROWSER_EXCERPT';
   await writeFile(
     path.join(directory, 'browser.txt'),
@@ -24,20 +26,37 @@ test('reads a selected local folder through the real pause and resume path witho
   const requests: Request[] = [];
   page.on('request', (request) => requests.push(request));
   // Exercise the directory-input fallback with actual browser File objects.
-  await page.addInitScript(() =>
-    Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true }),
-  );
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true });
+    localStorage.setItem('color-theme', 'system');
+  });
   try {
     await page.goto(NEW_CHAT_PATH);
     await selectMockEndpoint(page, MOCK_ENDPOINTS[0]);
-    await page.getByRole('button', { name: 'Tools Options' }).click();
+    const menuButton = page.getByTestId('local-folder-menu-button');
+    await expect(menuButton).toHaveText('Kein Ordner');
+    await menuButton.click();
     const chooserPromise = page.waitForEvent('filechooser');
-    await page.getByTestId('tools-menu-local-folder').click();
+    await page.getByRole('menuitem', { name: 'Ordner öffnen…' }).click();
     await (await chooserPromise).setFiles(directory);
-    const remove = page.getByRole('button', {
+    await expect(menuButton).toHaveText(path.basename(directory));
+    const remove = page.getByRole('menuitemcheckbox', {
       name: `Ordnerzugriff entfernen: ${path.basename(directory)}`,
     });
+    await menuButton.click();
     await expect(remove).toBeVisible();
+    await expect(remove).toHaveAttribute('aria-checked', 'true');
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${theme}\\b`));
+      const screenshotPath = testInfo.outputPath(`local-folder-menu-${theme}.png`);
+      await page.screenshot({ path: screenshotPath });
+      await testInfo.attach(`local-folder-menu-${theme}`, {
+        path: screenshotPath,
+        contentType: 'image/png',
+      });
+    }
+    await page.keyboard.press('Escape');
     const response = await sendMessage(page, 'E2E_LOCAL_FOLDER:browser.txt');
     const body = response.request().postDataJSON();
     expect(body.ephemeralAgent.localFolders).toEqual([
@@ -48,7 +67,7 @@ test('reads a selected local folder through the real pause and resume path witho
       timeout: 45000,
     });
     await expect(page).not.toHaveURL(/\/c\/new$/);
-    await expect(remove).toBeVisible();
+    await expect(menuButton).toHaveText(path.basename(directory));
     const resume = requests.find(
       (request) => new URL(request.url()).pathname === '/api/agents/chat/resume',
     );
@@ -65,14 +84,15 @@ test('reads a selected local folder through the real pause and resume path witho
           request.method() === 'POST' && new URL(request.url()).pathname.startsWith('/api/files'),
       ),
     ).toBe(false);
+    await menuButton.click();
     await remove.click();
-    await expect(remove).not.toBeVisible();
+    await expect(menuButton).toHaveText('Kein Ordner');
     const after = await sendMessage(page, 'E2E_LOCAL_FOLDER:browser.txt');
     expect(after.request().postDataJSON().ephemeralAgent?.localFolders).toBeUndefined();
     await expect(
       messagesView(page).getByText('E2E local folder unavailable', { exact: true }),
     ).toBeVisible();
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
