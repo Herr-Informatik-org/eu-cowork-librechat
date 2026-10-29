@@ -1,4 +1,6 @@
 import { createMailGraph } from './graph';
+import type { MailAttachmentScanner } from './attachments';
+import { MailAttachmentScanError } from './scanner';
 import { sanitizeMailPreview } from './preview';
 
 describe('isolated mail HTML preview', () => {
@@ -209,6 +211,7 @@ describe('explicit embedded mail image boundary', () => {
   function setup(
     rows: Record<string, unknown>[] = [file()],
     html = '<p>Mail</p><img src="cid:logo"><img src="https://tracker.test/pixel">',
+    scanAttachment?: MailAttachmentScanner,
   ) {
     const request = jest.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = String(input);
@@ -227,9 +230,25 @@ describe('explicit embedded mail image boundary', () => {
         fetch: request,
         token: async () => 'fixture-only',
         beforeRequest: guard,
+        scanAttachment,
       }),
     };
   }
+  test('scans original embedded bytes before reencoding and withholds failed scans', async () => {
+    const scanner = jest.fn(async (_bytes: Buffer) => ({
+      verdict: 'no_known_threats' as const,
+      engine: 'ClamAV' as const,
+      scannedAt: '2026-10-29T10:00:00Z',
+      signaturesAt: '2026-10-29T09:00:00Z',
+    }));
+    const f = setup([file()], '<img src="cid:logo">', scanner);
+    const preview = await f.graph.preview('mail', true);
+    expect(scanner).toHaveBeenCalledWith(png);
+    expect(preview.html).toContain('data:image/png');
+    scanner.mockRejectedValue(new MailAttachmentScanError('found'));
+    const blocked = setup([file()], '<img src="cid:logo">', scanner);
+    await expect(blocked.graph.preview('mail', true)).rejects.toThrow();
+  });
   test('loads only an explicitly requested referenced inline image and returns fresh PNG', async () => {
     const { graph, request } = setup([
       file(),
@@ -373,5 +392,112 @@ describe('explicit embedded mail image boundary', () => {
       String(url).endsWith('/$value') ? json({}, 403) : implementation(url),
     );
     await expect(graph.preview('mail', true)).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe('tenant link policy and local reputation in mail previews', () => {
+  function fixture(policy: () => Promise<import('./preview').MailPreviewLinkPolicy>, html: string) {
+    const fetch = jest.fn(
+      async (_url: string | URL | Request, _init?: RequestInit) =>
+        new Response(JSON.stringify({ id: 'mail', body: { contentType: 'html', content: html } })),
+    );
+    return {
+      fetch,
+      graph: createMailGraph({
+        token: async () => 'fixture',
+        beforeRequest: async () => undefined,
+        fetch,
+        linkPolicy: policy,
+      }),
+    };
+  }
+  const checkedPolicy = (trustedOrigins = ['https://customer.example']) => ({
+    trustedOrigins,
+    status: 'not_listed' as const,
+    checkedAt: '2026-10-29T12:00:00.000Z',
+    sourceUpdatedAt: '2026-10-29T10:00:00.000Z',
+    check: jest.fn(() => 'not_listed' as import('./reputation').MailReputationVerdict),
+  });
+  test('allows only configured exact origins and never fetches navigation targets', async () => {
+    const policy = checkedPolicy();
+    const f = fixture(
+      async () => policy,
+      '<a href="https://customer.example/tasks/12">Allowed</a><a href="https://erp.rzcloud.ch/odoo">Not configured</a>',
+    );
+    const preview = await f.graph.preview('mail');
+    expect(preview.html).toContain('href="https://customer.example/tasks/12"');
+    expect(preview.html).not.toContain('href="https://erp.rzcloud.ch');
+    expect(preview.html).toContain('customer.example in neuem Tab');
+    expect(preview).toMatchObject({
+      linksEnabled: true,
+      trustedOrigins: ['https://customer.example'],
+      linkCheck: {
+        status: 'not_listed',
+        checkedAt: policy.checkedAt,
+        sourceUpdatedAt: policy.sourceUpdatedAt,
+        blocked: 1,
+      },
+    });
+    expect(policy.check).toHaveBeenCalledWith('https://customer.example/tasks/12');
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+    expect(String(f.fetch.mock.calls[0][0])).toMatch(/^https:\/\/graph.microsoft.com\//);
+  });
+  test('preserves nested Odoo and Safe Links while checking only the final URL locally', async () => {
+    const destination = 'https://erp.rzcloud.ch/mail/view?model=account.move&res_id=12';
+    const wrapper = `https://redirect-url.email/?link=${encodeURIComponent(destination)}&apn=com.odoo.mobile&afl=${encodeURIComponent(destination)}&ibi=com.odoo.mobile&ifl=${encodeURIComponent(destination)}`;
+    const href = `https://che01.safelinks.protection.outlook.com/?url=${encodeURIComponent(wrapper)}&data=opaque&sdata=opaque&reserved=0`;
+    const policy = checkedPolicy(['https://erp.rzcloud.ch']);
+    const f = fixture(async () => policy, `<a href="${href.replace(/&/g, '&amp;')}">Invoice</a>`);
+    expect((await f.graph.preview('mail')).html).toContain(`href="${href.replace(/&/g, '&amp;')}"`);
+    expect(policy.check).toHaveBeenCalledWith(destination);
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  });
+  test('known threat overrides administrator trust', async () => {
+    const policy = checkedPolicy();
+    policy.check.mockReturnValue('known_threat');
+    const f = fixture(
+      async () => policy,
+      '<a href="https://customer.example/tasks/12">Blocked</a>',
+    );
+    const preview = await f.graph.preview('mail');
+    expect(preview.html).not.toMatch(/<a|href=/);
+    expect(preview.linkCheck).toMatchObject({ status: 'known_threat', blocked: 1 });
+  });
+  test.each(['unavailable', 'disabled'] as const)(
+    'blocks links with %s reputation',
+    async (status) => {
+      const policy = { ...checkedPolicy(), status };
+      const f = fixture(
+        async () => policy,
+        '<a href="https://customer.example/tasks/12">Blocked</a>',
+      );
+      const preview = await f.graph.preview('mail');
+      expect(preview.html).not.toMatch(/<a|href=/);
+      expect(preview.linksEnabled).toBe(false);
+      expect(preview.linkCheck).toMatchObject({ status, blocked: 1 });
+      expect(policy.check).not.toHaveBeenCalled();
+    },
+  );
+  test('failed policy read preserves readable content but blocks all links', async () => {
+    const f = fixture(async () => {
+      throw new Error('private details');
+    }, '<p>Readable</p><a href="https://erp.rzcloud.ch/odoo">Blocked</a>');
+    const preview = await f.graph.preview('mail');
+    expect(preview.html).toContain('<p>Readable</p>');
+    expect(preview.html).not.toMatch(/<a|href=|private details/);
+    expect(preview).toMatchObject({
+      linksEnabled: false,
+      trustedOrigins: [],
+      linkCheck: { status: 'unavailable' },
+    });
+  });
+  test('re-reads administrator policy for each later preview', async () => {
+    const policy = checkedPolicy();
+    const read = jest.fn(async () => policy);
+    const f = fixture(read, '<a href="https://customer.example/tasks/12">Task</a>');
+    expect((await f.graph.preview('mail')).html).toContain('href=');
+    policy.trustedOrigins = [];
+    expect((await f.graph.preview('mail')).html).not.toContain('href=');
+    expect(read).toHaveBeenCalledTimes(2);
   });
 });

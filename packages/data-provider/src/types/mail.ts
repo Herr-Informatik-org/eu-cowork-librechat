@@ -90,6 +90,13 @@ export type MailWorkspacePreview = {
   embeddedImagesAvailable?: boolean;
   imagesLoaded?: boolean;
   linksEnabled?: boolean;
+  trustedOrigins?: string[];
+  linkCheck?: {
+    status: 'not_listed' | 'known_threat' | 'unavailable' | 'disabled';
+    checkedAt?: string;
+    sourceUpdatedAt?: string;
+    blocked: number;
+  };
   html: string;
   blockedImages: number;
   truncated: boolean;
@@ -102,6 +109,11 @@ export type MailWorkspaceContent = {
     responseAction?: MailWorkspaceResponseAction;
     responseActionAt?: string;
     replyRecipients?: { name: string; address: string }[];
+    replyCcRecipients?: { name: string; address: string }[];
+    replyMode?: 'all';
+    toRecipients?: { name: string; address: string }[];
+    ccRecipients?: { name: string; address: string }[];
+    senderName?: string;
     subject: string;
     sender: string;
     receivedAt: string;
@@ -200,12 +212,14 @@ export type MailDraftRequest = {
   revision: string;
   instructions: string;
   requestId: string;
+  newReply?: boolean;
 };
 export type MailDraftOutcome = {
   status: 'created' | 'existing' | 'uncertain';
   draftUrl?: string;
 };
 export type MailAttachments = {
+  downloadAvailable?: boolean;
   attachments: {
     id: string;
     name: string;

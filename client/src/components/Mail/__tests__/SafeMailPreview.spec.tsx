@@ -128,7 +128,7 @@ describe('opaque mail preview frame', () => {
     const doc = parse(frame.getAttribute('srcdoc')!);
     expect(doc.body.querySelector('a')?.getAttribute('href')).toBe('https://erp.rzcloud.ch/odoo');
     expect(doc.body.querySelector('script,form,input,[src],[onclick]')).toBeNull();
-    expect(screen.getByText('com_ui_mail_preview_erp_links')).toBeInTheDocument();
+    expect(screen.getByText('com_ui_mail_preview_allowed_links')).toBeInTheDocument();
   });
   test('mail-supplied attributes cannot enable links without the separate server flag', () => {
     const doc = parse(
@@ -164,4 +164,71 @@ describe('opaque mail preview frame', () => {
     expect(screen.getByTitle('Mail').getAttribute('srcdoc')).toContain('Mailbox B');
     expect(screen.getByTitle('Mail').getAttribute('srcdoc')).not.toContain('Mailbox A');
   });
+});
+
+test('enforces exact per-instance origins and explicit deny-all without restoring stripped links', () => {
+  const input =
+    '<a href="https://erp.customer.example/task/1">Customer</a><a href="https://erp.rzcloud.ch/odoo">Internal</a><a data-href="https://erp.customer.example/task/2" title="https://erp.customer.example/task/2">Blocked by server</a>';
+  const custom = parse(
+    createMailPreviewDocument(input, true, false, ['https://erp.customer.example'])!,
+  );
+  expect(custom.body.querySelectorAll('a[href]')).toHaveLength(1);
+  expect(custom.body.querySelector('a[href]')?.getAttribute('title')).toBe('erp.customer.example');
+  expect(custom.body.querySelectorAll('a')[2].hasAttribute('href')).toBe(false);
+  const denied = parse(createMailPreviewDocument(input, true, false, [])!);
+  expect(denied.body.querySelector('a[href]')).toBeNull();
+});
+
+test.each(['unavailable', 'disabled'] as const)(
+  'suppresses navigation for %s checks even with a contradictory enabled flag',
+  (status) => {
+    render(
+      <SafeMailPreview
+        title="Mail"
+        text="Fallback"
+        preview={{
+          html: '<a href="https://erp.rzcloud.ch/odoo">ERP</a>',
+          blockedImages: 0,
+          warnings: [],
+          truncated: false,
+          linksEnabled: true,
+          trustedOrigins: ['https://erp.rzcloud.ch'],
+          linkCheck: { status, blocked: 0 },
+        }}
+      />,
+    );
+    const frame = screen.getByTitle('Mail');
+    expect(frame).toHaveAttribute('sandbox', '');
+    expect(parse(frame.getAttribute('srcdoc')!).body.querySelector('[href]')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent(`com_ui_mail_links_${status}`);
+  },
+);
+
+test('known threat status shows the snapshot time and keeps only hrefs the server retained', () => {
+  render(
+    <SafeMailPreview
+      title="Mail"
+      text="Fallback"
+      preview={{
+        html: '<a>Flagged by server</a><a href="https://erp.rzcloud.ch/odoo">Allowed</a>',
+        blockedImages: 0,
+        warnings: [],
+        truncated: false,
+        linksEnabled: true,
+        trustedOrigins: ['https://erp.rzcloud.ch'],
+        linkCheck: {
+          status: 'known_threat',
+          blocked: 1,
+          checkedAt: '2026-10-29T09:00:00.000Z',
+          sourceUpdatedAt: '2026-10-29T08:00:00.000Z',
+        },
+      }}
+    />,
+  );
+  const doc = parse(screen.getByTitle('Mail').getAttribute('srcdoc')!);
+  expect(doc.body.querySelectorAll('a[href]')).toHaveLength(1);
+  expect(doc.body.querySelector('a')?.hasAttribute('href')).toBe(false);
+  expect(screen.getByRole('status')).toHaveTextContent('com_ui_mail_links_blocked');
+  expect(document.querySelectorAll('time')).toHaveLength(2);
+  expect(document.querySelector('time')).toHaveAttribute('datetime', '2026-10-29T09:00:00.000Z');
 });

@@ -88,7 +88,7 @@ test.each(['mail', 'kind', 'revision'] as const)(
     fireEvent.click(screen.getByRole('button', { name: 'com_ui_mail_images_load' }));
     expect(
       await screen.findByRole('button', { name: 'com_ui_mail_images_loading' }),
-    ).toBeDisabled();
+    ).toHaveAttribute('aria-disabled', 'true');
     view.rerender(
       view.content(
         change === 'mail' ? 'result-b' : 'result-a',
@@ -163,4 +163,26 @@ test('has no image action for mails without embedded images and refuses data ima
   const doc = new DOMParser().parseFromString(frame(), 'text/html');
   expect(doc.body.querySelector('img[src]')).toBeNull();
   expect(load).not.toHaveBeenCalled();
+});
+
+test('an image-loaded preview cannot restore links denied by a refreshed security policy', async () => {
+  load.mockResolvedValue({
+    ...loaded,
+    linksEnabled: true,
+    trustedOrigins: [],
+    linkCheck: { status: 'disabled', blocked: 0 },
+    html: `<img src="${png}"><a href="https://erp.rzcloud.ch/odoo">ERP</a>`,
+  });
+  const view = mount();
+  const button = screen.getByRole('button', { name: 'com_ui_mail_images_load' });
+  button.focus();
+  fireEvent.click(button);
+  await waitFor(() => expect(frame()).toContain(png));
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'com_ui_mail_images_hide' }),
+  );
+  const doc = new DOMParser().parseFromString(frame(), 'text/html');
+  expect(doc.body.querySelector('[href]')).toBeNull();
+  expect(screen.getByTitle('Mail')).toHaveAttribute('sandbox', '');
+  view.unmount();
 });

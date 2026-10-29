@@ -49,6 +49,18 @@ describe('fixed personal Graph adapter', () => {
       'thread',
     ]);
   });
+  test.each([undefined, null, []])(
+    'preserves absent original recipients separately from known empty: %j',
+    async (recipients) => {
+      const { graph, request } = setup();
+      request.mockResolvedValue(
+        response({ ...row, toRecipients: recipients, ccRecipients: recipients }),
+      );
+      const mail = await graph.message(row.id);
+      expect(mail.toRecipients).toEqual(recipients == null ? undefined : []);
+      expect(mail.ccRecipients).toEqual(recipients == null ? undefined : []);
+    },
+  );
   test.each([
     ['102', 'replied'],
     ['103', 'replied'],
@@ -366,6 +378,12 @@ describe('metadata-only inbox and correspondence pages', () => {
     subject: 'Test subject',
     from: { emailAddress: { address: 'peer@example.invalid', name: 'Peer Name' } },
     replyTo: [{ emailAddress: { address: 'reply@example.invalid', name: 'Reply Name' } }],
+    toRecipients: [
+      { emailAddress: { address: 'original-to@example.invalid', name: 'Original To' } },
+    ],
+    ccRecipients: [
+      { emailAddress: { address: 'original-cc@example.invalid', name: 'Original Cc' } },
+    ],
     receivedDateTime: '2026-10-27T10:00:00Z',
     parentFolderId: folder,
     categories: [],
@@ -403,6 +421,8 @@ describe('metadata-only inbox and correspondence pages', () => {
       isRead: true,
       hasAttachments: true,
       replyTo: [{ name: 'Reply Name', address: 'reply@example.invalid' }],
+      toRecipients: [{ name: 'Original To', address: 'original-to@example.invalid' }],
+      ccRecipients: [{ name: 'Original Cc', address: 'original-cc@example.invalid' }],
     });
     expect(first.nextUrl).toBe(next);
     expect((await graph.inboxPage!(next)).messages[0].id).toBe('mail-2');
@@ -506,5 +526,86 @@ describe('metadata-only inbox and correspondence pages', () => {
     expect(sent.messages[0]).toMatchObject({ sentByUser: true, body: '' });
     for (const [url] of request.mock.calls)
       expect(url).not.toMatch(/\$filter|\$search|peer|absent/);
+  });
+});
+
+describe('explicit scanned attachment download', () => {
+  const bytes = Buffer.from('Nur Text\n');
+  const metadata = {
+    id: 'file/+=',
+    '@odata.type': '#microsoft.graph.fileAttachment',
+    name: 'Notiz.txt',
+    contentType: 'text/plain',
+    size: bytes.length,
+    isInline: false,
+  };
+  const scan = {
+    verdict: 'no_known_threats' as const,
+    engine: 'ClamAV' as const,
+    scannedAt: '2026-10-29T10:00:00Z',
+    signaturesAt: '2026-10-29T09:00:00Z',
+  };
+  function fixture() {
+    const scanner = jest.fn(async (_bytes: Buffer) => scan);
+    const guard = jest.fn(async () => {});
+    const request = jest.fn(async (input: Parameters<typeof fetch>[0]) =>
+      String(input).endsWith('/$value')
+        ? new Response(new Uint8Array(bytes))
+        : new Response(JSON.stringify(metadata)),
+    );
+    const graph = createMailGraph({
+      token: async () => 'fixture-token',
+      fetch: request,
+      beforeRequest: guard,
+      scanAttachment: scanner,
+    });
+    return { scanner, guard, request, graph };
+  }
+  test('uses encoded original identifiers, scans once and does not refetch scanned bytes', async () => {
+    const f = fixture();
+    const result = await f.graph.downloadAttachment!('message/+=', metadata.id);
+    expect(result).toEqual({ bytes, name: metadata.name, contentType: metadata.contentType, scan });
+    expect(f.scanner).toHaveBeenCalledTimes(1);
+    expect(f.scanner).toHaveBeenCalledWith(bytes);
+    expect(f.request.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://graph.microsoft.com/v1.0/me/messages/message%2F%2B%3D/attachments/file%2F%2B%3D?$select=id,name,contentType,size,isInline',
+      'https://graph.microsoft.com/v1.0/me/messages/message%2F%2B%3D/attachments/file%2F%2B%3D/$value',
+      'https://graph.microsoft.com/v1.0/me/messages/message%2F%2B%3D/attachments/file%2F%2B%3D?$select=id,name,contentType,size,isInline',
+    ]);
+  });
+  test('blocks changed metadata after scan and withheld scan failures', async () => {
+    const f = fixture();
+    f.scanner.mockImplementation(async () => {
+      f.request.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...metadata, name: 'changed.txt' })),
+      );
+      return scan;
+    });
+    await expect(f.graph.downloadAttachment!('message', metadata.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    const blocked = fixture();
+    blocked.scanner.mockRejectedValue(Error('scanner unavailable'));
+    await expect(blocked.graph.downloadAttachment!('message', metadata.id)).rejects.toThrow(
+      'scanner unavailable',
+    );
+    expect(blocked.request).toHaveBeenCalledTimes(2);
+  });
+  test.each([
+    { ...metadata, name: 'script.exe' },
+    { ...metadata, '@odata.type': '#microsoft.graph.itemAttachment' },
+    { ...metadata, id: 'another-file' },
+    { ...metadata, size: 21 * 1024 * 1024 },
+  ])('blocks unsupported metadata before reading bytes: %j', async (value) => {
+    const f = fixture();
+    f.request.mockResolvedValue(new Response(JSON.stringify(value)));
+    await expect(f.graph.downloadAttachment!('message', metadata.id)).rejects.toThrow();
+    expect(f.request).toHaveBeenCalledTimes(1);
+    expect(f.scanner).not.toHaveBeenCalled();
+  });
+  test('exposes no download capability without scanner configuration', () => {
+    expect(
+      createMailGraph({ token: async () => '', beforeRequest: async () => {} }).downloadAttachment,
+    ).toBeUndefined();
   });
 });

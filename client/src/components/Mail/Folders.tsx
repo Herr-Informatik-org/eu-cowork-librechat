@@ -3,6 +3,7 @@ import { ArrowLeft, Check, ChevronRight, FolderCheck } from 'lucide-react';
 import type { MailWorkspaceFolder } from 'librechat-data-provider';
 import { useMailFolders } from '~/data-provider/Mail';
 import { useLocalize } from '~/hooks';
+import { isMailEscape, trapMailDialogFocus } from './Shortcuts';
 
 export function FolderPicker({
   active,
@@ -39,23 +40,39 @@ export function FolderPicker({
       aria-label={title}
       ref={container}
       onKeyDown={(event) => {
-        if (event.key === 'Escape') {
+        if (isMailEscape(event)) {
           event.preventDefault();
+          event.stopPropagation();
           onClose();
+          return;
         }
-        if (event.key !== 'Tab') return;
+        trapMailDialogFocus(event);
+        if (
+          event.defaultPrevented ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.altKey ||
+          event.shiftKey ||
+          event.nativeEvent.isComposing ||
+          event.nativeEvent.keyCode === 229 ||
+          !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)
+        )
+          return;
         const buttons = Array.from(
-          container.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || [],
+          event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
         );
-        const first = buttons.at(0);
-        const last = buttons.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
+        const index = buttons.indexOf(event.target as HTMLButtonElement);
+        if (index < 0) return;
+        let nextIndex = Math.max(
+          0,
+          Math.min(buttons.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)),
+        );
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = buttons.length - 1;
+        if (buttons[nextIndex]) {
           event.preventDefault();
-          last?.focus();
-        }
-        if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
+          event.stopPropagation();
+          buttons[nextIndex].focus();
         }
       }}
     >

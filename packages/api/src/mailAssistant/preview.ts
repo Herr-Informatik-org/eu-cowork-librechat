@@ -1,6 +1,8 @@
 import sanitizeHtml from 'sanitize-html';
+import type { MailAttachmentScanner } from './attachments';
 import { mailPreviewLink } from 'librechat-data-provider';
 import type { MailHtmlPreview } from './types';
+import type { MailReputationVerdict } from './reputation';
 import { MailGraphError } from './errors';
 import { reencodeMailImage, MAX_MAIL_IMAGE_INPUT, MAX_MAIL_IMAGE_TOTAL_INPUT } from './images';
 
@@ -109,14 +111,26 @@ function cid(value: string): string | undefined {
   }
 }
 
+export interface MailPreviewLinkPolicy {
+  trustedOrigins: string[];
+  status: 'not_listed' | 'unavailable' | 'disabled';
+  checkedAt?: string;
+  sourceUpdatedAt?: string;
+  check: (destination: string) => MailReputationVerdict;
+}
+
 /** Parse hostile HTML with a maintained sanitizer before any image lookup. */
 export function sanitizeMailPreview(
   html: string,
   images: ReadonlyMap<string, string> = new Map(),
   linksEnabled = false,
+  linkPolicy?: MailPreviewLinkPolicy,
 ) {
   const references = new Set<string>();
   let blockedImages = 0;
+  let blockedLinks = 0;
+  let knownThreats = 0;
+  let unavailableLinks = 0;
   let nodes = 0;
   let imageBytes = 0;
   let imageCount = 0;
@@ -175,8 +189,25 @@ export function sanitizeMailPreview(
             delete attribs[key];
         }
         if (name === 'a') {
-          const link = linksEnabled === true && mailPreviewLink(attribs.href || '');
-          if (!link) return { tagName: 'span', attribs: { style: attribs.style || '' } };
+          const link =
+            linksEnabled === true &&
+            mailPreviewLink(attribs.href || '', linkPolicy?.trustedOrigins);
+          let verdict: MailReputationVerdict = 'unavailable';
+          if (link && linkPolicy?.status === 'not_listed') {
+            try {
+              verdict = linkPolicy.check(link.destination);
+            } catch {
+              /* Fail closed. */
+            }
+          }
+          if (!link || (linkPolicy && verdict !== 'not_listed')) {
+            if (attribs.href) blockedLinks++;
+            if (verdict === 'known_threat') knownThreats++;
+            if (link && linkPolicy && (verdict === 'unavailable' || verdict === 'disabled'))
+              unavailableLinks++;
+            return { tagName: 'span', attribs: { style: attribs.style || '' } };
+          }
+          const destinationHost = new URL(link.destination).hostname;
           return {
             tagName: 'a',
             attribs: {
@@ -186,8 +217,8 @@ export function sanitizeMailPreview(
               rel: 'noopener noreferrer',
               referrerpolicy: 'no-referrer',
               title: link.viaSafeLinks
-                ? 'erp.rzcloud.ch über Microsoft Safe Links in neuem Tab öffnen'
-                : 'erp.rzcloud.ch in neuem Tab öffnen',
+                ? `${destinationHost} über Microsoft Safe Links in neuem Tab öffnen`
+                : `${destinationHost} in neuem Tab öffnen`,
             },
           };
         }
@@ -235,7 +266,7 @@ export function sanitizeMailPreview(
       },
     },
   });
-  return { html: clean, blockedImages, references };
+  return { html: clean, blockedImages, references, blockedLinks, knownThreats, unavailableLinks };
 }
 
 type GraphCall = (
@@ -253,14 +284,29 @@ export function createPreviewOperation({
   id,
   beforeRequest,
   linksEnabled = false,
+  linkPolicy,
+  scanAttachment,
 }: {
   linksEnabled?: boolean;
+  linkPolicy?: () => Promise<MailPreviewLinkPolicy>;
+  scanAttachment?: MailAttachmentScanner;
   call: GraphCall;
   raw: (path: string, timeout: number) => Promise<Response>;
   id: (value: string) => string;
   beforeRequest: () => Promise<void>;
 }) {
   const operation = async (value: string, loadImages: boolean): Promise<MailHtmlPreview> => {
+    let policy: MailPreviewLinkPolicy | undefined;
+    if (linkPolicy) {
+      try {
+        policy = await linkPolicy();
+      } catch {
+        policy = { trustedOrigins: [], status: 'unavailable', check: () => 'unavailable' };
+      }
+    }
+    const resolvedLinksEnabled = policy
+      ? policy.status === 'not_listed' && policy.trustedOrigins.length > 0
+      : linksEnabled;
     const deadline = Date.now() + 25_000;
     const remaining = () => {
       const budget = deadline - Date.now();
@@ -286,12 +332,12 @@ export function createPreviewOperation({
     truncated ||= html.length > maxHtml;
     let first: ReturnType<typeof sanitizeMailPreview>;
     try {
-      first = sanitizeMailPreview(html, new Map(), linksEnabled);
+      first = sanitizeMailPreview(html, new Map(), resolvedLinksEnabled, policy);
     } catch {
       truncated = true;
       html =
         '<p>Diese Mail ist zu komplex für die sichere Vorschau. Bitte öffne sie in Outlook.</p>';
-      first = sanitizeMailPreview(html, new Map(), linksEnabled);
+      first = sanitizeMailPreview(html, new Map(), resolvedLinksEnabled, policy);
     }
     if (loadImages && first.references.size) {
       const images = new Map<string, string>();
@@ -363,7 +409,13 @@ export function createPreviewOperation({
           await beforeRequest();
           remaining();
           if (oversized) continue;
-          const image = await reencodeMailImage(Buffer.concat(chunks), String(file.contentType));
+          const bytes = Buffer.concat(chunks);
+          if (scanAttachment) {
+            await scanAttachment(bytes);
+            await beforeRequest();
+            remaining();
+          }
+          const image = await reencodeMailImage(bytes, String(file.contentType));
           await beforeRequest();
           remaining();
           if (!image || outputBytes + image.length > 3_000_000) continue;
@@ -371,19 +423,32 @@ export function createPreviewOperation({
           outputBytes += image.length;
         }
       }
-      first = sanitizeMailPreview(html, images, linksEnabled);
+      first = sanitizeMailPreview(html, images, resolvedLinksEnabled, policy);
       if (first.blockedImages)
         warnings.push(
           'Einige Bilder bleiben gesperrt. Nur eindeutig zugeordnete eingebettete PNG- und JPEG-Bilder innerhalb der Sicherheitsgrenzen werden geladen.',
         );
     }
+    let linkStatus: NonNullable<MailHtmlPreview['linkCheck']>['status'] =
+      policy?.status ?? 'disabled';
+    if (first.unavailableLinks > 0) linkStatus = 'unavailable';
+    if (first.knownThreats > 0) linkStatus = 'known_threat';
     await beforeRequest();
     return {
       html: first.html,
       blockedImages: first.blockedImages,
       truncated,
       warnings,
-      linksEnabled: linksEnabled === true,
+      linksEnabled: resolvedLinksEnabled === true && first.unavailableLinks === 0,
+      ...(policy && {
+        trustedOrigins: policy.trustedOrigins,
+        linkCheck: {
+          status: linkStatus,
+          ...(policy.checkedAt && { checkedAt: policy.checkedAt }),
+          ...(policy.sourceUpdatedAt && { sourceUpdatedAt: policy.sourceUpdatedAt }),
+          blocked: first.blockedLinks,
+        },
+      }),
       embeddedImagesAvailable: first.references.size > 0,
       imagesLoaded: loadImages,
     };

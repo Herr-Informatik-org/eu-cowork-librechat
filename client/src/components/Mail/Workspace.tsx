@@ -36,10 +36,18 @@ import {
 } from '~/data-provider/Mail';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import { useAuthContext, useLocalize } from '~/hooks';
-import { mailShortcutKey, ShortcutHelp } from './Shortcuts';
+import {
+  isMailEscape,
+  isMailSubmitShortcut,
+  mailShortcutKey,
+  ShortcutHelp,
+  trapMailDialogFocus,
+} from './Shortcuts';
 import { MailFollowupSettings, MailFollowupAction } from './Followup';
 import { MailDraftRequest, safeOutlookDraftUrl } from './DraftRequest';
 import { MailAttachments } from './Attachments';
+import MailRecipients from './Recipients';
+import { MailResearch, MailResearchProgress } from './Research';
 import { MailChat, MailCorrespondence, emptyMailChat } from './Chat';
 import type { MailChatState } from './Chat';
 import { MailSignatureSettings } from './Signature';
@@ -120,6 +128,14 @@ function PersonalSettings({
   const [accepted, setAccepted] = useState(status.settings.consentVersion === consentVersion);
   const [disconnect, setDisconnect] = useState(false);
   const [connectError, setConnectError] = useState(false);
+  const settingsPanel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    settingsPanel.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
   const busy =
     actions.settings.isLoading || actions.connect.isLoading || actions.disconnect.isLoading;
   const update = (next: Partial<MailWorkspaceSettings>) => setForm((old) => ({ ...old, ...next }));
@@ -146,9 +162,21 @@ function PersonalSettings({
   };
   return (
     <aside
+      ref={settingsPanel}
       className="mail-settings"
+      role="dialog"
+      aria-modal="true"
       data-mail-shortcuts="off"
       aria-label={t('com_ui_mail_settings')}
+      onKeyDown={(event) => {
+        if (isMailEscape(event)) {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+          return;
+        }
+        trapMailDialogFocus(event);
+      }}
     >
       <div className="mail-settings-heading">
         <h2>{t('com_ui_mail_settings')}</h2>
@@ -363,7 +391,16 @@ type DraftEditor = {
   revision: string;
 };
 
-type MailDetailControls = { reply: () => void; chat: () => void; outlook: () => void };
+type MailDetailControls = {
+  reply: () => void;
+  chat: () => void;
+  outlook: () => void;
+  original: () => void;
+  draft: () => void;
+  attachments: () => void;
+  correspondence: () => void;
+  research: () => void;
+};
 
 const Detail = forwardRef<
   MailDetailControls,
@@ -404,7 +441,13 @@ const Detail = forwardRef<
   const [notice, setNotice] = useState('');
   const [draftOpenRequest, setDraftOpenRequest] = useState(0);
   const [chatFocusRequest, setChatFocusRequest] = useState(0);
+  const [researchOpenRequest, setResearchOpenRequest] = useState(0);
+  const [instructionRequest, setInstructionRequest] = useState<{ id: number; text: string }>();
   const editorInput = useRef<HTMLTextAreaElement>(null);
+  const detail = useRef<HTMLElement>(null);
+  const draftSaving = useRef(false);
+  const originalTab = useRef<HTMLButtonElement>(null);
+  const draftTab = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (editing && tab === 'draft') editorInput.current?.focus();
   }, [editing, tab]);
@@ -428,9 +471,38 @@ const Detail = forwardRef<
     setTab('chat');
     setChatFocusRequest((value) => value + 1);
   };
+  const openDetails = (selector: string) => {
+    const section = detail.current?.querySelector<HTMLDetailsElement>(selector);
+    if (!section) return;
+    section.open = true;
+    section.querySelector<HTMLElement>('summary')?.focus();
+    section.scrollIntoView?.({ block: 'nearest' });
+  };
+  const saveDraft = () => {
+    if (!editing || !body.trim() || busy || locked || draftSaving.current) return;
+    draftSaving.current = true;
+    actions.draft.mutate(
+      { id: result.id, body, revision },
+      {
+        onSuccess: () => {
+          onEditorChange();
+          setNotice(t('com_ui_mail_saved'));
+          draftTab.current?.focus();
+        },
+        onSettled: () => {
+          draftSaving.current = false;
+        },
+      },
+    );
+  };
   useImperativeHandle(ref, () => ({
     reply: () => {
-      if (locked || busy || editing || !data) return;
+      if (locked || busy || !data) return;
+      if (editing) {
+        setTab('draft');
+        editorInput.current?.focus();
+        return;
+      }
       if (data.draft?.revision && data.draft.replyText !== undefined) {
         setTab('draft');
         onEditorChange({
@@ -444,6 +516,19 @@ const Detail = forwardRef<
       setDraftOpenRequest((value) => value + 1);
     },
     chat: startChat,
+    research: () => {
+      if (data && !locked) setResearchOpenRequest((value) => value + 1);
+    },
+    original: () => {
+      setTab('message');
+      originalTab.current?.focus();
+    },
+    draft: () => {
+      setTab('draft');
+      draftTab.current?.focus();
+    },
+    attachments: () => openDetails('.mail-attachments'),
+    correspondence: () => openDetails('.mail-correspondence'),
     outlook: () => {
       if (editing) return;
       const url = safeOutlookDraftUrl(data?.draft?.url);
@@ -476,6 +561,7 @@ const Detail = forwardRef<
   );
   return (
     <article
+      ref={detail}
       className={`mail-detail ${tab === 'chat' ? 'mail-detail-chat' : ''}`}
       aria-label={t('com_ui_mail_detail')}
     >
@@ -501,7 +587,21 @@ const Detail = forwardRef<
           )}
         </div>
         <h2>{result.subject || t('com_ui_mail_no_subject')}</h2>
-        <p className="mail-address">{result.sender}</p>
+        <MailRecipients
+          message={currentContent?.message}
+          sender={result.sender}
+          loading={content.isLoading || content.isFetching}
+        />
+        {(currentContent?.message.responseAction || result.responseAction) === 'forwarded' && (
+          <p className="mail-muted">
+            {t('com_ui_mail_forwarded')} ·{' '}
+            {date(
+              currentContent?.message.responseActionAt || result.responseActionAt,
+              status.settings.timeZone,
+            )}{' '}
+            · {t('com_ui_mail_forwarded_recipient_unknown')}
+          </p>
+        )}
       </header>
       <div className="mail-detail-tools">
         <label className="mail-inline-label">
@@ -544,11 +644,27 @@ const Detail = forwardRef<
             result={result}
             content={data}
             editing={editing}
+            disabled={locked || busy || !data}
             openRequest={draftOpenRequest}
+            instructionRequest={instructionRequest}
           />
         )}
         {status.odooAvailable === true && <MailFollowupAction result={result} />}
       </div>
+      <MailResearch
+        result={result}
+        disabled={locked || !currentContent}
+        openRequest={researchOpenRequest}
+        transferDisabled={
+          editing || busy || result.draftStatus === 'uncertain' || result.mailboxLocation === 'sent'
+        }
+        onUse={(text) => {
+          setInstructionRequest((previous) => ({ id: (previous?.id || 0) + 1, text }));
+          detail.current
+            ?.querySelector<HTMLElement>('.mail-draft-request')
+            ?.scrollIntoView({ block: 'nearest' });
+        }}
+      />
       {editing && <p className="mail-notice">{t('com_ui_mail_edit_before_move')}</p>}
       {result.moveStatus === 'uncertain' && (
         <p className="mail-notice">{t('com_ui_mail_move_uncertain')}</p>
@@ -573,11 +689,52 @@ const Detail = forwardRef<
         ) : (
           <section className="mail-summary">{summary}</section>
         ))}
-      <div className="mail-tabs" role="tablist" aria-label={t('com_ui_mail_content')}>
-        <button role="tab" aria-selected={tab === 'message'} onClick={() => setTab('message')}>
+      <div
+        className="mail-tabs"
+        role="tablist"
+        aria-label={t('com_ui_mail_content')}
+        onKeyDown={(event) => {
+          if (
+            event.defaultPrevented ||
+            event.ctrlKey ||
+            event.altKey ||
+            event.metaKey ||
+            event.shiftKey ||
+            event.nativeEvent.isComposing ||
+            event.nativeEvent.keyCode === 229 ||
+            !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
+          )
+            return;
+          const tabs = Array.from(
+            event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)'),
+          );
+          const index = tabs.indexOf(event.target as HTMLButtonElement);
+          if (index < 0) return;
+          event.preventDefault();
+          event.stopPropagation();
+          let nextIndex =
+            (index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length;
+          if (event.key === 'Home') nextIndex = 0;
+          if (event.key === 'End') nextIndex = tabs.length - 1;
+          const next = tabs[nextIndex];
+          next?.focus();
+          next?.click();
+        }}
+      >
+        <button
+          ref={originalTab}
+          role="tab"
+          aria-selected={tab === 'message'}
+          onClick={() => setTab('message')}
+        >
           {t('com_ui_mail_original')}
         </button>
-        <button role="tab" aria-selected={tab === 'draft'} onClick={() => setTab('draft')}>
+        <button
+          ref={draftTab}
+          role="tab"
+          aria-selected={tab === 'draft'}
+          onClick={() => setTab('draft')}
+        >
           {t('com_ui_mail_draft')}
         </button>
         <button
@@ -675,6 +832,13 @@ const Detail = forwardRef<
                   ref={editorInput}
                   value={body}
                   disabled={busy}
+                  aria-keyshortcuts="Control+Enter Meta+Enter"
+                  onKeyDown={(event) => {
+                    if (!isMailSubmitShortcut(event)) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    saveDraft();
+                  }}
                   onChange={(event) =>
                     editor && onEditorChange({ ...editor, body: event.target.value })
                   }
@@ -682,26 +846,24 @@ const Detail = forwardRef<
                   maxLength={12000}
                 />
               </label>
+              <p className="mail-muted">{t('com_ui_mail_editor_submit_shortcut')}</p>
               <div className="mail-body-actions">
                 <button
                   className="mail-button primary"
                   disabled={!body.trim() || busy || locked}
-                  onClick={() =>
-                    actions.draft.mutate(
-                      { id: result.id, body, revision },
-                      {
-                        onSuccess: () => {
-                          onEditorChange();
-                          setNotice(t('com_ui_mail_saved'));
-                        },
-                      },
-                    )
-                  }
+                  onClick={saveDraft}
                 >
                   <Save size={15} />
                   {t('com_ui_mail_save_draft')}
                 </button>
-                <button className="mail-button" disabled={busy} onClick={() => onEditorChange()}>
+                <button
+                  className="mail-button"
+                  disabled={busy}
+                  onClick={() => {
+                    onEditorChange();
+                    draftTab.current?.focus();
+                  }}
+                >
                   {t('com_ui_mail_cancel')}
                 </button>
               </div>
@@ -735,6 +897,7 @@ const Detail = forwardRef<
           )}
         </p>
       )}
+
       <MailAttachments result={result} />
       <MailCorrespondence result={result} onOpen={onOpen} />
       <footer className="mail-detail-footer">{t('com_ui_mail_never_send')}</footer>
@@ -751,6 +914,8 @@ function MailWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
+  const searchReturnFocus = useRef(false);
+  const workspace = useRef<HTMLElement>(null);
   const detailControls = useRef<MailDetailControls>(null);
   const moveSubmitting = useRef(false);
   const rowButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -823,6 +988,17 @@ function MailWorkspace() {
   const eligible = rows.filter((row) => !row.moveStatus && row.mailboxLocation !== 'sent');
   const selectable = eligible.slice(0, 100);
   const allSelected = selectable.length > 0 && selectable.every((row) => checked.has(row.id));
+  const tabRowId = rows.some((row) => row.id === selectedId) ? selectedId : rows[0]?.id;
+  const focusList = () => {
+    const next = rows.find((row) => row.id === selectedId) || rows[0];
+    if (!next) {
+      workspace.current?.focus();
+      return;
+    }
+    openMail(next);
+    rowButtons.current.get(next.id)?.focus({ preventScroll: true });
+    rowButtons.current.get(next.id)?.scrollIntoView?.({ block: 'nearest' });
+  };
   const requestMove = (items: MailWorkspaceResult[], target = folder) => {
     if (
       !target ||
@@ -849,6 +1025,23 @@ function MailWorkspace() {
           for (const item of items) next.delete(item.id);
           return next;
         });
+        const nextRow = rows.find(
+          (row) => !items.some((item) => item.id === row.id) && !row.moveStatus,
+        );
+        const active = document.activeElement;
+        if (
+          active === workspace.current ||
+          items.some((item) => rowButtons.current.get(item.id) === active)
+        ) {
+          setSelectedId((current) =>
+            items.some((item) => item.id === current) ? nextRow?.id || null : current,
+          );
+          if (nextRow) {
+            const button = rowButtons.current.get(nextRow.id);
+            button?.focus({ preventScroll: true });
+            button?.scrollIntoView?.({ block: 'nearest' });
+          } else workspace.current?.focus();
+        }
         setNotice(t('com_ui_mail_bulk_queued'));
       },
       onError: () => setNotice(t('com_ui_mail_job_submit_error')),
@@ -923,8 +1116,29 @@ function MailWorkspace() {
       return next.size === previous.size ? previous : next;
     });
   }, [rows]);
+  useEffect(() => {
+    if (!searchReturnFocus.current || search !== query) return;
+    searchReturnFocus.current = false;
+    const first = rows[0];
+    setSelectedId(first?.id || null);
+    if (first) rowButtons.current.get(first.id)?.focus({ preventScroll: true });
+    else workspace.current?.focus();
+  }, [rows, search, query]);
+  const finishSearch = () => {
+    searchReturnFocus.current = true;
+    setQuery(search);
+    setSelectedId(null);
+    setChecked(new Map());
+  };
+  const refreshMailbox = () => {
+    if (resultQuery.isFetching) return;
+    requestedInboxCursor.current = undefined;
+    void actions.refresh();
+    if (inboxMode) void inboxQuery.refresh();
+  };
   return (
     <main
+      ref={workspace}
       className="mail-workspace"
       tabIndex={0}
       aria-label={t('com_ui_mail_workspace')}
@@ -937,6 +1151,24 @@ function MailWorkspace() {
           shortcutsOpen
         )
           return;
+        const target = event.target;
+        if (
+          isMailEscape(event) &&
+          target instanceof HTMLElement &&
+          target.closest(
+            'input:not([type="checkbox"]), textarea, [contenteditable="true"], [data-mail-shortcuts="off"]',
+          ) &&
+          !target.closest('[role="dialog"], [role="alertdialog"], [role="menu"]') &&
+          !document.querySelector(
+            '[role="dialog"], [role="alertdialog"], [role="menu"][data-state="open"]',
+          )
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (target === searchInput.current && search !== query) finishSearch();
+          else focusList();
+          return;
+        }
         const key = mailShortcutKey(event);
         if (!key) return;
         event.preventDefault();
@@ -947,6 +1179,18 @@ function MailWorkspace() {
         }
         if (key === '?') {
           setShortcutsOpen(true);
+          return;
+        }
+        if (key === 'g') {
+          refreshMailbox();
+          return;
+        }
+        if (key === ',') {
+          setSettingsOpen(true);
+          return;
+        }
+        if (key === 'l') {
+          focusList();
           return;
         }
         if (key === 'Escape') {
@@ -965,7 +1209,7 @@ function MailWorkspace() {
         if (key === 'e' || key === 'Shift+e') {
           const items = checked.size ? Array.from(checked.values()) : [];
           if (!items.length && selected) items.push(selected);
-          if (key === 'e') requestMove(items, folder);
+          if (key === 'e' && folder) requestMove(items, folder);
           else if (
             items.length &&
             !moveUnavailable &&
@@ -984,10 +1228,19 @@ function MailWorkspace() {
           setChecked(allSelected ? new Map() : new Map(selectable.map((row) => [row.id, row])));
           return;
         }
-        if (key === 'r' || key === 'c' || key === 'o') {
+        if (['r', 'c', 'o', 'm', 'd', 'a', 'h', 'p'].includes(key)) {
           if (!selected) return;
-          const action = { r: 'reply', c: 'chat', o: 'outlook' } as const;
-          detailControls.current?.[action[key]]();
+          const action = {
+            r: 'reply',
+            c: 'chat',
+            o: 'outlook',
+            m: 'original',
+            d: 'draft',
+            a: 'attachments',
+            h: 'correspondence',
+            p: 'research',
+          } as const;
+          detailControls.current?.[action[key as keyof typeof action]]();
           return;
         }
         if (['1', '2', '3'].includes(key)) {
@@ -1025,7 +1278,10 @@ function MailWorkspace() {
         if (!rows.length) return;
         const index = rows.findIndex((row) => row.id === selectedId);
         const offset = key === 'j' || key === 'ArrowDown' ? 1 : -1;
-        const next = rows[index < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, index + offset))];
+        let nextIndex = index < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, index + offset));
+        if (key === 'Home') nextIndex = 0;
+        if (key === 'End') nextIndex = rows.length - 1;
+        const next = rows[nextIndex];
         openMail(next);
         const button = rowButtons.current.get(next.id);
         button?.focus({ preventScroll: true });
@@ -1053,11 +1309,8 @@ function MailWorkspace() {
           </button>
           <button
             className="mail-button"
-            onClick={() => {
-              requestedInboxCursor.current = undefined;
-              void actions.refresh();
-              if (inboxMode) void inboxQuery.refresh();
-            }}
+            onClick={refreshMailbox}
+            disabled={resultQuery.isFetching}
             aria-label={t('com_ui_mail_refresh')}
           >
             <RefreshCw size={16} />
@@ -1103,6 +1356,7 @@ function MailWorkspace() {
           {t('com_ui_mail_job_loading_error')}
         </p>
       )}
+      {status?.available && status.connection.connected && <MailResearchProgress />}
       <MoveProgress
         jobs={status?.connection.connected ? jobs : []}
         running={running}
@@ -1177,6 +1431,22 @@ function MailWorkspace() {
                 ref={searchInput}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key !== 'Enter' ||
+                    event.ctrlKey ||
+                    event.metaKey ||
+                    event.altKey ||
+                    event.shiftKey ||
+                    event.repeat ||
+                    event.nativeEvent.isComposing ||
+                    event.nativeEvent.keyCode === 229
+                  )
+                    return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  finishSearch();
+                }}
                 placeholder={t('com_ui_mail_search')}
                 aria-label={t('com_ui_mail_search')}
               />
@@ -1289,6 +1559,7 @@ function MailWorkspace() {
                         type="checkbox"
                         aria-label={t('com_ui_mail_select_one', { subject: row.subject })}
                         checked={checked.has(row.id)}
+                        tabIndex={row.id === tabRowId ? 0 : -1}
                         disabled={
                           !!row.moveStatus ||
                           row.mailboxLocation === 'sent' ||
@@ -1310,6 +1581,7 @@ function MailWorkspace() {
                         else rowButtons.current.delete(row.id);
                       }}
                       className={`mail-row ${row.id === selectedId ? 'selected' : ''}`}
+                      tabIndex={row.id === tabRowId ? 0 : -1}
                       onClick={() => openMail(row)}
                       aria-pressed={row.id === selectedId}
                     >
@@ -1431,8 +1703,10 @@ function MailWorkspace() {
               moveCount={moveFolderItems?.length}
               chosen={folder}
               onChoose={(chosen) => {
-                if (moveFolderItems) requestMove(moveFolderItems, chosen);
-                else chooseFolder(chosen);
+                if (moveFolderItems) {
+                  if (!folder) chooseFolder(chosen);
+                  requestMove(moveFolderItems, chosen);
+                } else chooseFolder(chosen);
               }}
               onClose={() => {
                 setFolderPicker(false);

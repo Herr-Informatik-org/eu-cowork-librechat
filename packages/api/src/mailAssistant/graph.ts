@@ -1,12 +1,20 @@
 import type { MailFetch, MailGraph, MailMessage, MailFolder } from './types';
 import { createDraftOperations } from './drafts';
 import { createPreviewOperation } from './preview';
+import type { MailPreviewLinkPolicy } from './preview';
+import { graphRecipients } from './recipients';
+import type { MailAttachmentScanner } from './attachments';
+import {
+  assertScannableAttachment,
+  checkAttachmentBytes,
+  readAttachmentBytes,
+} from './attachments';
 import { MailGraphError } from './errors';
 export { MailGraphError } from './errors';
 
 const origin = 'https://graph.microsoft.com';
 const fields =
-  'id,conversationId,changeKey,subject,from,replyTo,receivedDateTime,sentDateTime,categories,isDraft,webLink,parentFolderId,isRead,hasAttachments';
+  'id,conversationId,changeKey,subject,from,replyTo,toRecipients,ccRecipients,receivedDateTime,sentDateTime,categories,isDraft,webLink,parentFolderId,isRead,hasAttachments';
 const responseActionExpand =
   "singleValueExtendedProperties($filter=id eq 'Integer 0x1081' or id eq 'SystemTime 0x1082')";
 const otherFolderAliases = new Set([
@@ -100,15 +108,9 @@ function message(value: Record<string, unknown>): MailMessage {
     subject: text(value.subject, 500),
     sender: text(from?.emailAddress?.address, 320),
     senderName: text(from?.emailAddress?.name, 320),
-    replyTo: Array.isArray(value.replyTo)
-      ? value.replyTo
-          .slice(0, 50)
-          .map((item) => ({
-            name: text(item?.emailAddress?.name, 320),
-            address: text(item?.emailAddress?.address, 320),
-          }))
-          .filter((item) => item.address)
-      : [],
+    replyTo: graphRecipients(value.replyTo),
+    toRecipients: value.toRecipients == null ? undefined : graphRecipients(value.toRecipients),
+    ccRecipients: value.ccRecipients == null ? undefined : graphRecipients(value.ccRecipients),
     isRead: value.isRead === true,
     hasAttachments: value.hasAttachments === true,
     ...responseAction(value),
@@ -135,11 +137,15 @@ export function createMailGraph({
   beforeRequest,
   fetch: request = globalThis.fetch,
   erpLinksEnabled = false,
+  linkPolicy,
+  scanAttachment,
 }: {
   token: () => Promise<string>;
   beforeRequest: () => Promise<void>;
   fetch?: MailFetch;
   erpLinksEnabled?: boolean;
+  linkPolicy?: () => Promise<MailPreviewLinkPolicy>;
+  scanAttachment?: MailAttachmentScanner;
 }): MailGraph {
   async function raw(
     path: string,
@@ -389,7 +395,7 @@ export function createMailGraph({
       throw new MailGraphError(400);
     }
   }
-  const metadataFields = `${fields},toRecipients,ccRecipients,singleValueExtendedProperties`;
+  const metadataFields = `${fields},singleValueExtendedProperties`;
   const metadataFolders = new Map<string, Promise<string>>();
   async function metadataFolder(alias: 'inbox' | 'sentitems'): Promise<string> {
     if (!metadataFolders.has(alias))
@@ -502,6 +508,8 @@ export function createMailGraph({
     },
     preview: createPreviewOperation({
       linksEnabled: erpLinksEnabled,
+      linkPolicy,
+      scanAttachment,
       raw: (path, timeout) => raw(path, 'GET', undefined, undefined, 'text', timeout),
       call,
       id,
@@ -538,8 +546,49 @@ export function createMailGraph({
       });
       if (data['@odata.nextLink'] != null && typeof data['@odata.nextLink'] !== 'string')
         throw new MailGraphError(502);
-      return { attachments, hasMore: !!data['@odata.nextLink'] };
+      return {
+        attachments,
+        hasMore: !!data['@odata.nextLink'],
+        ...(scanAttachment && { downloadAvailable: true }),
+      };
     },
+    ...(scanAttachment && {
+      async downloadAttachment(messageId: string, attachmentId: string) {
+        const path = `/v1.0/me/messages/${id(messageId)}/attachments/${id(attachmentId)}`;
+        const query = `${path}?$select=id,name,contentType,size,isInline`;
+        const metadata = await call(query);
+        if (
+          metadata.id !== attachmentId ||
+          metadata['@odata.type'] !== '#microsoft.graph.fileAttachment' ||
+          typeof metadata.name !== 'string' ||
+          metadata.name.length > 255 ||
+          typeof metadata.contentType !== 'string' ||
+          metadata.contentType.length > 255 ||
+          typeof metadata.size !== 'number' ||
+          typeof metadata.isInline !== 'boolean'
+        )
+          throw new MailGraphError(400);
+        const file = {
+          name: metadata.name,
+          contentType: metadata.contentType,
+          size: metadata.size,
+        };
+        assertScannableAttachment(file);
+        const response = await raw(`${path}/$value`, 'GET', undefined, undefined, 'text', 30_000);
+        const bytes = await readAttachmentBytes(response, file.size, beforeRequest);
+        const checked = await checkAttachmentBytes(file, bytes, scanAttachment);
+        await beforeRequest();
+        const fresh = await call(query);
+        if (
+          ['id', '@odata.type', 'name', 'contentType', 'size', 'isInline'].some(
+            (key) => fresh[key] !== metadata[key],
+          )
+        )
+          throw new MailGraphError(409);
+        await beforeRequest();
+        return checked;
+      },
+    }),
     async folders(parentId) {
       const path = parentId
         ? `/v1.0/me/mailFolders/${id(parentId)}/childFolders`
@@ -693,6 +742,7 @@ export function createMailGraph({
       beforeRequest,
       id,
       safeOutlookUrl,
+      scanAttachment,
     }),
   };
 }

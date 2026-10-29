@@ -25,8 +25,10 @@ function Images({ id, revision, kind, preview, text, title }: Props) {
         <div className="mail-body-actions">
           <button
             className="mail-button"
-            disabled={images.isLoading}
-            onClick={images.preview ? images.hide : images.load}
+            aria-disabled={images.isLoading}
+            onClick={() => {
+              if (!images.isLoading) (images.preview ? images.hide : images.load)();
+            }}
           >
             {images.isLoading ? (
               <Loader2 size={15} className="animate-spin" aria-hidden="true" />

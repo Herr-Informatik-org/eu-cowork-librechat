@@ -14,6 +14,8 @@ const mockCommit = jest.fn();
 const mockDraft = jest.fn();
 const mockAttachments = jest.fn();
 const mockSaveSettings = jest.fn();
+let mockDraftLoading = false;
+let mockDraftOutcome: { status: string; draftUrl?: string } | undefined;
 let mockConfiguration: MailFollowupConfiguration | undefined;
 let mockPreview: MailFollowupPreview | undefined;
 const result: MailWorkspaceResult = {
@@ -40,12 +42,18 @@ jest.mock('~/data-provider/Mail', () => ({
   }),
   useMailFollowupSettings: () => ({ data: mockConfiguration }),
   useMailFollowupProjects: () => ({ data: undefined }),
-  useMailDraftRequest: () => ({ mutate: mockDraft }),
+  useMailDraftRequest: () => ({
+    mutate: mockDraft,
+    isLoading: mockDraftLoading,
+    data: mockDraftOutcome,
+  }),
   useMailAttachments: (...args: Parameters<typeof mockAttachments>) => mockAttachments(...args),
 }));
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockDraftLoading = false;
+  mockDraftOutcome = undefined;
   mockPreview = undefined;
   mockConfiguration = undefined;
   mockAttachments.mockReturnValue({ data: undefined });
@@ -182,12 +190,15 @@ test('a draft requires explicit request and carries optional human instructions'
     target: { value: 'Donnerstag bestätigen, Preis offen lassen.' },
   });
   fireEvent.click(screen.getByText('Entwurf erstellen'));
-  expect(mockDraft).toHaveBeenCalledWith({
-    id: result.id,
-    revision: result.revision,
-    instructions: 'Donnerstag bestätigen, Preis offen lassen.',
-    requestId: '00000000-0000-4000-8000-000000000001',
-  });
+  expect(mockDraft).toHaveBeenCalledWith(
+    {
+      id: result.id,
+      revision: result.revision,
+      instructions: 'Donnerstag bestätigen, Preis offen lassen.',
+      requestId: '00000000-0000-4000-8000-000000000001',
+    },
+    expect.objectContaining({ onSettled: expect.any(Function) }),
+  );
 });
 
 test('existing draft is opened explicitly and never regenerated', () => {
@@ -295,4 +306,163 @@ test('shows actual reply recipients as inert text before the draft request', () 
   expect(screen.getByText(/<img src=x onerror=alert\(1\)> <reply@example.test>/)).toBeVisible();
   expect(document.querySelector('img')).toBeNull();
   expect(mockDraft).not.toHaveBeenCalled();
+});
+
+test.each(['ctrlKey', 'metaKey'])(
+  'submits a draft request once with %s + Enter and permits empty optional instructions',
+  (modifier) => {
+    render(<MailDraftRequest result={result} openRequest={1} />);
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveAttribute('aria-keyshortcuts', 'Control+Enter Meta+Enter');
+    fireEvent.keyDown(input, { key: 'Enter', [modifier]: true });
+    fireEvent.keyDown(input, { key: 'Enter', [modifier]: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Entwurf erstellen' }));
+    expect(mockDraft).toHaveBeenCalledTimes(1);
+    expect(mockDraft.mock.calls[0][0]).toMatchObject({
+      id: result.id,
+      revision: result.revision,
+      instructions: '',
+    });
+  },
+);
+
+test.each([
+  { key: 'Enter' },
+  { key: 'Enter', ctrlKey: true, shiftKey: true },
+  { key: 'Enter', ctrlKey: true, altKey: true },
+  { key: 'Enter', ctrlKey: true, repeat: true },
+  { key: 'Enter', ctrlKey: true, isComposing: true },
+  { key: 'Enter', ctrlKey: true, keyCode: 229 },
+])('keeps draft text input unchanged without an explicit submit chord: %j', (keys) => {
+  render(<MailDraftRequest result={result} openRequest={1} />);
+  const input = screen.getByRole('textbox');
+  fireEvent.change(input, { target: { value: 'Freitag bestätigen.\nBitte Rückfrage ergänzen.' } });
+  expect(fireEvent.keyDown(input, keys)).toBe(true);
+  expect(mockDraft).not.toHaveBeenCalled();
+  expect(input).toHaveValue('Freitag bestätigen.\nBitte Rückfrage ergänzen.');
+});
+
+test('draft shortcut uses current instructions and revision, retries only after settled, and respects busy editing', () => {
+  const view = render(<MailDraftRequest result={result} openRequest={1} />);
+  const input = screen.getByRole('textbox');
+  fireEvent.change(input, { target: { value: 'Nur den Termin bestätigen.' } });
+  view.rerender(
+    <MailDraftRequest result={{ ...result, revision: 'new-revision' }} openRequest={1} />,
+  );
+  fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+  expect(mockDraft.mock.calls[0][0]).toMatchObject({
+    revision: 'new-revision',
+    instructions: 'Nur den Termin bestätigen.',
+  });
+  mockDraft.mock.calls[0][1].onSettled();
+  mockDraftLoading = true;
+  view.rerender(<MailDraftRequest result={result} openRequest={1} />);
+  fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+  expect(mockDraft).toHaveBeenCalledTimes(1);
+  mockDraftLoading = false;
+  view.rerender(<MailDraftRequest result={result} openRequest={1} editing />);
+  fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+  expect(mockDraft).toHaveBeenCalledTimes(1);
+  view.rerender(<MailDraftRequest result={result} openRequest={1} />);
+  fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+  expect(mockDraft).toHaveBeenCalledTimes(2);
+});
+
+test('Escape closes the manual draft form, restores focus and retains optional notes', () => {
+  const view = render(<MailDraftRequest result={result} openRequest={1} />);
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Angaben behalten' } });
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Antwort entwerfen' })).toHaveFocus();
+  view.rerender(<MailDraftRequest result={result} openRequest={2} />);
+  expect(screen.getByRole('textbox')).toHaveFocus();
+  expect(screen.getByRole('textbox')).toHaveValue('Angaben behalten');
+  expect(mockDraft).not.toHaveBeenCalled();
+});
+
+test('shows reply-all To and Cc as plain text without generating a draft', () => {
+  render(
+    <MailDraftRequest
+      result={result}
+      openRequest={1}
+      content={{
+        resultId: result.id,
+        mailbox: 'owner@example.test',
+        message: {
+          subject: '',
+          sender: 'sender@example.test',
+          receivedAt: '',
+          body: '',
+          bodyTruncated: false,
+          replyMode: 'all',
+          replyRecipients: [{ name: 'Kunde', address: 'customer@example.test' }],
+          replyCcRecipients: [{ name: '<script>cc</script>', address: 'copy@example.test' }],
+        },
+      }}
+    />,
+  );
+  expect(screen.getByText('Antwort an alle · An')).toBeVisible();
+  expect(screen.getByText('Cc')).toBeVisible();
+  expect(screen.getByText(/<script>cc<\/script> <copy@example.test>/)).toBeVisible();
+  expect(document.querySelector('script')).toBeNull();
+  expect(mockDraft).not.toHaveBeenCalled();
+});
+
+test('focuses the completed Outlook draft link only if the request still owns focus', () => {
+  const view = render(<MailDraftRequest result={result} openRequest={1} />);
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
+  mockDraftOutcome = {
+    status: 'created',
+    draftUrl: 'https://outlook.office.com/mail/deeplink/compose/created-draft',
+  };
+  view.rerender(<MailDraftRequest result={result} openRequest={1} />);
+  expect(screen.getByRole('link', { name: 'Entwurf in Outlook öffnen' })).toHaveFocus();
+});
+
+test('does not create a draft through shortcut while permission or content is unavailable', () => {
+  const view = render(<MailDraftRequest result={result} openRequest={1} />);
+  const input = screen.getByRole('textbox');
+  view.rerender(<MailDraftRequest result={result} openRequest={1} disabled />);
+  fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+  expect(mockDraft).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Entwurf erstellen' })).toBeDisabled();
+});
+
+test('new reply explicitly bypasses an existing-draft UI barrier without editing or removing the previous draft', () => {
+  render(<MailDraftRequest result={{ ...result, draftStatus: 'stale' }} />);
+  expect(mockDraft).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Neue Antwort erstellen' }));
+  expect(screen.getByText(/Bestehende Entwürfe bleiben erhalten/)).toBeInTheDocument();
+  const textbox = screen.getByRole('textbox');
+  fireEvent.change(textbox, { target: { value: 'Bitte neuen Liefertermin nennen.' } });
+  fireEvent.keyDown(textbox, { key: 'Enter', ctrlKey: true });
+  expect(mockDraft).toHaveBeenCalledTimes(1);
+  expect(mockDraft.mock.calls[0][0]).toMatchObject({
+    id: result.id,
+    revision: result.revision,
+    newReply: true,
+    instructions: 'Bitte neuen Liefertermin nennen.',
+  });
+});
+
+test('uncertain draft state never offers or triggers an additional new reply', () => {
+  const { container } = render(
+    <MailDraftRequest result={{ ...result, draftStatus: 'uncertain' }} openRequest={1} />,
+  );
+  expect(screen.queryByRole('button', { name: 'Neue Antwort erstellen' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  fireEvent.keyDown(container, { key: 'Enter', ctrlKey: true });
+  expect(mockDraft).not.toHaveBeenCalled();
+});
+
+test('explicit research transfer fills the form once but never generates a draft automatically', () => {
+  const request = { id: 1, text: 'Recherche: Lizenzposition prüfen.' };
+  const view = render(<MailDraftRequest result={result} instructionRequest={request} />);
+  expect(screen.getByRole('textbox')).toHaveValue(request.text);
+  expect(mockDraft).not.toHaveBeenCalled();
+  view.rerender(<MailDraftRequest result={result} instructionRequest={request} />);
+  expect(screen.getByRole('textbox')).toHaveValue(request.text);
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', metaKey: true });
+  expect(mockDraft.mock.calls[0][0]).toMatchObject({ instructions: request.text });
+  expect(mockDraft.mock.calls[0][0]).not.toHaveProperty('newReply');
 });

@@ -380,6 +380,9 @@ export function createUserMethods(
       await mongoose.connection
         .collection('eucowork_mail_followups')
         .deleteMany({ ownerId: userId });
+      await mongoose.connection
+        .collection('eucowork_mail_research')
+        .deleteMany({ ownerId: userId });
       await mailbox.deleteOne({ _id: userId, ownerId: userId });
       const result = await User.deleteOne({ _id: userId });
       // Close a connection-start race between the initial cleanup and account deletion.
@@ -394,6 +397,9 @@ export function createUserMethods(
         .deleteMany({ ownerId: userId });
       await mongoose.connection
         .collection('eucowork_mail_followups')
+        .deleteMany({ ownerId: userId });
+      await mongoose.connection
+        .collection('eucowork_mail_research')
         .deleteMany({ ownerId: userId });
       await mailbox.deleteOne({ _id: userId, ownerId: userId });
       if (result.deletedCount === 0) {

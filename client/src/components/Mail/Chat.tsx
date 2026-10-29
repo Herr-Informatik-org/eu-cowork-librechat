@@ -5,6 +5,7 @@ import { useMailChat, useMailCorrespondence } from '~/data-provider/Mail';
 import { useLocalize } from '~/hooks';
 import { mailActionError } from './Followup';
 import { buildMailChatRequest } from './context';
+import { isMailSubmitShortcut } from './Shortcuts';
 
 type Message = {
   role: 'user' | 'assistant';
@@ -269,15 +270,7 @@ export function MailChat({
             aria-describedby={shortcutHint}
             aria-keyshortcuts="Control+Enter Meta+Enter"
             onKeyDown={(event) => {
-              if (
-                event.key !== 'Enter' ||
-                (!event.ctrlKey && !event.metaKey) ||
-                event.shiftKey ||
-                event.altKey ||
-                event.repeat ||
-                event.nativeEvent.isComposing
-              )
-                return;
+              if (!isMailSubmitShortcut(event)) return;
               event.preventDefault();
               event.stopPropagation();
               void submit();

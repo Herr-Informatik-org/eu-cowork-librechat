@@ -1,5 +1,28 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-29 — Sichere Mailbearbeitung und manuelle Kundenrecherche
+
+- Ctrl/Cmd+Enter funktioniert auch beim Anfordern eines Antwortentwurfs.
+  Tastaturfokus und zusätzliche Kürzel erschliessen Mailaktionen, Einstellungen,
+  Ordner, Bilder, Anhänge und die manuelle Recherche.
+- Der Mailkopf zeigt An und Cc. Neue Outlook-Entwürfe verwenden «Allen antworten»
+  mit überprüften Originalempfängern. Eine ausdrücklich neue Antwort kann trotz
+  geschütztem Entwurf angefordert werden; interne Weiterleitungen werden dabei
+  nicht als Kontext oder Empfänger übernommen. Bestehende Entwürfe bleiben erhalten.
+- Weiterleitungszeit wird aus Outlook-Metadaten gezeigt. Fehlende Empfängernachweise
+  bleiben als «nicht ermittelbar» sichtbar; es gibt keine Zuordnung allein nach Betreff.
+- Exakte Linkfreigaben sind administrativ pro Instanz pflegbar. Bekannte verschachtelte
+  Odoo-/Microsoft-Weiterleitungen bleiben nur bei eindeutig freigegebenem Endziel
+  erhalten. Die optionale lokale Reputationsprüfung übermittelt keine privaten URLs.
+- Bewusste Anhangsdownloads und neue Entwurfsanhänge können über einen getrennten
+  lokalen ClamAV-Dienst geprüft werden. Fehlende/alte Signaturen, Zeitüberschreitungen
+  und unvollständige Prüfungen sperren die Freigabe; vorhandene Entwürfe werden nicht
+  verändert. Dateiformate und Grössen bleiben begrenzt.
+- Persönliche versionierte Mail-Recherche-Skills werden nur ausdrücklich gespeichert
+  und gestartet. Festgelegte Odoo-/OPS-Abfragen verwenden aktuelle Benutzer-, Profil-
+  und Werkzeugrechte. Das Modell bekommt ausgewählte Quelldaten, keine Werkzeuge.
+  Ergebnisse bleiben intern; eine Übernahme in Antwortvorgaben erfolgt erst auf Klick.
+
 ## 2026-10-28 — Outlook-Aktionsstatus und Tastenkürzel im Mail-Chat
 
 - Kompakte Symbole zeigen die letzte von Outlook gespeicherte Antwort oder

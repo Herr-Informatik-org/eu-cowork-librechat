@@ -1,3 +1,11 @@
+import type {
+  MailResearchSettings,
+  MailResearchSkill,
+  MailResearchSkillInput,
+  MailResearchCustomer,
+  MailResearchJob,
+  MailResearchRunRequest,
+} from './mailResearch';
 import type { AxiosResponse } from 'axios';
 import type {
   MailWorkspaceChatRequest,
@@ -177,6 +185,27 @@ export const getMailWorkspaceAttachments = (
   signal?: AbortSignal,
 ): Promise<MailAttachments> =>
   request.get(endpoints.mailWorkspaceResult(id, 'attachments'), { signal });
+
+export const downloadMailWorkspaceAttachment = (
+  id: string,
+  attachmentId: string,
+  revision: string,
+  signal?: AbortSignal,
+): Promise<Response> =>
+  request.authenticatedFetch(
+    endpoints.mailWorkspace(
+      `/results/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}/download`,
+    ),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision }),
+      signal,
+      cache: 'no-store',
+      redirect: 'error',
+      credentials: 'same-origin',
+    },
+  );
 
 export const getBrainHistory = (signal?: AbortSignal): Promise<BrainHistoryStatus> =>
   request.get(endpoints.brainHistory(), { signal });
@@ -1639,3 +1668,30 @@ export interface ActiveJobsResponse {
 export const getActiveJobs = (): Promise<ActiveJobsResponse> => {
   return request.get(endpoints.activeJobs());
 };
+
+export const getMailResearchSettings = (signal?: AbortSignal): Promise<MailResearchSettings> =>
+  request.get(endpoints.mailWorkspace('/research/settings'), { signal });
+export const saveMailResearchSkill = (
+  id: string,
+  input: MailResearchSkillInput,
+): Promise<MailResearchSkill> =>
+  request.put(endpoints.mailWorkspace(`/research/skills/${encodeURIComponent(id)}`), input);
+export const getMailResearchCustomers = (
+  profileId: string,
+  search: string,
+  signal?: AbortSignal,
+): Promise<MailResearchCustomer[]> =>
+  request.get(
+    endpoints.mailWorkspace(`/research/customers?${new URLSearchParams({ profileId, search })}`),
+    { signal },
+  );
+export const runMailResearch = (
+  id: string,
+  input: MailResearchRunRequest,
+): Promise<MailResearchJob> => request.post(endpoints.mailWorkspaceResult(id, 'research'), input);
+export const getMailResearchJobs = (signal?: AbortSignal): Promise<MailResearchJob[]> =>
+  request.get(endpoints.mailWorkspace('/research/jobs'), { signal });
+export const getMailResearchJob = (id: string, signal?: AbortSignal): Promise<MailResearchJob> =>
+  request.get(endpoints.mailWorkspace(`/research/jobs/${encodeURIComponent(id)}`), { signal });
+export const cancelMailResearchJob = (id: string): Promise<MailResearchJob> =>
+  request.post(endpoints.mailWorkspace(`/research/jobs/${encodeURIComponent(id)}/cancel`), {});

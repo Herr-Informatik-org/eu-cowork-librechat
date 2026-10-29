@@ -972,6 +972,8 @@ describe('explicit manual drafts and attachment metadata', () => {
       {
         sender: { name: '', address: 'alice@example.invalid' },
         recipients: [{ name: '', address: 'customer@example.invalid' }],
+        ccRecipients: [],
+        replyMode: 'all',
         signatureEnabled: false,
       },
     );
@@ -980,6 +982,11 @@ describe('explicit manual drafts and attachment metadata', () => {
       'mail',
       'Guten Tag\n\nGerne unterstützen wir Sie.',
       undefined,
+      {
+        selfAddresses: ['alice@example.invalid', 'alice@example.invalid', 'alice@example.invalid'],
+        to: [{ name: '', address: 'customer@example.invalid' }],
+        cc: [],
+      },
     );
     expect(JSON.stringify([...f.results.values()])).not.toContain(instructions);
     expect(JSON.stringify([...f.operations.values()])).not.toContain(instructions);
@@ -999,6 +1006,51 @@ describe('explicit manual drafts and attachment metadata', () => {
       sender: { name: 'Alice Owner', address: 'alice@example.invalid' },
       recipients: [{ name: 'Actual recipient', address: 'reply@example.invalid' }],
     });
+  });
+  test('draft preflight and model context retain original To and Cc for reply-all', async () => {
+    const f = await prepared();
+    f.message.toRecipients = [
+      { name: 'Owner', address: 'ALICE@example.invalid' },
+      { name: 'Dario', address: 'dario@example.invalid' },
+    ];
+    f.message.ccRecipients = [
+      { name: 'Marco', address: 'marco@example.invalid' },
+      { name: 'Duplicate', address: 'DARIO@example.invalid' },
+      { name: 'Owner', address: 'alice@example.invalid' },
+    ];
+    const view = await f.engine.content(f.owner, f.result.id);
+    expect(view.message).toMatchObject({
+      replyMode: 'all',
+      replyRecipients: [
+        { name: '', address: 'customer@example.invalid' },
+        { name: 'Dario', address: 'dario@example.invalid' },
+      ],
+      replyCcRecipients: [{ name: 'Marco', address: 'marco@example.invalid' }],
+    });
+    await requestDraft(f);
+    expect(jest.mocked(f.adapter.analyzeDraft!).mock.calls[0][4]).toMatchObject({
+      replyMode: 'all',
+      recipients: view.message.replyRecipients,
+      ccRecipients: view.message.replyCcRecipients,
+    });
+    expect(f.graph.createReply).toHaveBeenCalledWith(
+      f.message.id,
+      expect.any(String),
+      undefined,
+      expect.objectContaining({
+        to: view.message.replyRecipients,
+        cc: view.message.replyCcRecipients,
+      }),
+    );
+  });
+  test('changing only recipient metadata while the model runs prevents draft creation', async () => {
+    const f = await prepared();
+    jest.mocked(f.adapter.analyzeDraft!).mockImplementation(async () => {
+      f.message.ccRecipients = [{ name: '', address: 'new@example.invalid' }];
+      return 'A prepared reply';
+    });
+    await expect(requestDraft(f)).rejects.toThrow('Originalmail wurde inzwischen geändert');
+    expect(f.graph.createReply).not.toHaveBeenCalled();
   });
   test('an existing human draft is linked and persisted but never rewritten or duplicated', async () => {
     const f = await prepared();
@@ -1025,6 +1077,166 @@ describe('explicit manual drafts and attachment metadata', () => {
       draftStatus: 'existing',
       draftUrl: 'https://outlook.office.com/mail/human',
     });
+  });
+  test('explicit new reply preserves existing drafts and excludes internal forwarded conversation from context and recipients', async () => {
+    const f = await prepared();
+    const oldDraft = {
+      ...f.message,
+      id: 'human-draft',
+      isDraft: true,
+      body: 'Private unsent text',
+    };
+    const internalForward = {
+      ...f.message,
+      id: 'internal-forward',
+      sentByUser: true,
+      body: 'Internal assessment, never customer-visible',
+      toRecipients: [{ name: 'Internal colleague', address: 'internal@example.invalid' }],
+      receivedAt: '2026-10-26T07:59:00Z',
+    };
+    f.graph.thread.mockResolvedValue({
+      complete: true,
+      messages: [f.message, oldDraft, internalForward],
+    });
+    await requestDraft(f);
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    const current = (await f.engine.results(f.owner, {})).results[0];
+    f.graph.thread.mockClear();
+    const input = {
+      revision: current.revision!,
+      instructions: 'Kundenfrage beantworten',
+      requestId: '00000000-0000-4000-8000-000000000021',
+      newReply: true,
+    };
+    await expect(f.engine.requestDraft(f.owner, f.result.id, input)).resolves.toMatchObject({
+      status: 'created',
+    });
+    expect(f.graph.thread).not.toHaveBeenCalled();
+    expect(f.adapter.analyzeDraft).toHaveBeenCalledWith(
+      f.owner,
+      [f.message],
+      input.instructions,
+      expect.any(Function),
+      expect.objectContaining({ recipients: [{ name: '', address: 'customer@example.invalid' }] }),
+    );
+    expect(JSON.stringify(jest.mocked(f.adapter.analyzeDraft!).mock.calls)).not.toContain(
+      'internal@example.invalid',
+    );
+    expect(f.graph.createReply).toHaveBeenCalledWith(
+      'mail',
+      expect.any(String),
+      undefined,
+      expect.objectContaining({ to: [{ name: '', address: 'customer@example.invalid' }], cc: [] }),
+    );
+    expect(f.graph.editDraft).not.toHaveBeenCalled();
+    expect(oldDraft.body).toBe('Private unsent text');
+    await expect(f.engine.requestDraft(f.owner, f.result.id, input)).resolves.toMatchObject({
+      status: 'existing',
+    });
+    await expect(
+      f.engine.requestDraft(f.owner, f.result.id, {
+        ...input,
+        requestId: '00000000-0000-4000-8000-000000000022',
+      }),
+    ).resolves.toMatchObject({ status: 'existing' });
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+    expect(f.adapter.analyzeDraft).toHaveBeenCalledTimes(1);
+    await expect(
+      f.engine.requestDraft(f.owner, f.result.id, { ...input, instructions: 'Changed payload' }),
+    ).rejects.toThrow('Auftragskennung');
+    expect(JSON.stringify([...f.operations.values()])).not.toContain(input.instructions);
+  });
+  test('only an explicit new reply bypasses a sent conversation continuation', async () => {
+    const f = await prepared();
+    f.graph.thread.mockResolvedValue({
+      complete: true,
+      messages: [
+        f.message,
+        {
+          ...f.message,
+          id: 'forward',
+          sentByUser: true,
+          receivedAt: '2026-10-26T07:59:00Z',
+          sentAt: '2026-10-26T07:59:00Z',
+        },
+      ],
+    });
+    await expect(requestDraft(f)).rejects.toThrow('fortgesetzt');
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    await expect(
+      f.engine.requestDraft(f.owner, f.result.id, {
+        revision: f.result.revision!,
+        instructions: '',
+        requestId: '00000000-0000-4000-8000-000000000023',
+        newReply: true,
+      }),
+    ).resolves.toMatchObject({ status: 'created' });
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+  });
+  test.each(['body', 'recipients', 'version', 'connection'])(
+    'explicit new replies still block source or authority change: %s',
+    async (change) => {
+      const f = await prepared();
+      jest.mocked(f.adapter.analyzeDraft!).mockImplementation(async () => {
+        if (change === 'body') f.message.body = 'Changed';
+        if (change === 'recipients')
+          f.message.ccRecipients = [{ name: 'Other', address: 'other@example.invalid' }];
+        if (change === 'version') f.message.changeKey = 'changed';
+        if (change === 'connection')
+          jest.mocked(f.adapter.connection).mockResolvedValue({ connected: false });
+        return 'Reply';
+      });
+      await expect(
+        f.engine.requestDraft(f.owner, f.result.id, {
+          revision: f.result.revision!,
+          instructions: '',
+          requestId: '00000000-0000-4000-8000-000000000024',
+          newReply: true,
+        }),
+      ).rejects.toThrow();
+      expect(f.graph.createReply).not.toHaveBeenCalled();
+    },
+  );
+  test('completed reservations with an unpublished draft result remain uncertain on request replay', async () => {
+    const f = await prepared();
+    const input = {
+      revision: f.result.revision!,
+      instructions: '',
+      requestId: '00000000-0000-4000-8000-000000000029',
+      newReply: true,
+    };
+    await f.engine.requestDraft(f.owner, f.result.id, input);
+    const stored = f.results.get(f.owner + ':' + f.result.id)!;
+    stored.operationPending = true;
+    stored.draftStatus = 'uncertain';
+    stored.draftId = 'older-protected-draft';
+    await expect(f.engine.requestDraft(f.owner, f.result.id, input)).resolves.toEqual({
+      status: 'uncertain',
+    });
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
+  });
+  test('uncertain new-reply outcomes remain protected even with a different request id', async () => {
+    const f = await prepared();
+    f.graph.createReply.mockRejectedValue(new MailGraphError(0, true));
+    const input = {
+      revision: f.result.revision!,
+      instructions: '',
+      requestId: '00000000-0000-4000-8000-000000000025',
+      newReply: true,
+    };
+    await expect(f.engine.requestDraft(f.owner, f.result.id, input)).resolves.toEqual({
+      status: 'uncertain',
+    });
+    await expect(f.engine.requestDraft(f.owner, f.result.id, input)).resolves.toEqual({
+      status: 'uncertain',
+    });
+    await expect(
+      f.engine.requestDraft(f.owner, f.result.id, {
+        ...input,
+        requestId: '00000000-0000-4000-8000-000000000026',
+      }),
+    ).resolves.toEqual({ status: 'uncertain' });
+    expect(f.graph.createReply).toHaveBeenCalledTimes(1);
   });
   test.each(['draft', 'reply', 'message'])(
     'a %s appearing while drafting blocks creation',
@@ -1134,6 +1346,68 @@ describe('explicit manual drafts and attachment metadata', () => {
     await expect(f.engine.attachments('other-user', f.result.id)).rejects.toThrow();
     expect(f.graph.attachments).toHaveBeenCalledTimes(1);
   });
+  test('scanned downloads require owner and revision, return exact bytes and never invoke models or writes', async () => {
+    const f = await prepared();
+    const download = {
+      bytes: Buffer.from('Text'),
+      name: 'Notiz.txt',
+      contentType: 'text/plain',
+      scan: {
+        verdict: 'no_known_threats' as const,
+        engine: 'ClamAV' as const,
+        scannedAt: '2026-10-29T10:00:00Z',
+        signaturesAt: '2026-10-29T09:00:00Z',
+      },
+    };
+    const downloadAttachment = jest.fn(async () => download);
+    Object.assign(f.graph, { downloadAttachment });
+    await expect(
+      f.engine.downloadAttachment!(f.owner, f.result.id, 'file', f.result.revision!),
+    ).resolves.toBe(download);
+    expect(downloadAttachment).toHaveBeenCalledWith('mail', 'file');
+    expect(f.adapter.analyzeDraft).not.toHaveBeenCalled();
+    expect(f.graph.createReply).not.toHaveBeenCalled();
+    await expect(
+      f.engine.downloadAttachment!('other-user', f.result.id, 'file', f.result.revision!),
+    ).rejects.toThrow();
+    await expect(
+      f.engine.downloadAttachment!(f.owner, f.result.id, 'file', '0'.repeat(64)),
+    ).rejects.toThrow('verändert');
+    expect(downloadAttachment).toHaveBeenCalledTimes(1);
+  });
+  test.each(['connection', 'source', 'result', 'audit'])(
+    'withholds downloaded bytes after %s changes during scan',
+    async (change) => {
+      const f = await prepared();
+      Object.assign(f.graph, {
+        downloadAttachment: jest.fn(async () => {
+          if (change === 'connection')
+            (f.adapter.connection as jest.Mock).mockResolvedValue({ connected: false });
+          if (change === 'source') f.message.changeKey = 'changed';
+          if (change === 'result')
+            f.results.get(f.owner + ':' + f.result.id)!.moveStatus = 'completed';
+          if (change === 'audit')
+            (f.adapter.audit as jest.Mock).mockRejectedValue(Error('audit unavailable'));
+          return { bytes: Buffer.from('Text') };
+        }),
+      });
+      await expect(
+        f.engine.downloadAttachment!(f.owner, f.result.id, 'file', f.result.revision!),
+      ).rejects.toThrow();
+      if (change !== 'audit')
+        expect(f.adapter.audit).not.toHaveBeenCalledWith(
+          f.owner,
+          'attachment_scan_released',
+          f.result.id,
+        );
+    },
+  );
+  test('disabled scanner prevents download before contacting Graph attachment endpoints', async () => {
+    const f = await prepared();
+    await expect(
+      f.engine.downloadAttachment!(f.owner, f.result.id, 'file', f.result.revision!),
+    ).rejects.toThrow('nicht aktiviert');
+  });
   test('changed connection during attachment metadata retrieval withholds its response', async () => {
     const f = await prepared();
     f.graph.attachments.mockImplementation(async () => {
@@ -1219,6 +1493,28 @@ describe('mail result content boundary', () => {
     expect(f.adapter.audit).toHaveBeenNthCalledWith(1, f.owner, 'result_content_requested', f.id);
     expect(f.adapter.audit).toHaveBeenNthCalledWith(2, f.owner, 'result_content_read', f.id);
     expect((await f.engine.status(f.owner)).connection).not.toHaveProperty('generation');
+  });
+  it('returns actual original To and Cc without excluding self or replacing them with reply targets', async () => {
+    const f = preview();
+    f.message.senderName = 'Original sender';
+    f.message.toRecipients = [
+      { name: 'Alice', address: 'alice@example.invalid' },
+      { name: 'Dario', address: 'dario@example.invalid' },
+    ];
+    f.message.ccRecipients = [{ name: 'Marco', address: 'marco@example.invalid' }];
+    const content = await f.engine.content(f.owner, f.id);
+    expect(content.message).toMatchObject({
+      senderName: 'Original sender',
+      toRecipients: f.message.toRecipients,
+      ccRecipients: f.message.ccRecipients,
+    });
+    expect(content.message.replyRecipients).not.toContainEqual(f.message.toRecipients[0]);
+    expect(content.message).not.toHaveProperty('bccRecipients');
+    f.message.toRecipients = [];
+    f.message.ccRecipients = undefined;
+    const unknown = await f.engine.content(f.owner, f.id);
+    expect(unknown.message.toRecipients).toEqual([]);
+    expect(unknown.message.ccRecipients).toBeUndefined();
   });
   it('loads embedded images only on explicit owner request without models or mail writes', async () => {
     const f = preview();

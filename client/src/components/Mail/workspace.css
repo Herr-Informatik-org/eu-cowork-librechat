@@ -13,6 +13,10 @@
 .mail-workspace textarea {
   font: inherit;
 }
+.mail-workspace:focus-visible,
+.mail-workspace a:focus-visible,
+.mail-workspace summary:focus-visible,
+.mail-workspace [contenteditable='true']:focus-visible,
 .mail-workspace button:focus-visible,
 .mail-workspace input:focus-visible,
 .mail-workspace select:focus-visible,
@@ -1085,6 +1089,13 @@
   padding: 8px 0;
   border-top: 1px solid var(--border-light);
 }
+.mail-attachment-list .mail-button {
+  align-self: flex-start;
+}
+.mail-attachment-list .mail-button[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .mail-attachment-name {
   overflow-wrap: anywhere;
 }
@@ -1282,4 +1293,92 @@
   max-height: clamp(160px, 28vh, 280px);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.mail-recipients {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 8px 0 0;
+}
+.mail-recipients dt {
+  color: var(--text-secondary);
+}
+.mail-recipients dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.mail-recipients summary {
+  cursor: pointer;
+}
+.mail-recipients ul {
+  list-style: none;
+  margin: 3px 0 0;
+  padding: 0;
+}
+
+.mail-research {
+  margin: 10px 0;
+  font-size: 12px;
+}
+.mail-research > .mail-card {
+  margin-top: 8px;
+}
+.mail-research label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+.mail-research label.mail-check {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.mail-research input:not([type='checkbox']),
+.mail-research textarea,
+.mail-research select {
+  width: 100%;
+  padding: 7px;
+  border: 1px solid var(--border-medium);
+  border-radius: 5px;
+  background: var(--surface-primary);
+  color: var(--text-primary);
+}
+.mail-research fieldset {
+  min-width: 0;
+  border: 1px solid var(--border-light);
+  border-radius: 5px;
+  padding: 8px;
+  margin: 8px 0;
+}
+.mail-research-customer ul {
+  list-style: none;
+  padding: 0;
+}
+.mail-research-customer li {
+  margin: 4px 0;
+}
+.mail-research-result pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.mail-research-result details {
+  border-top: 1px solid var(--border-light);
+  padding: 7px 0;
+}
+.mail-research-result summary {
+  cursor: pointer;
+}
+.mail-research-result dd {
+  margin: 0 0 5px;
+  overflow-wrap: anywhere;
+}
+.mail-research-progress {
+  border-bottom: 1px solid var(--border-light);
+  padding: 5px 20px;
+  font-size: 12px;
 }

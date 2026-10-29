@@ -88,6 +88,7 @@ export function createMailPreviewDocument(
   html: string,
   linksEnabled = false,
   imagesEnabled = false,
+  trustedOrigins?: readonly string[],
 ): string | undefined {
   if (typeof html !== 'string' || html.length > 4_000_000) return;
   // Reject excessive markup before DOMPurify allocates its inert DOM; this is a size guard only.
@@ -137,7 +138,8 @@ export function createMailPreviewDocument(
         node.removeAttribute(name);
     }
     if (node.tagName === 'A') {
-      const link = linksEnabled === true && mailPreviewLink(node.getAttribute('href') || '');
+      const link =
+        linksEnabled === true && mailPreviewLink(node.getAttribute('href') || '', trustedOrigins);
       if (!link) {
         node.removeAttribute('href');
         return;
@@ -148,7 +150,7 @@ export function createMailPreviewDocument(
       node.setAttribute('referrerpolicy', 'no-referrer');
       node.setAttribute(
         'title',
-        link.viaSafeLinks ? 'erp.rzcloud.ch (Microsoft Safe Links)' : 'erp.rzcloud.ch',
+        `${new URL(link.destination).hostname}${link.viaSafeLinks ? ' (Microsoft Safe Links)' : ''}`,
       );
     }
     if (node.tagName === 'IMG') {
@@ -238,19 +240,60 @@ export default function SafeMailPreview({
   title: string;
 }) {
   const t = useLocalize();
-  const linksEnabled = preview?.linksEnabled === true;
+  const check = preview?.linkCheck;
+  const checkLabels = {
+    not_listed: 'com_ui_mail_links_not_listed',
+    known_threat: 'com_ui_mail_links_blocked',
+    disabled: 'com_ui_mail_links_disabled',
+    unavailable: 'com_ui_mail_links_unavailable',
+  } as const;
+  const checkLabel = check
+    ? checkLabels[check.status] || 'com_ui_mail_links_unavailable'
+    : 'com_ui_mail_links_unchecked';
+  const linksEnabled =
+    preview?.linksEnabled === true &&
+    (!check || check.status === 'not_listed' || check.status === 'known_threat');
   const document = useMemo(
     () =>
       preview &&
-      createMailPreviewDocument(preview.html, linksEnabled, preview.imagesLoaded === true),
-    [preview, linksEnabled],
+      createMailPreviewDocument(
+        preview.html,
+        linksEnabled,
+        preview.imagesLoaded === true,
+        preview.trustedOrigins ?? (check ? [] : undefined),
+      ),
+    [preview, linksEnabled, check],
   );
   return (
     <div>
       {document ? (
         <>
           <p className="mail-muted">
-            {t(linksEnabled ? 'com_ui_mail_preview_erp_links' : 'com_ui_mail_preview_safety')}
+            {t(linksEnabled ? 'com_ui_mail_preview_allowed_links' : 'com_ui_mail_preview_safety')}
+          </p>
+          <p
+            className={check?.status === 'known_threat' ? 'mail-error' : 'mail-muted'}
+            role="status"
+          >
+            {t(checkLabel, { count: check?.blocked || 0 })}
+            {check?.checkedAt && Number.isFinite(Date.parse(check.checkedAt)) && (
+              <>
+                {' '}
+                {t('com_ui_mail_links_checked_at')}{' '}
+                <time dateTime={check.checkedAt}>
+                  {new Date(check.checkedAt).toLocaleString('de-CH')}
+                </time>
+              </>
+            )}
+            {check?.sourceUpdatedAt && Number.isFinite(Date.parse(check.sourceUpdatedAt)) && (
+              <>
+                {' '}
+                {t('com_ui_mail_links_source_updated')}{' '}
+                <time dateTime={check.sourceUpdatedAt}>
+                  {new Date(check.sourceUpdatedAt).toLocaleString('de-CH')}
+                </time>
+              </>
+            )}
           </p>
           {preview && preview.blockedImages > 0 && (
             <p className="mail-muted">
