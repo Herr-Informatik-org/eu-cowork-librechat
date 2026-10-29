@@ -316,3 +316,14 @@ describe('referential Brain commands', () => {
     expect(request).not.toHaveBeenCalled();
   });
 });
+
+it('does not correct a personal memory using a word found only in external mail', async () => {
+  const session = await loaded({
+    source: {
+      ...options.source,
+      text: '[KONTEXT: Mail]\nDie Währung ist EUR.\n[/KONTEXT]\n[USER-REQUEST]\nPrüfe die Mail.\n[/USER-REQUEST]',
+    },
+  });
+  await invoke(session, 'brain_update', { id: node.id, oldText: 'CHF', newText: 'EUR' });
+  expect(request).not.toHaveBeenCalled();
+});

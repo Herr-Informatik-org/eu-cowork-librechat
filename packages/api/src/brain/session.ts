@@ -7,6 +7,7 @@ import type { BrainConversationMessage } from './conversation';
 import { validateContextualFacts } from './evidence';
 import { containsBrainCredential } from './safety';
 import { isBrainConfigured, requestBrain } from './client';
+import { brainAuthoredText, buildBrainRecallQuery } from './query';
 
 export interface BrainSourceMessage {
   id: string;
@@ -101,6 +102,7 @@ export interface BrainSession {
   readonly context: string;
   readonly handledExplicitly?: boolean;
   remember: (candidates: BrainCandidate[], automatic?: boolean) => Promise<BrainIngestResult>;
+  learningContext?: (budget: number) => Promise<string>;
   initialize: () => Promise<string>;
   setContextBudget: (tokens: number) => void;
 }
@@ -126,6 +128,8 @@ export interface BrainSessionOptions {
   historical?: boolean;
   getBudget?: () => { remaining: number; revision: number } | undefined;
   countTokens?: (text: string) => Promise<number>;
+  recallQuery?: string;
+  retrieveLearningContext?: boolean;
 }
 
 export function contextualBrainIngestFacts(
@@ -181,7 +185,7 @@ export function groundedBrainFacts(
 ): BrainIngestFact[] {
   return candidates.flatMap((candidate) => {
     const quote = candidate.quote.trim();
-    if (!source.text.includes(quote)) {
+    if (!brainAuthoredText(source.text).includes(quote)) {
       return [];
     }
     if (candidate.supersedesId && !knownIds.has(candidate.supersedesId)) {
@@ -551,7 +555,7 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
               return 'Die Erinnerung wurde nicht geändert. Lade sie erneut und prüfe die Korrektur.';
             }
           }
-          if (!options.source.text.includes(newText)) {
+          if (!brainAuthoredText(options.source.text).includes(newText)) {
             return 'Der neue Text muss wörtlich aus dem aktuellen Benutzerbeitrag stammen.';
           }
           if (!oldText || !node.text.includes(oldText)) {
@@ -651,10 +655,29 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
       return initialContext;
     },
     async initialize() {
-      const result = await search(options.source.text, [], true);
+      const result = await search(
+        options.recallQuery ?? buildBrainRecallQuery({ text: options.source.text }),
+        [],
+        true,
+      );
       initialContext = result.output;
       return initialContext;
     },
+    ...(options.retrieveLearningContext
+      ? {
+          learningContext: async (budget: number) => {
+            if (budget < 128 || options.signal?.aborted) return '';
+            const result = await requestBrain<RecallResult>(options.userId, 'POST', '/v1/recall', {
+              query: options.recallQuery ?? buildBrainRecallQuery({ text: options.source.text }),
+              contextBudgetTokens: budget,
+              recordTrace: false,
+            });
+            if ((await count(result.context)) > budget) return '';
+            for (const node of result.nodes) knownIds.add(node.id);
+            return result.context;
+          },
+        }
+      : {}),
     setContextBudget(tokens: number) {
       options.contextBudgetTokens = Math.max(0, tokens);
     },

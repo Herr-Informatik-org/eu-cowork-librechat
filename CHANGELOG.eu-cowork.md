@@ -97,6 +97,21 @@
   einschliesslich Absender, Betreff und Kürzungshinweis ein. Lange Mails werden vor
   der Bestätigung sichtbar gekürzt und nicht erst vom sicheren Odoo-Werkzeug abgelehnt.
 
+## 2026-10-27 — Persönliches Wissen in Chats und Mailarbeit verwenden
+
+- Brain sucht nach dem eigentlichen Auftrag und berücksichtigt bei kurzen
+  Folgefragen den erlaubten Gesprächskontext. Lange fremde Mail- und Dokumenttexte
+  werden getrennt behandelt und nicht als eigene Präferenzbelege übernommen.
+- Laufendes Lernen erhält einen eigenen passenden Wissensabruf innerhalb seines
+  Modellbudgets. Der Brain-Dialog zeigt erfolgreiche, fehlgeschlagene und
+  unterbrochene Lernläufe; Fehler erhalten unterscheidbare Ursachenkennungen.
+- Die automatische Mailanalyse stellt dem gewählten Modell passende persönliche
+  Erinnerungen bereit. Opt-out und Zugriffsrechte gelten weiterhin. Eigene Regeln
+  lassen sich ausdrücklich für den Kontakt oder die allgemeine Mailarbeit merken.
+- Temporäre Chats bleiben ausgeschlossen; private Erinnerungen und Lernstatus
+  bleiben an das eigene Konto gebunden. Es entsteht keine automatische
+  Wiederholungswarteschlange für unterbrochene Modellanfragen.
+
 ## 2026-10-27 — Kompakte Mailbearbeitung und gezielte Folgeaktionen auf CW01
 
 - Eine schmale gemeinsame Statuszeile und Tastenkürzel lassen mehr Platz für Liste

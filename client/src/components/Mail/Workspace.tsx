@@ -25,6 +25,7 @@ import type {
   MailWorkspaceSettings,
   MailWorkspaceFolder,
   MailWorkspaceContent,
+  MailWorkspaceMemory,
 } from 'librechat-data-provider';
 import {
   useMailStatus,
@@ -53,6 +54,7 @@ import type { MailChatState } from './Chat';
 import { MailSignatureSettings } from './Signature';
 import { FolderPicker, useDoneFolder } from './Folders';
 import MailImages from './Images';
+import PersonalRule from './PersonalRule';
 import { MoveProgress, isMoveActive } from './Operations';
 import './workspace.css';
 
@@ -69,6 +71,12 @@ const draftStates: Record<MailWorkspaceResult['draftStatus'], TranslationKeys> =
   uncertain: 'com_ui_mail_draft_uncertain',
   existing: 'com_ui_mail_draft_existing',
   error: 'com_ui_mail_draft_error',
+};
+const memoryStates: Record<MailWorkspaceMemory['status'], TranslationKeys> = {
+  available: 'com_ui_mail_memory_used',
+  empty: 'com_ui_mail_memory_empty',
+  disabled: 'com_ui_mail_memory_disabled',
+  unavailable: 'com_ui_mail_memory_unavailable',
 };
 function date(value?: string, timeZone = 'Europe/Zurich') {
   if (!value || !Number.isFinite(Date.parse(value))) return '–';
@@ -232,6 +240,7 @@ function PersonalSettings({
         <h3>{t('com_ui_mail_processing')}</h3>
         <p className="mail-model">{status.modelLabel}</p>
         <p className="mail-muted">{t('com_ui_mail_privacy')}</p>
+        <p className="mail-muted">{t('com_ui_mail_memory_privacy')}</p>
         <label className="mail-check">
           <input
             type="checkbox"
@@ -542,6 +551,11 @@ const Detail = forwardRef<
         <span>{t(draftStates[result.draftStatus])}</span>
       </div>
       <p>{result.summary}</p>
+      {result.memory && (
+        <p className="mail-muted">
+          {t(memoryStates[result.memory.status], { count: result.memory.count })}
+        </p>
+      )}
       {result.questions.length > 0 && (
         <div className="mail-questions">
           <h4>{t('com_ui_mail_questions')}</h4>
@@ -689,6 +703,7 @@ const Detail = forwardRef<
         ) : (
           <section className="mail-summary">{summary}</section>
         ))}
+      <PersonalRule key={result.id} result={result} disabled={locked || busy || editing} />
       <div
         className="mail-tabs"
         role="tablist"

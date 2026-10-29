@@ -97,6 +97,18 @@ export interface MailAnalysis {
   reason: string;
   questions: string[];
   draft: string;
+  memory?: MailMemoryStatus;
+}
+
+export interface MailMemoryStatus {
+  status: 'available' | 'empty' | 'disabled' | 'unavailable';
+  count: number;
+}
+
+export interface MailRuleInput {
+  text: string;
+  scope: 'sender' | 'global';
+  revision: string;
 }
 
 export interface MailResult extends Omit<MailAnalysis, 'draft'> {
@@ -417,6 +429,10 @@ export interface MailRuntimeAdapter {
     beforeRequest: () => Promise<void>,
   ): Promise<string>;
   audit(ownerId: string, event: string, resultId?: string): Promise<void>;
+  rememberRule?(
+    ownerId: string,
+    input: { text: string; scope: 'sender' | 'global'; sender: string },
+  ): Promise<void>;
 }
 
 export interface MailAssistantStatus {
@@ -475,6 +491,7 @@ export interface MailAssistantEngine {
     revision: string,
   ): Promise<MailAttachmentDownload>;
   editDraft(owner: string, id: string, body: string, revision: string): Promise<void>;
+  rememberRule(owner: string, id: string, input: MailRuleInput): Promise<void>;
   tick(): Promise<void>;
   start(): void;
   stop(): void;

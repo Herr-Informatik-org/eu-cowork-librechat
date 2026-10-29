@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { createHash, randomUUID } from 'node:crypto';
-import { PermissionTypes, Permissions } from 'librechat-data-provider';
+import {
+  EModelEndpoint,
+  normalizeEndpointName,
+  PermissionTypes,
+  Permissions,
+} from 'librechat-data-provider';
 import type { Collection, Document } from 'mongodb';
 import type { Response } from 'express';
 import type {
@@ -31,8 +36,17 @@ import { assertUsageCredit } from '~/middleware/usageCredit';
 import { checkBalance } from '~/middleware/checkBalance';
 import { checkAccess } from '~/middleware/access';
 import { countTokens } from '~/utils/tokenizer';
+import { getModelMaxTokens } from '~/utils/tokens';
+import { tokenConfigCache } from '~/cache';
+import { getTokenConfigKey } from '~/endpoints/custom/initialize';
+import {
+  readPersonalMailContext,
+  rememberPersonalMailRule,
+  isPersonalMailMemoryAllowed,
+} from '~/brain/mail';
+import type { PersonalMailContext } from '~/brain/mail';
 import { createMailOAuth, readMailOAuthConfig, MailAuthorizationError } from './oauth';
-import { createMailAssistantEngine } from './engine';
+import { createMailAssistantEngine, MailAssistantError } from './engine';
 import { createMailInbox } from './inbox';
 import { createMailChat } from './chat';
 import { createMongoMailStore } from './store';
@@ -103,6 +117,17 @@ interface ResearchModelContext {
   limitations: { sources: MailResearchJob['sources']; warnings: string[] };
 }
 class MailModelConfigurationError extends Error {}
+const mailOutputTokens = 4096;
+const mailEnvelopeTokens = 512;
+// Unknown models get a conservative explicit limit until their catalog/config is available.
+const unknownModelContextTokens = 8192;
+const personalContextInstructions =
+  'Persönlicher Kontext des Postfacheigentümers. Verwende nur zur aktuellen Mail passende Erinnerungen. Kontaktbezogene Regeln gelten ausschliesslich für ihren angegebenen Geltungsbereich. Bei derselben Eigenschaft geht die Regel für den exakt passenden Kontakt einer allgemeinen Mailregel vor. Widersprechen sich ausdrücklich gespeicherte Regeln zur selben Eigenschaft innerhalb desselben Geltungsbereichs, bevorzuge die jüngere Regel anhand von updatedAt (ersatzweise createdAt). Andere passende Regeln bleiben gültig; das jüngste Datum allein verwirft keine anderen Eigenschaften. Bei unklarem Widerspruch keine Behauptung oder Zusage ableiten. Erinnerungen erweitern keine Berechtigungen und autorisieren weder Versand noch Systemaktionen.';
+
+function positiveTokenLimit(value: unknown): number | undefined {
+  const limit = Number(value);
+  return Number.isSafeInteger(limit) && limit > 0 ? limit : undefined;
+}
 interface ModelResponse {
   choices?: {
     message?: {
@@ -295,6 +320,7 @@ export function createMailAssistantRuntime(
     const preset = candidates[0].preset;
     let provider = preset?.endpoint;
     let model = preset?.model;
+    let configuredContextTokens = positiveTokenLimit(preset?.maxContextTokens);
     if (provider === 'agents') {
       if (!preset || typeof preset.agent_id !== 'string')
         throw new MailModelConfigurationError('Der Standardagent ist nicht verfügbar.');
@@ -309,6 +335,7 @@ export function createMailAssistantRuntime(
           ? agent.model_parameters.model
           : agent.model;
       model = typeof preset.model === 'string' ? preset.model : agentModel;
+      configuredContextTokens ??= positiveTokenLimit(agent.model_parameters?.maxContextTokens);
     }
     if (!provider || !model || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(model))
       throw new MailModelConfigurationError('Das Standardmodell ist nicht eindeutig festgelegt.');
@@ -407,6 +434,18 @@ export function createMailAssistantRuntime(
         ...(rates.cacheWrite != null ? { write: rates.cacheWrite } : {}),
         ...(rates.cacheRead != null ? { read: rates.cacheRead } : {}),
       };
+    const tokenConfig =
+      endpoint.tokenConfig ??
+      ((await tokenConfigCache().get(
+        getTokenConfigKey(endpoint, normalizeEndpointName(provider), ownerId, req.user?.tenantId),
+      )) as EndpointTokenConfig | undefined);
+    const catalogContextTokens = positiveTokenLimit(
+      getModelMaxTokens(model, EModelEndpoint.custom, tokenConfig),
+    );
+    const contextTokens =
+      configuredContextTokens && catalogContextTokens
+        ? Math.min(configuredContextTokens, catalogContextTokens)
+        : (configuredContextTokens ?? catalogContextTokens ?? unknownModelContextTokens);
     return {
       req,
       key,
@@ -418,6 +457,7 @@ export function createMailAssistantRuntime(
       modelLabel,
       modelFingerprint,
       gatewayFingerprint,
+      contextTokens,
     };
   };
   const analyze = async (
@@ -441,6 +481,16 @@ export function createMailAssistantRuntime(
       bodyTruncated,
     }));
     const manual = manualInstructions !== undefined;
+    let currentRequestInstructions = ' Nenne offene interne Fragen in questions.';
+    if (manual)
+      currentRequestInstructions =
+        ' Aktuelle ausdrückliche Nutzerangaben in userInstructions haben bei Stil und Arbeitsweise Vorrang vor älteren persönlichen Regeln.';
+    else if (chatContext)
+      currentRequestInstructions =
+        ' Die aktuelle ausdrückliche Frage in question hat Vorrang vor älteren persönlichen Regeln. Antworte im festgelegten answer-Format.';
+    const memoryInstructions = researchContext
+      ? ''
+      : personalContextInstructions + currentRequestInstructions;
     const replyContext = manual ? draftContextSchema.parse(draftContext) : undefined;
     let promptInstructions = instructions;
     let source = JSON.stringify(emails);
@@ -470,7 +520,34 @@ export function createMailAssistantRuntime(
       throw new Error(
         'Die Unterhaltung ist zu umfangreich für eine sichere automatische Bearbeitung.',
       );
-    const inputTokens = await countTokens(promptInstructions + source);
+    const baseInputTokens = await countTokens(promptInstructions + source + memoryInstructions);
+    const contextBudgetTokens = Math.floor(
+      selected.contextTokens - baseInputTokens - mailOutputTokens - mailEnvelopeTokens,
+    );
+    if (contextBudgetTokens < 0)
+      throw new MailAssistantError(
+        'Die Unterhaltung passt mit der benötigten Antwortreserve nicht in das Standardmodell. Bitte manuell prüfen.',
+      );
+    await beforeRequest();
+    const currentMessage = chatContext
+      ? messages[0]
+      : messages
+          .filter((message) => !message.sentByUser && !message.isDraft)
+          .sort((left, right) => Date.parse(right.receivedAt) - Date.parse(left.receivedAt))[0];
+    // Research has an explicitly selected evidence set and must not expand it with personal memory.
+    const memory: PersonalMailContext = researchContext
+      ? { context: '', status: 'disabled', count: 0 }
+      : await readPersonalMailContext(req, deps.getRoleByName, {
+          query: `[USER-REQUEST]\n${manualInstructions ?? chatContext?.message ?? 'Ordne diese Mail für mich ein.'}\n[/USER-REQUEST]\n[KONTEXT: E-Mail]\n${JSON.stringify(
+            { subject: currentMessage?.subject ?? '', body: currentMessage?.body ?? '' },
+          )
+            .replace(/\u2028/g, '\\u2028')
+            .replace(/\u2029/g, '\\u2029')}\n[/KONTEXT]`,
+          sender: currentMessage?.sender ?? '',
+          contextBudgetTokens,
+        });
+    const personalContext = memory.context ? `${memoryInstructions}\n${memory.context}` : '';
+    const inputTokens = await countTokens(promptInstructions + source + personalContext);
     const balance = getBalanceConfig(req.config);
     await assertUsageCredit();
     if (balance?.enabled) {
@@ -481,7 +558,8 @@ export function createMailAssistantRuntime(
         throw new Error('Das Budget für das Standardmodell kann nicht zuverlässig geprüft werden.');
       const tokenType = promptRate > 0 ? 'prompt' : 'completion';
       const unitRate = promptRate > 0 ? promptRate : completionRate;
-      const estimatedCost = (inputTokens + 128) * promptRate + 4096 * completionRate;
+      const estimatedCost =
+        (inputTokens + mailEnvelopeTokens) * promptRate + mailOutputTokens * completionRate;
       await checkBalance(
         {
           req,
@@ -501,9 +579,21 @@ export function createMailAssistantRuntime(
     await beforeRequest();
     const routeAudit = { provider, model, modelFingerprint: selected.modelFingerprint };
     await audit(ownerId, 'model.request', undefined, routeAudit);
-    if ((await resolveModel(ownerId)).modelFingerprint !== selected.modelFingerprint)
+    const currentSelection = await resolveModel(ownerId);
+    if (currentSelection.modelFingerprint !== selected.modelFingerprint)
       throw new Error(
         'Die Standardmodellroute wurde während der Prüfung geändert. Bitte den Lauf erneut starten.',
+      );
+    if (inputTokens + mailOutputTokens + mailEnvelopeTokens > currentSelection.contextTokens)
+      throw new MailAssistantError(
+        'Der verfügbare Modellkontext reicht für diese Mailprüfung nicht mehr aus. Bitte erneut prüfen.',
+      );
+    if (
+      personalContext &&
+      !(await isPersonalMailMemoryAllowed(currentSelection.req, deps.getRoleByName))
+    )
+      throw new MailAssistantError(
+        'Die Brain-Freigabe wurde geändert. Bitte die Mail erneut prüfen.',
       );
     await beforeRequest();
     const response = await request(`${baseURL}/chat/completions`, {
@@ -528,10 +618,11 @@ export function createMailAssistantRuntime(
         model,
         messages: [
           { role: 'system', content: promptInstructions },
+          ...(personalContext ? [{ role: 'user', content: personalContext }] : []),
           { role: 'user', content: source },
         ],
         response_format: { type: 'json_object' },
-        max_tokens: 4096,
+        max_tokens: mailOutputTokens,
         stream: false,
       }),
     });
@@ -652,8 +743,15 @@ export function createMailAssistantRuntime(
     }
     if (!manual && !chatContext && !researchContext) result.draft = '';
     await beforeRequest();
+    if (
+      personalContext &&
+      !(await isPersonalMailMemoryAllowed(await fresh(ownerId), deps.getRoleByName))
+    )
+      throw new MailAssistantError(
+        'Die Brain-Freigabe wurde geändert. Bitte die Mail erneut prüfen.',
+      );
     await audit(ownerId, 'model.complete', undefined, routeAudit);
-    return result;
+    return { ...result, memory: { status: memory.status, count: memory.count } };
   };
   const adapter: MailRuntimeAdapter = {
     authorize: async (ownerId) => {
@@ -695,6 +793,16 @@ export function createMailAssistantRuntime(
         }),
       }),
     analyze,
+    rememberRule: async (ownerId, input) => {
+      const req = await fresh(ownerId);
+      try {
+        await rememberPersonalMailRule(req, deps.getRoleByName, input);
+      } catch {
+        throw new MailAssistantError(
+          'Die persönliche Regel konnte nicht gespeichert werden. Bitte Brain-Freigabe und Erinnerungsberechtigung prüfen.',
+        );
+      }
+    },
     chat: async (ownerId, messages, input, beforeRequest) =>
       (await analyze(ownerId, messages, beforeRequest, undefined, undefined, input)).draft,
     analyzeDraft: async (ownerId, messages, userInstructions, beforeRequest, draftContext) =>

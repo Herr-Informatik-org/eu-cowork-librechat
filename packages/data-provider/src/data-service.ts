@@ -22,6 +22,7 @@ import type {
   MailWorkspacePriority,
   MailWorkspaceMoveRequest,
   MailWorkspaceMoveJob,
+  MailWorkspaceRule,
   MailFollowupProfile,
   MailFollowupTarget,
   MailFollowupSettings,
@@ -43,6 +44,7 @@ import type {
   BrainEdge,
   BrainExport,
   BrainHistoryStatus,
+  BrainLearningStatus,
   BrainRebuildStatus,
 } from './types/brain';
 import type * as t from './types';
@@ -150,6 +152,8 @@ export const enqueueMailWorkspaceMove = (
   request.post(endpoints.mailWorkspace('/move-jobs'), input);
 export const saveMailWorkspaceDraft = (id: string, body: string, revision: string): Promise<void> =>
   request.put(endpoints.mailWorkspaceResult(id, 'draft'), { body, revision });
+export const rememberMailWorkspaceRule = (id: string, rule: MailWorkspaceRule): Promise<void> =>
+  request.post(endpoints.mailWorkspaceResult(id, 'rule'), rule);
 
 export const getMailFollowupSettings = (signal?: AbortSignal): Promise<MailFollowupConfiguration> =>
   request.get(endpoints.mailWorkspace('/followup/settings'), { signal });
@@ -209,6 +213,10 @@ export const downloadMailWorkspaceAttachment = (
 
 export const getBrainHistory = (signal?: AbortSignal): Promise<BrainHistoryStatus> =>
   request.get(endpoints.brainHistory(), { signal });
+export const getBrainLearning = (
+  conversationId?: string,
+  signal?: AbortSignal,
+): Promise<BrainLearningStatus> => request.get(endpoints.brainLearning(conversationId), { signal });
 export const startBrainHistory = (): Promise<BrainHistoryStatus> =>
   request.post(endpoints.brainHistory(), {});
 export const pauseBrainHistory = (): Promise<BrainHistoryStatus> =>

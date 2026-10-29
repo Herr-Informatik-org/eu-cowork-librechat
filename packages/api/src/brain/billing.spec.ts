@@ -41,7 +41,10 @@ beforeEach(() => {
     llmConfig: { provider: Providers.OPENAI, model: 'learning-model' },
     endpointTokenConfig: targetPricing,
   });
-  learn.mockImplementation(async ({ onUsage }) => onUsage([]));
+  learn.mockImplementation(async ({ onUsage }) => {
+    await onUsage([]);
+    return { status: 'completed', saved: 0 };
+  });
 });
 
 describe('configured Brain learning billing', () => {
@@ -108,6 +111,7 @@ describe('contextual Brain budget checks', () => {
     learn.mockImplementation(async ({ beforeModelCall }) => {
       await beforeModelCall!(600, 1600);
       await beforeModelCall!(900, 1600);
+      return { status: 'completed', saved: 0 };
     });
     const configured = {
       req: { config: { memory: { maxInputTokens: 7000 } } },
@@ -141,7 +145,10 @@ describe('contextual Brain budget checks', () => {
   it('fails closed when a configured credit limit cannot be checked', async () => {
     const current = session();
     current.options.loadConversation = async () => [];
-    learn.mockImplementation(async ({ beforeModelCall }) => beforeModelCall!(500, 1600));
+    learn.mockImplementation(async ({ beforeModelCall }) => {
+      await beforeModelCall!(500, 1600);
+      return { status: 'completed', saved: 0 };
+    });
     await expect(
       learnConfiguredBrainWithUsage({
         session: current,

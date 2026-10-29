@@ -10,6 +10,8 @@ import type { BrainRebuildStatus } from 'librechat-data-provider';
 import { BrainHistoryError } from './history';
 import type { BrainFailureReporter } from './diagnostics';
 import { classifyBrainFailure, createBrainFailureReporter } from './diagnostics';
+import type { BrainLearningStore } from './status';
+import { isPersonalMailMemoryAllowed } from './mail';
 
 const queryKeys = new Set(['query', 'scope', 'cursor', 'limit', 'conversationId', 'generationId']);
 
@@ -27,10 +29,12 @@ export function getBrainProxyPath(req: Pick<Request, 'path' | 'query'>): string 
 export function createBrainRouter({
   getRoleByName,
   history,
+  learning,
   reportFailure = createBrainFailureReporter(),
 }: {
   getRoleByName: (roleName: string, fieldsToSelect?: string | string[]) => Promise<IRole | null>;
   history?: BrainHistoryService;
+  learning?: BrainLearningStore;
   reportFailure?: BrainFailureReporter;
 }): Router {
   const router = Router();
@@ -80,6 +84,31 @@ export function createBrainRouter({
   router.get('/status', access(Permissions.READ), (_req, res) => {
     res.json({ enabled: isBrainConfigured() });
   });
+  if (learning)
+    router.get('/learning', access(Permissions.READ), async (req, res) => {
+      const userId = (req.user as IUser | undefined)?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Bitte melde dich erneut an.' });
+        return;
+      }
+      try {
+        if (!(await isPersonalMailMemoryAllowed(req as ServerRequest, getRoleByName))) {
+          res.json({ status: 'disabled', saved: 0 });
+          return;
+        }
+        const conversationId = req.query.conversationId;
+        if (
+          conversationId !== undefined &&
+          (typeof conversationId !== 'string' || conversationId.length > 128)
+        ) {
+          res.status(400).json({ error: 'Der Chat ist ungültig.' });
+          return;
+        }
+        res.json(await learning.latest(String(userId), conversationId));
+      } catch {
+        res.status(503).json({ error: 'Der Lernstatus kann zurzeit nicht geladen werden.' });
+      }
+    });
   if (history) {
     const historyHandler =
       (operation: 'status' | 'start' | 'pause'): RequestHandler =>

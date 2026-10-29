@@ -25,6 +25,7 @@ import { brainKinds, kindColors, kindKeys, mergeBrainPages } from './layout';
 import Details, { CreateNode } from './Details';
 import Graph from './Graph';
 import History from './History';
+import Learning from './Learning';
 
 function RecallTrace({ nodes, onSelect }: { nodes: BrainNode[]; onSelect: (id: string) => void }) {
   const localize = useLocalize();
@@ -57,6 +58,9 @@ function RecallTrace({ nodes, onSelect }: { nodes: BrainNode[]; onSelect: (id: s
               ))
             )}
           </div>
+          {recall.diagnostics?.semantic.status === 'degraded' && (
+            <p className="brain-muted">{localize('com_ui_brain_recall_degraded')}</p>
+          )}
           {recall.hasMore && <p className="brain-muted">{localize('com_ui_brain_recall_more')}</p>}
         </>
       )}
@@ -260,6 +264,7 @@ export default function Workspace({
             <span>{localize('com_ui_brain_map_hint')}</span>
             <span>{localize('com_ui_brain_connection_count', { count: edges.length })}</span>
           </div>
+          {!isDraft && <Learning />}
           {!isDraft && <RecallTrace nodes={nodes} onSelect={select} />}
         </main>
         <div className="brain-rail">

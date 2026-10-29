@@ -6,6 +6,7 @@ import type {
   MailWorkspaceSettings,
   MailWorkspaceMoveRequest,
   MailWorkspaceMoveJob,
+  MailWorkspaceRule,
 } from 'librechat-data-provider';
 import { useRecoilValue } from 'recoil';
 import store from '~/store';
@@ -141,5 +142,28 @@ export function useMailActions() {
       dataService.saveMailWorkspaceDraft(id, body, revision),
     options,
   );
-  return { connect, settings, run, pause, disconnect, priority, move, enqueueMove, draft, refresh };
+  const rule = useMutation(
+    [MutationKeys.mailWorkspace, user?.id, 'rule'],
+    ({ id, ...input }: MailWorkspaceRule & { id: string }) =>
+      dataService.rememberMailWorkspaceRule(id, input),
+    {
+      retry: false,
+      networkMode: 'always',
+      onSuccess: () =>
+        Promise.all([refresh(), client.invalidateQueries([QueryKeys.brain, user?.id])]),
+    },
+  );
+  return {
+    connect,
+    settings,
+    run,
+    pause,
+    disconnect,
+    priority,
+    move,
+    enqueueMove,
+    draft,
+    rule,
+    refresh,
+  };
 }

@@ -314,6 +314,49 @@ async function requestDraft(f: ReturnType<typeof fixture>, instructions = '') {
 }
 
 describe('mail assistant deterministic safety boundary', () => {
+  it('stores only an explicit personal rule for the owned result and never learns incoming mail text', async () => {
+    const f = fixture();
+    f.adapter.rememberRule = jest.fn(async () => undefined);
+    await f.engine.run(f.owner);
+    expect(f.adapter.rememberRule).not.toHaveBeenCalled();
+    const [result] = (await f.engine.status(f.owner)).results;
+    const input = {
+      text: 'Bei diesem Kontakt immer kurz antworten.',
+      scope: 'sender' as const,
+      revision: result.revision!,
+    };
+    await f.engine.rememberRule(f.owner, result.id, input);
+    expect(f.adapter.rememberRule).toHaveBeenCalledWith(f.owner, {
+      text: input.text,
+      scope: 'sender',
+      sender: f.message.sender,
+    });
+    expect(JSON.stringify(jest.mocked(f.adapter.rememberRule).mock.calls)).not.toContain(
+      f.message.body,
+    );
+    expect(f.graph.editDraft).not.toHaveBeenCalled();
+  });
+  it('rejects stale or foreign rule targets and refuses to save after consent or audit failure', async () => {
+    const f = fixture();
+    f.adapter.rememberRule = jest.fn(async () => undefined);
+    await f.engine.run(f.owner);
+    const [result] = (await f.engine.status(f.owner)).results;
+    const input = {
+      text: 'Mailantworten bitte immer kurz halten.',
+      scope: 'global' as const,
+      revision: result.revision!,
+    };
+    await expect(
+      f.engine.rememberRule(f.owner, result.id, { ...input, revision: '0'.repeat(64) }),
+    ).rejects.toThrow();
+    await expect(f.engine.rememberRule(f.owner, 'not-owned', input)).rejects.toThrow();
+    await expect(f.engine.rememberRule('other', result.id, input)).rejects.toThrow();
+    jest.mocked(f.adapter.audit).mockRejectedValueOnce(Error('audit unavailable'));
+    await expect(f.engine.rememberRule(f.owner, result.id, input)).rejects.toThrow();
+    f.jobs.get(f.owner)!.settings.consentVersion = 'old';
+    await expect(f.engine.rememberRule(f.owner, result.id, input)).rejects.toThrow();
+    expect(f.adapter.rememberRule).not.toHaveBeenCalled();
+  });
   function historyFixture() {
     const f = fixture();
     const job = f.jobs.get(f.owner)!;

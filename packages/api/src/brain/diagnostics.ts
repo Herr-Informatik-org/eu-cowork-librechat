@@ -40,6 +40,15 @@ const messages = {
     'Das verfügbare Guthaben reicht nicht aus oder konnte nicht geprüft werden. Der Import ist angehalten.',
   history_stopped:
     'Die Verarbeitung wurde angehalten. Bereits abgeschlossene Beiträge bleiben erhalten.',
+  review_context_budget:
+    'Der Gesprächskontext passt nicht in das Fenster des Lernmodells. Bitte die Brain-Konfiguration prüfen.',
+  review_missing_capture:
+    'Das Lernmodell hat kein gültiges abschliessendes Prüfergebnis geliefert. Bitte Modell und Werkzeugunterstützung prüfen.',
+  review_source_changed:
+    'Die Quelle, Berechtigung oder Brain-Konfiguration wurde während des Lernens geändert.',
+  review_candidate_limit:
+    'Der Chat enthält zu viele offene Wissenskandidaten. Der Zwischenstand bleibt zur Prüfung erhalten.',
+  review_checkpoint_mismatch: 'Der gespeicherte Prüfstand passt nicht mehr zum Originalgespräch.',
   interrupted:
     'Die Verarbeitung wurde durch einen Dienstunterbruch angehalten. Beim Fortsetzen kann eine noch offene Modellanfrage erneut Kosten verursachen.',
   unknown:

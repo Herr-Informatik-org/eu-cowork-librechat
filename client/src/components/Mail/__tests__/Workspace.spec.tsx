@@ -30,6 +30,7 @@ const mockRun = jest.fn();
 const mockPause = jest.fn();
 const mockMove = jest.fn();
 const mockSave = jest.fn();
+const mockRule = jest.fn();
 const mockNext = jest.fn();
 const mockResults = jest.fn();
 const mockMutation = (mutate = jest.fn()) => ({
@@ -48,6 +49,7 @@ const mockActions = () => ({
   move: mockMutation(),
   enqueueMove: mockMutation(mockMove),
   draft: mockMutation(mockSave),
+  rule: mockMutation(mockRule),
   refresh: jest.fn(),
 });
 jest.mock('react-router-dom', () => ({
@@ -591,6 +593,77 @@ it('stops queued operations only when the user requests it', () => {
   expect(mockPause).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Aufträge und Analyse anhalten' }));
   expect(mockPause).toHaveBeenCalledTimes(1);
+});
+
+it('keeps corrections mail-local unless the user writes and selects a reusable personal rule', () => {
+  mount();
+  chooseMail();
+  fireEvent.click(screen.getByText('Aus meiner Korrektur lernen'));
+  expect(screen.getByRole('combobox', { name: 'Geltungsbereich' })).toHaveValue('message');
+  expect(mockRule).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole('textbox', { name: 'Meine persönliche Regel' }),
+  ).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Geltungsbereich' }), {
+    target: { value: 'sender' },
+  });
+  const rule = screen.getByRole('textbox', { name: 'Meine persönliche Regel' });
+  expect(rule).toHaveValue('');
+  fireEvent.change(rule, { target: { value: 'Für diesen Kontakt keine langen Einleitungen.' } });
+  fireEvent.keyDown(rule, { key: 'Enter' });
+  fireEvent.keyDown(rule, { key: 'Enter', ctrlKey: true, isComposing: true });
+  fireEvent.keyDown(rule, { key: 'Enter', ctrlKey: true, repeat: true });
+  expect(mockRule).not.toHaveBeenCalled();
+  fireEvent.keyDown(rule, { key: 'Enter', ctrlKey: true });
+  fireEvent.keyDown(rule, { key: 'Enter', ctrlKey: true });
+  expect(mockRule).toHaveBeenCalledTimes(1);
+  expect(mockRule.mock.calls[0][0]).toEqual({
+    id: 'result',
+    revision: 'result-revision',
+    scope: 'sender',
+    text: 'Für diesen Kontakt keine langen Einleitungen.',
+  });
+  expect(mockSave).not.toHaveBeenCalled();
+});
+
+it('keeps explicit personal rules separate from original mail and research context', () => {
+  mount();
+  chooseMail();
+  const summary = screen.getByText('Aus meiner Korrektur lernen');
+  fireEvent.click(summary);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Geltungsbereich' }), {
+    target: { value: 'global' },
+  });
+  const input = screen.getByRole('textbox', { name: 'Meine persönliche Regel' });
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+  expect(mockRule).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: 'Ich bevorzuge kurze Antworten ohne Einleitung.' } });
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+  expect(mockRule).toHaveBeenCalledWith(
+    {
+      id: 'result',
+      revision: 'result-revision',
+      scope: 'global',
+      text: 'Ich bevorzuge kurze Antworten ohne Einleitung.',
+    },
+    expect.any(Object),
+  );
+  fireEvent.keyDown(input, { key: 'Escape' });
+  expect(summary).toHaveFocus();
+  expect(summary.closest('details')).not.toHaveAttribute('open');
+  expect(mockSave).not.toHaveBeenCalled();
+  expect(mockChat).not.toHaveBeenCalled();
+});
+
+it('shows the recorded personal memory status without learning from displayed mail content', () => {
+  mockRows[0].memory = { status: 'available', count: 2 };
+  mount();
+  chooseMail();
+  expect(
+    screen.getByText('2 persönliche Erinnerungen bei der Analyse berücksichtigt.'),
+  ).toBeInTheDocument();
+  expect(mockRule).not.toHaveBeenCalled();
+  expect(mockChat).not.toHaveBeenCalled();
 });
 
 it('keeps move and analysis progress together with collapsed statistics', () => {

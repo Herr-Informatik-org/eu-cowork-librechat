@@ -73,6 +73,7 @@ export function mergeBrainCandidates(
   if (result.size > 1000)
     throw new BrainOperationError(
       'Dieser Chat enthält zu viele offene Wissenskandidaten. Der Import bleibt zur Prüfung pausiert.',
+      'review_candidate_limit',
     );
   return [...result.values()];
 }
@@ -135,6 +136,7 @@ export async function brainReviewParts(
       if (end <= start)
         throw new BrainOperationError(
           'Das Lernmodell bietet zu wenig Kontext für diesen Gesprächsabschnitt.',
+          'review_context_budget',
         );
       parts.push({ ...message, text: message.text.slice(start, end) });
       start = end;
@@ -255,7 +257,10 @@ export async function reviewBrainConversation(
   let state = options.checkpoint ?? { position: 0, candidates: [], phase: 'extract' as const };
   const persist = async (next: BrainReviewCheckpoint) => {
     if (!(await options.canContinue()))
-      throw new BrainOperationError('Gespräch oder Berechtigung wurde inzwischen geändert.');
+      throw new BrainOperationError(
+        'Gespräch oder Berechtigung wurde inzwischen geändert.',
+        'review_source_changed',
+      );
     await options.onCheckpoint(next);
     state = next;
   };
@@ -272,7 +277,10 @@ export async function reviewBrainConversation(
   });
   const baseTokens = await countTokens(brainReviewInstructions + environment);
   if (inputBudget - baseTokens < 2048)
-    throw new BrainOperationError('Für die Gesprächsanalyse ist zu wenig Modellkontext verfügbar.');
+    throw new BrainOperationError(
+      'Für die Gesprächsanalyse ist zu wenig Modellkontext verfügbar.',
+      'review_context_budget',
+    );
   const parts = await brainReviewParts(
     messages,
     Math.floor((inputBudget - baseTokens) / 3),
@@ -293,11 +301,15 @@ export async function reviewBrainConversation(
   ): Promise<void> => {
     options.signal?.throwIfAborted();
     if (!(await options.canContinue()))
-      throw new BrainOperationError('Gespräch oder Berechtigung wurde inzwischen geändert.');
+      throw new BrainOperationError(
+        'Gespräch oder Berechtigung wurde inzwischen geändert.',
+        'review_source_changed',
+      );
     const inputTokens = await countTokens(instructions + environment + payload);
     if (inputTokens > inputBudget)
       throw new BrainOperationError(
         'Die Gesprächsanalyse benötigt mehr Kontext. Bitte das Kontextfenster des Lernmodells erhöhen; der Zwischenstand bleibt erhalten.',
+        'review_context_budget',
       );
     await options.beforeModelCall?.(inputTokens, 1600);
     const { handleLLMEnd, collected } = createMetadataAggregator();
@@ -342,6 +354,7 @@ export async function reviewBrainConversation(
       if (result === undefined)
         throw new BrainOperationError(
           'Das Modell hat keine abschliessende Wissensprüfung geliefert.',
+          'review_missing_capture',
         );
       await accept(result);
     } catch (error) {
@@ -378,6 +391,7 @@ export async function reviewBrainConversation(
     if (end <= state.position)
       throw new BrainOperationError(
         'Der gespeicherte Gesprächskontext übersteigt das Modellfenster. Bitte ein grösseres Kontextfenster konfigurieren.',
+        'review_context_budget',
       );
     const schema = z.object({
       facts: z.array(contextualFactSchema).max(40),
@@ -442,12 +456,14 @@ export async function reviewBrainConversation(
       if (state.verification)
         throw new BrainOperationError(
           'Die laufende Belegprüfung passt nicht mehr in das Modellfenster. Der Zwischenstand bleibt erhalten.',
+          'review_context_budget',
         );
       batch = batch.slice(0, Math.floor(batch.length / 2));
     }
     if (!batch.length)
       throw new BrainOperationError(
         'Die Belege passen nicht in das Modellfenster. Der Zwischenstand bleibt zur Prüfung erhalten.',
+        'review_context_budget',
       );
     if (!fullContext) {
       const cursor = state.verification?.cursor;
@@ -461,6 +477,7 @@ export async function reviewBrainConversation(
       )
         throw new BrainOperationError(
           'Der gespeicherte Prüfstand passt nicht mehr zum Originalgespräch.',
+          'review_checkpoint_mismatch',
         );
       let previousPart: BrainReviewSourcePart | undefined;
       const remaining = verificationParts.flatMap((part) => {
@@ -514,6 +531,7 @@ export async function reviewBrainConversation(
         if (end <= position)
           throw new BrainOperationError(
             'Ein Gesprächsabschnitt passt nicht in die Belegprüfung. Der Zwischenstand bleibt erhalten.',
+            'review_context_budget',
           );
         await invoke(
           z.object({ acceptedIds: z.array(z.string()).max(12) }),

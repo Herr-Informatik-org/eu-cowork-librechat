@@ -20,6 +20,15 @@ export type MailWorkspaceChatResponse = {
 export type MailWorkspacePriority = 'important' | 'normal' | 'low';
 /** Last recorded Outlook action; absence means unknown, not unanswered. */
 export type MailWorkspaceResponseAction = 'replied' | 'forwarded';
+export type MailWorkspaceRule = {
+  text: string;
+  scope: 'sender' | 'global';
+  revision: string;
+};
+export type MailWorkspaceMemory = {
+  status: 'available' | 'empty' | 'disabled' | 'unavailable';
+  count: number;
+};
 export type MailWorkspaceSettings = {
   signature?: MailSignature;
   enabled: boolean;
@@ -53,6 +62,7 @@ export type MailWorkspaceResult = {
   moveStatus?: 'completed' | 'uncertain';
   doneFolder?: string;
   draftWarnings?: string[];
+  memory?: MailWorkspaceMemory;
 };
 export type MailWorkspaceStatus = {
   available: boolean;

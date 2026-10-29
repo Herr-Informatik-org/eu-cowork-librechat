@@ -25,6 +25,7 @@ import {
 } from './ongoing';
 import { getAppConfigOptionsFromUser } from '~/app/service';
 import type { GetAppConfigOptions } from '~/app/service';
+import { buildBrainRecallQuery } from './query';
 
 interface PrepareBrainTurnOptions {
   reportFailure?: BrainFailureReporter;
@@ -40,6 +41,12 @@ interface PrepareBrainTurnOptions {
     createdAt?: string | Date;
     content?: BrainStoredMessage['content'];
   };
+  recallMessages?: Array<{
+    text?: string;
+    content?: BrainStoredMessage['content'];
+    isCreatedByUser?: boolean;
+    addedConvo?: boolean;
+  }>;
   getBudget: BrainSessionOptions['getBudget'];
   countTokens: BrainSessionOptions['countTokens'];
   dependencies: {
@@ -65,6 +72,7 @@ export async function prepareBrainTurn({
   conversationId,
   messageId,
   sourceMessage,
+  recallMessages,
   getBudget,
   countTokens,
   dependencies,
@@ -194,6 +202,16 @@ export async function prepareBrainTurn({
     conversationId,
     messageId,
     source,
+    recallQuery: buildBrainRecallQuery({
+      text: source.text,
+      previousMessages: (recallMessages ?? [])
+        .filter((message) => !message.addedConvo && typeof message.isCreatedByUser === 'boolean')
+        .map((message) => ({
+          text: conversationText(message),
+          role: message.isCreatedByUser ? 'user' : 'assistant',
+        })),
+    }),
+    retrieveLearningContext: true,
     contextBudgetTokens: 0,
     canWrite,
     canUpdate,

@@ -11,6 +11,7 @@ import type { BrainSession } from './session';
 import { mapCollectedMetadataToUsage } from '~/agents/activityLabels/host';
 import { recordCollectedUsage } from '~/agents/usage';
 import { learnBrainTurn } from './learning';
+import type { BrainLearningOutcome } from './learning';
 import type { BrainLearningModelOptions } from './model';
 import { resolveBrainLearningModel } from './model';
 
@@ -26,16 +27,16 @@ export async function learnConfiguredBrainWithUsage({
   modelOptions: BrainLearningModelOptions;
   dependencies: RecordUsageDeps;
   usageConfig: Pick<RecordUsageParams, 'balance' | 'transactions'>;
-}): Promise<void> {
+}): Promise<BrainLearningOutcome> {
   if (
     session.handledExplicitly ||
     !session.options.canWrite ||
     (session.options.canPersist && !(await session.options.canPersist()))
   ) {
-    return;
+    return { status: session.options.signal?.aborted ? 'interrupted' : 'skipped', saved: 0 };
   }
   const resolved = await resolveBrainLearningModel(modelOptions);
-  if (!resolved) return;
+  if (!resolved) return { status: 'disabled', saved: 0 };
   const configured = modelOptions.req?.config?.memory?.agent;
   const configuredCapacity =
     configured && 'model_parameters' in configured
@@ -57,7 +58,7 @@ export async function learnConfiguredBrainWithUsage({
   const outputTokens = Number(
     limits.maxTokens ?? limits.maxOutputTokens ?? limits.maxCompletionTokens ?? 4096,
   );
-  await learnBrainWithUsage({
+  return learnBrainWithUsage({
     session,
     llmConfig: resolved.llmConfig,
     dependencies,
@@ -114,8 +115,8 @@ export async function learnBrainWithUsage({
   llmConfig: LLMConfig;
   dependencies: RecordUsageDeps;
   usageConfig: Pick<RecordUsageParams, 'balance' | 'transactions' | 'endpointTokenConfig'>;
-}): Promise<void> {
-  await learnBrainTurn({
+}): Promise<BrainLearningOutcome> {
+  return learnBrainTurn({
     session,
     llmConfig,
     inputBudget,

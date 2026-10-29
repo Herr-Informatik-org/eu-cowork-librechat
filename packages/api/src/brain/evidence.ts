@@ -2,6 +2,7 @@ import type { BrainCandidate } from './session';
 import type { BrainConversationMessage } from './conversation';
 import { compatibleBrainEvidence } from './conversation';
 import { containsBrainCredential } from './safety';
+import { brainAuthoredText } from './query';
 
 function storageText(value: unknown, max: number): value is string {
   return (
@@ -88,7 +89,10 @@ export function validateContextualFacts(
           containsBrainCredential(evidence.quote)
         )
           return false;
-        if (message.role === 'user') hasUser = true;
+        if (message.role === 'user') {
+          if (!brainAuthoredText(message.text).includes(evidence.quote)) return false;
+          hasUser = true;
+        }
       }
       return hasUser;
     })

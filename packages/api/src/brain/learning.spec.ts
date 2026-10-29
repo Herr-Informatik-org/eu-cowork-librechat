@@ -147,7 +147,7 @@ describe('Brain learning using the active provider', () => {
       canPersist,
     });
     const onUsage = jest.fn(async (_metadata: BrainLearningMetadata) => {});
-    await learnBrainTurn({
+    const outcome = await learnBrainTurn({
       session,
       llmConfig: {
         provider: Providers.OPENAI,
@@ -157,6 +157,7 @@ describe('Brain learning using the active provider', () => {
       },
       onUsage,
     });
+    expect(outcome).toEqual({ status: 'interrupted', saved: 0 });
     expect(canPersist).toHaveBeenCalledTimes(2);
     expect(captured).toHaveLength(before);
     expect(onUsage.mock.calls[0][0].length).toBeGreaterThan(0);
