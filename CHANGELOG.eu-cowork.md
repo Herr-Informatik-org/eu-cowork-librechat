@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-30 — Ruhige Mailvorschau mit sichtbaren Linkaktionen
+
+- Hinweise zu Vorschau, Linkprüfung und Bildern stehen hinter «Info» neben
+  «Kopieren». Die Mail selbst beginnt direkt unter der Werkzeugleiste.
+- Ein Klick auf einen freigegebenen Mail-Link zeigt das Ziel mit «In neuem Tab
+  öffnen» und einer Kopiermöglichkeit. Microsoft Safe Links bleiben erhalten.
+- Die Vorschau bleibt vom Anwendungsursprung getrennt. Nur eine statische,
+  per CSP-Hash freigegebene Klickvermittlung darf Linkindizes melden; Ziel und
+  aktuelle Freigabe werden nochmals im übergeordneten Fenster geprüft.
+
+
 ## 2026-10-29 — Kompakte lokale Ordnerauswahl
 
 - Ein kleiner Ordnerknopf zeigt den gewählten Namen und öffnet eine kompakte Liste

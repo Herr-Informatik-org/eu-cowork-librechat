@@ -1382,3 +1382,11 @@
   padding: 5px 20px;
   font-size: 12px;
 }
+
+.mail-preview-info {
+  margin: 10px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--surface-secondary);
+}
