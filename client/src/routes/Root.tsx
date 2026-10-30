@@ -20,6 +20,7 @@ import KeyboardShortcutsDialog from '~/components/Nav/KeyboardShortcutsDialog';
 import KeyboardDeleteDialog from '~/components/Nav/KeyboardDeleteDialog';
 import { useUserTermsQuery, useGetStartupConfig } from '~/data-provider';
 import useKeyboardShortcuts from '~/hooks/useKeyboardShortcuts';
+import { BrainDialogProvider } from '~/components/Brain/Dialog';
 import { UnifiedSidebar } from '~/components/UnifiedSidebar';
 import { TermsAndConditionsModal } from '~/components/ui';
 import { useHealthCheck } from '~/data-provider';
@@ -79,42 +80,46 @@ export default function Root() {
 
   return (
     <SetConvoProvider>
-      <FileMapContext.Provider value={fileMap}>
-        <AssistantsMapContext.Provider value={assistantsMap}>
-          <AgentsMapContext.Provider value={agentsMap}>
-            <PromptGroupsProvider>
-              <Banner onHeightChange={setBannerHeight} />
-              <div className="flex" style={{ height: `calc(100dvh - ${bannerHeight}px)` }}>
-                <div className="relative z-0 flex h-full w-full overflow-hidden">
-                  <UnifiedSidebar />
-                  <div
-                    className="relative flex h-full max-w-full flex-1 flex-col overflow-hidden"
-                    style={{
-                      transform:
-                        isSmallScreen && sidebarExpanded ? 'translateX(min(85vw, 380px))' : 'none',
-                      transition: 'transform 300ms cubic-bezier(0.2, 0, 0, 1)',
-                    }}
-                    inert={isSmallScreen && sidebarExpanded ? '' : undefined}
-                  >
-                    <Outlet />
+      <BrainDialogProvider>
+        <FileMapContext.Provider value={fileMap}>
+          <AssistantsMapContext.Provider value={assistantsMap}>
+            <AgentsMapContext.Provider value={agentsMap}>
+              <PromptGroupsProvider>
+                <Banner onHeightChange={setBannerHeight} />
+                <div className="flex" style={{ height: `calc(100dvh - ${bannerHeight}px)` }}>
+                  <div className="relative z-0 flex h-full w-full overflow-hidden">
+                    <UnifiedSidebar />
+                    <div
+                      className="relative flex h-full max-w-full flex-1 flex-col overflow-hidden"
+                      style={{
+                        transform:
+                          isSmallScreen && sidebarExpanded
+                            ? 'translateX(min(85vw, 380px))'
+                            : 'none',
+                        transition: 'transform 300ms cubic-bezier(0.2, 0, 0, 1)',
+                      }}
+                      inert={isSmallScreen && sidebarExpanded ? '' : undefined}
+                    >
+                      <Outlet />
+                    </div>
                   </div>
                 </div>
-              </div>
-            </PromptGroupsProvider>
-          </AgentsMapContext.Provider>
-          {config?.interface?.termsOfService?.modalAcceptance === true && (
-            <TermsAndConditionsModal
-              open={showTerms}
-              onOpenChange={setShowTerms}
-              onAccept={handleAcceptTerms}
-              onDecline={handleDeclineTerms}
-              title={config.interface.termsOfService.modalTitle}
-              modalContent={config.interface.termsOfService.modalContent}
-            />
-          )}
-          <KeyboardShortcutsProvider />
-        </AssistantsMapContext.Provider>
-      </FileMapContext.Provider>
+              </PromptGroupsProvider>
+            </AgentsMapContext.Provider>
+            {config?.interface?.termsOfService?.modalAcceptance === true && (
+              <TermsAndConditionsModal
+                open={showTerms}
+                onOpenChange={setShowTerms}
+                onAccept={handleAcceptTerms}
+                onDecline={handleDeclineTerms}
+                title={config.interface.termsOfService.modalTitle}
+                modalContent={config.interface.termsOfService.modalContent}
+              />
+            )}
+            <KeyboardShortcutsProvider />
+          </AssistantsMapContext.Provider>
+        </FileMapContext.Provider>
+      </BrainDialogProvider>
     </SetConvoProvider>
   );
 }

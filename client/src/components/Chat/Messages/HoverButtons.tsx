@@ -5,6 +5,7 @@ import type { TConversation, TMessage, TFeedback } from 'librechat-data-provider
 import { useGenerationsByLatest, useLocalize } from '~/hooks';
 import { Fork } from '~/components/Conversations';
 import MessageAudio from './MessageAudio';
+import { MessageUsage } from '~/components/Brain/Usage';
 import Feedback from './Feedback';
 import { cn } from '~/utils';
 import store from '~/store';
@@ -209,6 +210,10 @@ const HoverButtons = ({
             />
           )}
         />
+      )}
+
+      {!isCreatedByUser && (
+        <MessageUsage conversationId={conversation.conversationId} messageId={message.messageId} />
       )}
 
       {/* Copy Button */}

@@ -168,7 +168,7 @@ describe('Personal mail HTTP boundary', () => {
         move: jest.fn(),
         moveJobs: jest.fn(),
         enqueueMove: jest.fn(),
-        editDraft: jest.fn(),
+        editDraft: jest.fn(async () => ({})),
         rememberRule: jest.fn(),
         requestDraft: jest.fn(),
         attachments: jest.fn(),
@@ -295,7 +295,7 @@ describe('Personal mail HTTP boundary', () => {
       .put('/api/agents/office/mail-assistant/results/result-1/draft')
       .set('authorization', 'Bearer fixture')
       .send({ body: 'Explicit edited reply', revision })
-      .expect(204);
+      .expect(200);
     expect(runtime.engine.editDraft).toHaveBeenCalledWith(
       owner,
       'result-1',

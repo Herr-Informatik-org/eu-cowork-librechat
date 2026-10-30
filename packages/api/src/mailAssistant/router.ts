@@ -327,8 +327,7 @@ export function createMailAssistantRouter(runtime: MailAssistantRuntime | null):
         })
         .strict()
         .parse(req.body);
-      await runtime!.engine.editDraft(owner(req), id, body.body, body.revision);
-      res.status(204).end();
+      res.json(await runtime!.engine.editDraft(owner(req), id, body.body, body.revision));
     }),
   );
   router.post(

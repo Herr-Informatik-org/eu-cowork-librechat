@@ -1,5 +1,20 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-30 — Persönliches Wissen gezielter nutzen und weiterentwickeln
+
+- Chat und Mail verwenden den gemeinsamen Brain-Abruf mit passendem Geltungsbereich.
+  Neue automatische Erinnerungen übernehmen keine erfundenen Ablaufdaten; eigene
+  dauerhafte Regeln bleiben von einmaligen Änderungen und fremden Inhalten getrennt.
+- Ein Brain-Info-Knopf zeigt die zur jeweiligen Antwort bereitgestellten Erinnerungen
+  mit Quellen und Geltungsbereich. Bestätigte Abrufbelege gehören zur konkreten
+  Antwort; eine blosse Suche wird nicht als bereitgestellter Kontext ausgewiesen.
+- Ausdrückliche dauerhafte Stilkorrekturen im Mail-Chat können gelernt werden.
+  Beim Speichern eines überarbeiteten Entwurfs bleibt eine mögliche persönliche
+  Regel ein editierbarer Vorschlag mit gesonderter Speicherung.
+- Die Brain-Qualitätsvorschau bietet auswählbare Korrekturen und getrennte
+  Prüfbefunde. Eine vorbereitete Version wird erst über den vorhandenen
+  Aktivierungsweg verwendet; Originale bleiben innerhalb der Rückkehrfrist erhalten.
+
 ## 2026-10-30 — JSON- und XML-Exporte herunterladen
 
 - Dateikarten laden gespeicherte Dateien über den berechtigten Dateiweg herunter.

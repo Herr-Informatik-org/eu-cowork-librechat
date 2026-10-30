@@ -2206,6 +2206,32 @@ describe('personal mail workspace mutations', () => {
     ).rejects.toThrow('inzwischen geändert');
     expect(f.graph.editDraft).toHaveBeenCalledTimes(1);
   });
+  test('a shortened draft only offers a reviewable contact rule without writing personal memory', async () => {
+    const f = await processed();
+    f.graph.message.mockImplementation(async (id) => ({
+      ...f.message,
+      id,
+      isDraft: id === 'draft-id',
+    }));
+    f.graph.editableReply.mockResolvedValue({
+      text: 'Ausführliche Antwort. '.repeat(30),
+      etag: 'W/"draft-v1"',
+    });
+    const remember = jest.fn(async () => {});
+    f.adapter.rememberRule = remember;
+    const content = await f.engine.content(f.owner, f.result.id);
+    const outcome = await f.engine.editDraft(
+      f.owner,
+      f.result.id,
+      'Danke für Ihre Nachricht. Wir prüfen die offene Anfrage.',
+      content.draft!.revision!,
+    );
+    expect(outcome.ruleProposal).toMatchObject({
+      scope: 'sender',
+      text: expect.stringContaining('knapp'),
+    });
+    expect(remember).not.toHaveBeenCalled();
+  });
   test('unknown draft save outcome blocks further changes and hides the editor', async () => {
     const f = await processed();
     f.graph.message.mockImplementation(async (id) => ({

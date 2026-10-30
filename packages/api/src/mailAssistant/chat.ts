@@ -144,15 +144,23 @@ export function createMailChat({
         }
       }
       await guard();
+      const generated = await adapter.chat(owner, messages, parsed, guard);
       const answer = z
         .string()
         .trim()
         .min(1)
         .max(12000)
-        .parse(await adapter.chat(owner, messages, parsed, guard));
+        .parse(typeof generated === 'string' ? generated : generated.text);
       await guard();
       await adapter.audit(owner, 'mail_chat_completed', id);
-      return { answer, modelLabel: model.modelLabel, sources };
+      return {
+        answer,
+        modelLabel: model.modelLabel,
+        sources,
+        ...(typeof generated !== 'string'
+          ? { memory: generated.memory, learning: generated.learning }
+          : {}),
+      };
     } finally {
       pending.delete(owner);
     }

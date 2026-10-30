@@ -100,7 +100,7 @@ describe('personal Brain scope and grounding', () => {
     expect(session.knownIds.size).toBe(0);
   });
   it('retains a large fitting recall without escaping or duplicating its source text', async () => {
-    const context = 'Projekt \"Atlas\"\n'.repeat(1000);
+    const context = 'Projekt "Atlas"\n'.repeat(1000);
     jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -166,6 +166,47 @@ describe('personal Brain scope and grounding', () => {
     await session.tools[0].invoke({ query: 'Projekt', seedIds: [] });
     expect(requests[2].contextBudgetTokens).toBe(requests[0].contextBudgetTokens);
   });
+  it.each([false, true])(
+    'confirms only budget-accepted context for the exact assistant reply: %s',
+    async (oversized) => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(
+        async (url) =>
+          new Response(
+            JSON.stringify(
+              String(url).endsWith('/confirm')
+                ? { confirmed: true }
+                : {
+                    context: oversized ? 'x'.repeat(20000) : 'Own memory',
+                    nodes: [],
+                    edges: [],
+                    recall: { id: 'trace-1' },
+                    hasMore: false,
+                    suggestedIds: [],
+                    stopReason: 'fertig',
+                  },
+            ),
+            { status: 200 },
+          ),
+      );
+      const session = createBrainSession({
+        userId: 'owner',
+        conversationId: 'conversation',
+        messageId: 'assistant-response',
+        source,
+        contextBudgetTokens: 4000,
+        canWrite: false,
+        canUpdate: false,
+        countTokens: async (text) => text.length,
+      });
+      await session.tools[0].invoke({ query: 'Präferenz', seedIds: [] });
+      const confirms = fetchSpy.mock.calls.filter(([url]) => String(url).endsWith('/confirm'));
+      expect(confirms).toHaveLength(oversized ? 0 : 1);
+      if (!oversized)
+        expect(JSON.parse(String(confirms[0][1]?.body))).toEqual({
+          messageId: 'assistant-response',
+        });
+    },
+  );
   it('replaces legacy writes without mutating the shared tool registry', () => {
     const original = new Map([
       [

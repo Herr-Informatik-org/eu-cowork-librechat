@@ -1,3 +1,4 @@
+import type { BrainUsage, MailRuleLearning, MailDraftEditOutcome } from 'librechat-data-provider';
 import type { MailAttachmentScanResult } from './scanner';
 
 export type MailPriority = 'important' | 'normal' | 'low';
@@ -49,6 +50,8 @@ export interface MailChatResponse {
   answer: string;
   modelLabel?: string;
   sources?: MailResult[];
+  memory?: BrainUsage;
+  learning?: MailRuleLearning;
 }
 
 export interface MailSettings {
@@ -100,9 +103,11 @@ export interface MailAnalysis {
   memory?: MailMemoryStatus;
 }
 
-export interface MailMemoryStatus {
-  status: 'available' | 'empty' | 'disabled' | 'unavailable';
-  count: number;
+export type MailMemoryStatus = BrainUsage;
+export interface MailGeneratedText {
+  text: string;
+  memory?: BrainUsage;
+  learning?: MailRuleLearning;
 }
 
 export interface MailRuleInput {
@@ -140,6 +145,8 @@ export interface StoredMailResult extends MailResult {
   sourceHash: string;
   categoryApplied: boolean;
   draftId?: string;
+  draftMemory?: BrainUsage;
+  draftTextHash?: string;
   operationPending?: boolean;
   moveDestination?: string;
   editPending?: boolean;
@@ -165,6 +172,7 @@ export interface MailResultContent {
     preview?: MailHtmlPreview;
   };
   draft?: {
+    memory?: BrainUsage;
     subject: string;
     body: string;
     bodyTruncated: boolean;
@@ -206,6 +214,7 @@ export interface MailDraftRequest {
 export interface MailDraftResponse {
   status: 'created' | 'existing' | 'uncertain';
   draftUrl?: string;
+  memory?: BrainUsage;
 }
 
 export interface MailHtmlPreview {
@@ -421,13 +430,13 @@ export interface MailRuntimeAdapter {
     instructions: string,
     beforeRequest: () => Promise<void>,
     context?: MailDraftContext,
-  ): Promise<string>;
+  ): Promise<string | MailGeneratedText>;
   chat?(
     ownerId: string,
     messages: MailMessage[],
     input: MailChatRequest,
     beforeRequest: () => Promise<void>,
-  ): Promise<string>;
+  ): Promise<string | MailGeneratedText>;
   audit(ownerId: string, event: string, resultId?: string): Promise<void>;
   rememberRule?(
     ownerId: string,
@@ -490,7 +499,12 @@ export interface MailAssistantEngine {
     attachmentId: string,
     revision: string,
   ): Promise<MailAttachmentDownload>;
-  editDraft(owner: string, id: string, body: string, revision: string): Promise<void>;
+  editDraft(
+    owner: string,
+    id: string,
+    body: string,
+    revision: string,
+  ): Promise<MailDraftEditOutcome>;
   rememberRule(owner: string, id: string, input: MailRuleInput): Promise<void>;
   tick(): Promise<void>;
   start(): void;

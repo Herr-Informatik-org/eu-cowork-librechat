@@ -1,7 +1,5 @@
-import { z } from 'zod';
-import { createHash } from 'node:crypto';
 import { Permissions, PermissionTypes } from 'librechat-data-provider';
-import type { BrainNode } from 'librechat-data-provider';
+import type { BrainNode, BrainUsage, BrainUsageItem } from 'librechat-data-provider';
 import type { ServerRequest } from '~/types';
 import type { CheckAccessParams } from '~/middleware/access';
 import { checkAccess } from '~/middleware/access';
@@ -10,17 +8,12 @@ import { isBrainChatEligible } from './session';
 import { requestBrain } from './client';
 import { buildBrainRecallQuery } from './query';
 import { containsBrainCredential } from './safety';
+import { personalMailScope } from './policy';
+import { brainUsageItem } from './usage';
 
 type Roles = CheckAccessParams['getRoleByName'];
-export interface PersonalMailContext {
+export interface PersonalMailContext extends BrainUsage {
   context: string;
-  status: 'available' | 'empty' | 'disabled' | 'unavailable';
-  count: number;
-}
-
-function senderScope(sender: string): string {
-  const address = z.string().email().max(254).parse(sender.trim().toLowerCase());
-  return `Mail: ${address.length <= 150 ? address : createHash('sha256').update(address).digest('hex')}`;
 }
 
 export async function isPersonalMailMemoryAllowed(
@@ -54,45 +47,54 @@ export async function readPersonalMailContext(
   if (!(await isPersonalMailMemoryAllowed(req, getRoleByName)))
     return { context: '', status: 'disabled', count: 0 };
   try {
-    const scope = senderScope(input.sender);
+    const scope = personalMailScope(input.sender);
     const budget = Math.max(0, Math.floor(input.contextBudgetTokens ?? 2800));
     if (budget < 128) return { context: '', status: 'empty', count: 0 };
     const query = `${input.sender}\n${buildBrainRecallQuery({ text: input.query })}`;
-    const recalls = await Promise.all(
-      [scope, 'Mail', undefined].map((selectedScope) =>
-        requestBrain<{ nodes: BrainNode[] }>(String(req.user!.id), 'POST', '/v1/recall', {
-          query,
-          ...(selectedScope ? { scope: selectedScope } : {}),
-          contextBudgetTokens: Math.min(1_000_000, Math.max(128, Math.floor(budget / 2))),
-          recordTrace: false,
-        }),
-      ),
+    const result = await requestBrain<{ nodes: BrainNode[] }>(
+      String(req.user!.id),
+      'POST',
+      '/v1/recall',
+      {
+        query,
+        purpose: 'mail',
+        applicableScopes: [scope, 'Mail'],
+        contextBudgetTokens: Math.min(1_000_000, budget),
+        recordTrace: false,
+      },
     );
-    const seen = new Set<string>();
+    const selected = new Set<string>();
     const lines: string[] = [];
-    for (const result of recalls)
-      for (const node of result.nodes) {
-        if (seen.has(node.id) || (node.scope?.startsWith('Mail: ') && node.scope !== scope))
-          continue;
-        seen.add(node.id);
-        const line = JSON.stringify({
-          id: node.id,
-          text: node.text,
-          scope: node.scope,
-          confidence: node.confidence,
-          updatedAt: node.updatedAt,
-          createdAt: node.createdAt,
-          claimState: node.claimState,
-          validUntil: node.validUntil,
-          sources: node.sources.map(({ type, conversationId }) => ({ type, conversationId })),
-        });
-        if ((await countTokens([...lines, line].join('\n'))) > budget) continue;
-        lines.push(line);
-      }
+    const items: BrainUsageItem[] = [];
+    for (const node of result.nodes) {
+      if (
+        selected.has(node.id) ||
+        (node.scope?.startsWith('Mail: ') && node.scope !== scope) ||
+        (node.kind === 'preference' && node.scope && ![scope, 'Mail'].includes(node.scope))
+      )
+        continue;
+      const line = JSON.stringify({
+        id: node.id,
+        text: node.text,
+        scope: node.scope,
+        confidence: node.confidence,
+        updatedAt: node.updatedAt,
+        createdAt: node.createdAt,
+        claimState: node.claimState,
+        validFrom: node.validFrom,
+        validUntil: node.validUntil,
+        sources: node.sources.map(({ type, conversationId }) => ({ type, conversationId })),
+      });
+      if ((await countTokens([...lines, line].join('\n'))) > budget) continue;
+      selected.add(node.id);
+      lines.push(line);
+      items.push(brainUsageItem(node));
+    }
     return {
       context: lines.join('\n'),
       status: lines.length ? 'available' : 'empty',
       count: lines.length,
+      items,
     };
   } catch {
     return { context: '', status: 'unavailable', count: 0 };
@@ -129,7 +131,7 @@ export async function rememberPersonalMailRule(
       title: text.slice(0, 140),
       text,
       kind: 'preference',
-      scope: input.scope === 'global' ? 'Mail' : senderScope(input.sender),
+      scope: input.scope === 'global' ? 'Mail' : personalMailScope(input.sender),
       tags: ['Mail'],
     },
   );

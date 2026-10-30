@@ -11,6 +11,8 @@ const BrainDialogContext = createContext<{
   triggerRef: MutableRefObject<HTMLButtonElement | null>;
 } | null>(null);
 
+export const useOptionalBrainDialog = () => useContext(BrainDialogContext);
+
 export function useBrainDialog() {
   const context = useContext(BrainDialogContext);
   if (!context) throw new Error('BrainDialogProvider is required');

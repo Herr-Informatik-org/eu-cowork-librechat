@@ -25,7 +25,7 @@ import type {
   MailWorkspaceSettings,
   MailWorkspaceFolder,
   MailWorkspaceContent,
-  MailWorkspaceMemory,
+  MailRuleProposal,
 } from 'librechat-data-provider';
 import {
   useMailStatus,
@@ -55,6 +55,7 @@ import { MailSignatureSettings } from './Signature';
 import { FolderPicker, useDoneFolder } from './Folders';
 import MailImages from './Images';
 import PersonalRule from './PersonalRule';
+import BrainUsage from '~/components/Brain/Usage';
 import { MoveProgress, isMoveActive } from './Operations';
 import './workspace.css';
 
@@ -71,12 +72,6 @@ const draftStates: Record<MailWorkspaceResult['draftStatus'], TranslationKeys> =
   uncertain: 'com_ui_mail_draft_uncertain',
   existing: 'com_ui_mail_draft_existing',
   error: 'com_ui_mail_draft_error',
-};
-const memoryStates: Record<MailWorkspaceMemory['status'], TranslationKeys> = {
-  available: 'com_ui_mail_memory_used',
-  empty: 'com_ui_mail_memory_empty',
-  disabled: 'com_ui_mail_memory_disabled',
-  unavailable: 'com_ui_mail_memory_unavailable',
 };
 function date(value?: string, timeZone = 'Europe/Zurich') {
   if (!value || !Number.isFinite(Date.parse(value))) return '–';
@@ -448,6 +443,7 @@ const Detail = forwardRef<
   const body = editor?.body || '';
   const revision = editor?.revision || '';
   const [notice, setNotice] = useState('');
+  const [ruleProposal, setRuleProposal] = useState<MailRuleProposal>();
   const [draftOpenRequest, setDraftOpenRequest] = useState(0);
   const [chatFocusRequest, setChatFocusRequest] = useState(0);
   const [researchOpenRequest, setResearchOpenRequest] = useState(0);
@@ -493,7 +489,8 @@ const Detail = forwardRef<
     actions.draft.mutate(
       { id: result.id, body, revision },
       {
-        onSuccess: () => {
+        onSuccess: (outcome) => {
+          setRuleProposal(outcome?.ruleProposal);
           onEditorChange();
           setNotice(t('com_ui_mail_saved'));
           draftTab.current?.focus();
@@ -547,15 +544,12 @@ const Detail = forwardRef<
   const summary = (
     <>
       <div className="mail-summary-heading">
-        <h3>{t('com_ui_mail_summary')}</h3>
+        <h3>
+          {t('com_ui_mail_summary')} {result.memory && <BrainUsage usage={result.memory} />}
+        </h3>
         <span>{t(draftStates[result.draftStatus])}</span>
       </div>
       <p>{result.summary}</p>
-      {result.memory && (
-        <p className="mail-muted">
-          {t(memoryStates[result.memory.status], { count: result.memory.count })}
-        </p>
-      )}
       {result.questions.length > 0 && (
         <div className="mail-questions">
           <h4>{t('com_ui_mail_questions')}</h4>
@@ -605,6 +599,7 @@ const Detail = forwardRef<
         <Copy size={15} />
         {t('com_ui_mail_copy')}
       </button>
+      {tab === 'draft' && data?.draft?.memory && <BrainUsage usage={data.draft.memory} />}
       {notice && <span role="status">{notice}</span>}
     </>
   );
@@ -738,7 +733,13 @@ const Detail = forwardRef<
         ) : (
           <section className="mail-summary">{summary}</section>
         ))}
-      <PersonalRule key={result.id} result={result} disabled={locked || busy || editing} />
+      <PersonalRule
+        key={result.id}
+        result={result}
+        disabled={locked || busy || editing}
+        proposal={ruleProposal}
+        onDismissProposal={() => setRuleProposal(undefined)}
+      />
       <div
         className="mail-tabs"
         role="tablist"

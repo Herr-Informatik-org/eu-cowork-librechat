@@ -1,17 +1,24 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Copy, Loader2, MessageSquare, Search } from 'lucide-react';
-import type { MailWorkspaceResult } from 'librechat-data-provider';
+import type { MailWorkspaceResult, MailWorkspaceChatResponse } from 'librechat-data-provider';
 import { useMailChat, useMailCorrespondence } from '~/data-provider/Mail';
 import { useLocalize } from '~/hooks';
 import { mailActionError } from './Followup';
 import { buildMailChatRequest } from './context';
+import BrainUsage from '~/components/Brain/Usage';
 import { isMailSubmitShortcut } from './Shortcuts';
+
+const learningKeys = {
+  saved: 'com_ui_mail_rule_saved',
+  disabled: 'com_ui_brain_usage_disabled',
+  unavailable: 'com_ui_mail_rule_error',
+} as const;
 
 type Message = {
   role: 'user' | 'assistant';
   content: string;
   sources?: MailWorkspaceResult[];
-};
+} & Pick<MailWorkspaceChatResponse, 'memory' | 'learning'>;
 export type MailChatState = {
   messages: Message[];
   input: string;
@@ -102,7 +109,13 @@ export function MailChat({
         messages: [
           ...previous.messages,
           { role: 'user', content: message },
-          { role: 'assistant', content: response.answer, sources: response.sources },
+          {
+            role: 'assistant',
+            content: response.answer,
+            sources: response.sources,
+            memory: response.memory,
+            learning: response.learning,
+          },
         ].slice(-40) as Message[],
       }));
     } catch (error) {
@@ -164,6 +177,10 @@ export function MailChat({
             ) : null}
             {message.role === 'assistant' && (
               <div className="mail-body-actions">
+                {message.memory && <BrainUsage usage={message.memory} />}
+                {message.learning && (
+                  <span role="status">{t(learningKeys[message.learning.status])}</span>
+                )}
                 <button
                   className="mail-button"
                   onClick={() =>

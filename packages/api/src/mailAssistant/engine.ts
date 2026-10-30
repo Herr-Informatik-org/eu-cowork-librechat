@@ -1,3 +1,5 @@
+import { brainUsageSchema } from '../brain/usage';
+import type { MailDraftEditOutcome } from 'librechat-data-provider';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type {
@@ -58,13 +60,7 @@ export const mailAnalysisSchema: z.ZodType<MailAnalysis> = z
     reason: z.string().min(1).max(800),
     questions: z.array(z.string().min(1).max(500)).max(10),
     draft: z.string().max(12000),
-    memory: z
-      .object({
-        status: z.enum(['available', 'empty', 'disabled', 'unavailable']),
-        count: z.number().int().min(0),
-      })
-      .strict()
-      .optional(),
+    memory: brainUsageSchema.optional(),
   })
   .strict();
 
@@ -75,6 +71,8 @@ function publicResult(value: StoredMailResult): MailResult {
     sourceHash: _source,
     categoryApplied: _category,
     draftId: _draft,
+    draftMemory: _draftMemory,
+    draftTextHash: _draftTextHash,
     operationPending: _pending,
     moveDestination: _destination,
     editPending: _edit,
@@ -649,6 +647,8 @@ export function createMailAssistantEngine({
               try {
                 const editable = await graph.editableReply(result.draftId);
                 await guard();
+                if (result.draftMemory && result.draftTextHash === hash(editable.text))
+                  response.draft.memory = result.draftMemory;
                 response.draft.replyText = editable.text;
                 response.draft.revision = hash([result.draftId, editable.etag]);
               } catch (error) {
@@ -1245,6 +1245,7 @@ export function createMailAssistantEngine({
       const response = (status: MailDraftResponse['status'], url?: string): MailDraftResponse => ({
         status,
         ...(safeOutlookUrl(url) && { draftUrl: safeOutlookUrl(url) }),
+        ...(status === 'created' && result.draftMemory ? { memory: result.draftMemory } : {}),
       });
       // Bind an explicit new-reply request before checking its now possibly stale UI revision.
       const requestKey = hash([owner, 'manual-new-reply-request', parsed.requestId]);
@@ -1389,12 +1390,13 @@ export function createMailAssistantEngine({
         replyMode: 'all' as const,
         signatureEnabled: signature?.enabled === true,
       };
+      const generated = await generate(owner, context, parsed.instructions, guard, draftContext);
       const text = z
         .string()
         .trim()
         .min(1)
         .max(12000)
-        .parse(await generate(owner, context, parsed.instructions, guard, draftContext));
+        .parse(typeof generated === 'string' ? generated : generated.text);
       await guard();
       const fresh = parsed.newReply
         ? { messages: [await graph.message(result.messageId)], complete: true }
@@ -1445,6 +1447,10 @@ export function createMailAssistantEngine({
         await store.finishDraft(owner, operationKey, result.sourceHash, 'completed');
         if (parsed.newReply) await store.finishDraft(owner, requestKey, requestHash, 'completed');
         result.draftId = created.id;
+        if (typeof generated !== 'string' && generated.memory) {
+          result.draftMemory = generated.memory;
+          result.draftTextHash = hash(text);
+        }
         result.draftUrl = safeOutlookUrl(created.url);
         result.draftStatus = 'created';
         result.operationPending = false;
@@ -1473,12 +1479,12 @@ export function createMailAssistantEngine({
     id: string,
     body: string,
     revision: string,
-  ): Promise<void> {
+  ): Promise<MailDraftEditOutcome> {
     if (!body.trim() || body.length > 12000 || !/^[a-f0-9]{64}$/.test(revision))
       throw new MailAssistantError(
         'Bitte einen vollständigen Antworttext mit höchstens 12000 Zeichen eingeben.',
       );
-    await manualOperation(owner, id, async (result, token, guard) => {
+    return manualOperation(owner, id, async (result, token, guard) => {
       if (
         !result.draftId ||
         result.draftStatus !== 'created' ||
@@ -1517,6 +1523,14 @@ export function createMailAssistantEngine({
         await guard();
         await store.putResult(owner, token, { ...result, editPending: false });
         await adapter.audit(owner, 'manual_draft_edit_completed', id);
+        return body.trim().length >= 40 && body.length < editable.text.length * 0.65
+          ? {
+              ruleProposal: {
+                text: 'Bitte Antworten an diesen Kontakt knapp und auf das Wesentliche beschränkt formulieren.',
+                scope: 'sender' as const,
+              },
+            }
+          : {};
       } catch (error) {
         if (error instanceof MailGraphError && !error.uncertain) {
           await store.finishDraft(owner, operationKey, revision, 'failed');

@@ -1,3 +1,5 @@
+import type { BrainUsage } from './brain';
+
 export type MailSignature = {
   enabled: boolean;
   html: string;
@@ -16,6 +18,8 @@ export type MailWorkspaceChatResponse = {
   answer: string;
   modelLabel?: string;
   sources?: MailWorkspaceResult[];
+  memory?: BrainUsage;
+  learning?: MailRuleLearning;
 };
 export type MailWorkspacePriority = 'important' | 'normal' | 'low';
 /** Last recorded Outlook action; absence means unknown, not unanswered. */
@@ -25,10 +29,10 @@ export type MailWorkspaceRule = {
   scope: 'sender' | 'global';
   revision: string;
 };
-export type MailWorkspaceMemory = {
-  status: 'available' | 'empty' | 'disabled' | 'unavailable';
-  count: number;
-};
+export type MailWorkspaceMemory = BrainUsage;
+export type MailRuleProposal = { text: string; scope: 'sender' | 'global' };
+export type MailRuleLearning = { status: 'saved' | 'disabled' | 'unavailable'; nodeId?: string };
+export type MailDraftEditOutcome = { ruleProposal?: MailRuleProposal };
 export type MailWorkspaceSettings = {
   signature?: MailSignature;
   enabled: boolean;
@@ -132,6 +136,7 @@ export type MailWorkspaceContent = {
     preview?: MailWorkspacePreview;
   };
   draft?: {
+    memory?: BrainUsage;
     subject: string;
     url?: string;
     body: string;
@@ -227,6 +232,7 @@ export type MailDraftRequest = {
 export type MailDraftOutcome = {
   status: 'created' | 'existing' | 'uncertain';
   draftUrl?: string;
+  memory?: BrainUsage;
 };
 export type MailAttachments = {
   downloadAvailable?: boolean;

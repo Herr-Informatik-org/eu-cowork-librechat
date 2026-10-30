@@ -53,15 +53,15 @@ export function useBrainNodeQuery(id: string | null, generationId?: string) {
   );
 }
 
-export function useBrainRecallsQuery(conversationId?: string) {
+export function useBrainRecallsQuery(conversationId?: string, enabled = true, messageId?: string) {
   const { data: user } = useGetUserQuery();
   return useQuery(
-    [QueryKeys.brain, user?.id, 'recalls', conversationId],
-    ({ signal }) => dataService.getBrainRecalls(conversationId!, signal),
+    [QueryKeys.brain, user?.id, 'recalls', conversationId, messageId],
+    ({ signal }) => dataService.getBrainRecalls(conversationId!, signal, messageId),
     {
       ...freshness,
-      enabled: !!user?.id && !!conversationId && conversationId !== 'new',
-      refetchInterval: 20_000,
+      enabled: enabled && !!user?.id && !!conversationId && conversationId !== 'new',
+      refetchInterval: enabled ? 20_000 : false,
     },
   );
 }

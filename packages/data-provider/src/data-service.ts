@@ -31,11 +31,13 @@ import type {
   MailFollowupOutcome,
   MailDraftRequest,
   MailDraftOutcome,
+  MailDraftEditOutcome,
   MailAttachments,
 } from './types/mail';
 import type { TFileConfig } from './file-config';
 import type {
   BrainGraph,
+  BrainQuality,
   BrainGraphParams,
   BrainNode,
   BrainNodeInput,
@@ -150,7 +152,11 @@ export const enqueueMailWorkspaceMove = (
   input: MailWorkspaceMoveRequest,
 ): Promise<{ job: MailWorkspaceMoveJob }> =>
   request.post(endpoints.mailWorkspace('/move-jobs'), input);
-export const saveMailWorkspaceDraft = (id: string, body: string, revision: string): Promise<void> =>
+export const saveMailWorkspaceDraft = (
+  id: string,
+  body: string,
+  revision: string,
+): Promise<MailDraftEditOutcome> =>
   request.put(endpoints.mailWorkspaceResult(id, 'draft'), { body, revision });
 export const rememberMailWorkspaceRule = (id: string, rule: MailWorkspaceRule): Promise<void> =>
   request.post(endpoints.mailWorkspaceResult(id, 'rule'), rule);
@@ -211,6 +217,13 @@ export const downloadMailWorkspaceAttachment = (
     },
   );
 
+export const getBrainQuality = (signal?: AbortSignal): Promise<BrainQuality> =>
+  request.get(endpoints.brainQuality(), { signal });
+export const applyBrainQuality = (
+  revision: number,
+  findingIds: string[],
+): Promise<BrainRebuildStatus> =>
+  request.post(endpoints.brainQualityApply(), { revision, findingIds });
 export const getBrainHistory = (signal?: AbortSignal): Promise<BrainHistoryStatus> =>
   request.get(endpoints.brainHistory(), { signal });
 export const getBrainLearning = (
@@ -261,8 +274,9 @@ export const deleteBrainNode = (id: string): Promise<{ deleted: true }> =>
 export const getBrainRecalls = (
   conversationId: string,
   signal?: AbortSignal,
+  messageId?: string,
 ): Promise<{ recalls: BrainRecall[] }> =>
-  request.get(endpoints.brainRecalls(conversationId), { signal });
+  request.get(endpoints.brainRecalls(conversationId, messageId), { signal });
 
 export const exportBrain = (): Promise<BrainExport> => request.get(endpoints.brainExport());
 export const getBrainStatus = (signal?: AbortSignal): Promise<{ enabled: boolean }> =>

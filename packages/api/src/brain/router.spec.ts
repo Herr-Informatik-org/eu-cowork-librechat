@@ -280,3 +280,47 @@ describe('private learning status', () => {
     expect(learning.latest).not.toHaveBeenCalled();
   });
 });
+
+it('binds quality review and application to the signed owner, never a caller-supplied owner', async () => {
+  const { app } = setup();
+  proxy.mockResolvedValue({ revision: 1, findings: [], total: 0, truncated: false });
+  await request(app).get('/api/brain/quality?ownerId=foreign').expect(200);
+  expect(proxy).toHaveBeenLastCalledWith('owner', 'GET', '/v1/quality', undefined, 5000);
+  await request(app)
+    .post('/api/brain/quality/apply')
+    .send({ revision: 1, findingIds: ['selected'] })
+    .expect(201);
+  expect(proxy).toHaveBeenLastCalledWith(
+    'owner',
+    'POST',
+    '/v1/quality/apply',
+    { revision: 1, findingIds: ['selected'] },
+    5000,
+  );
+});
+it.each([Permissions.USE, Permissions.UPDATE])(
+  'does not apply quality changes without %s',
+  async (permission) => {
+    const { app } = setup([permission]);
+    await request(app)
+      .post('/api/brain/quality/apply')
+      .send({ revision: 1, findingIds: ['selected'] })
+      .expect(403);
+    expect(proxy).not.toHaveBeenCalled();
+  },
+);
+
+it('forwards an exact assistant message filter without accepting a foreign owner selector', async () => {
+  const { app } = setup();
+  proxy.mockResolvedValue({ recalls: [] });
+  await request(app)
+    .get('/api/brain/recalls?conversationId=chat&messageId=old-answer&ownerId=foreign')
+    .expect(200);
+  expect(proxy).toHaveBeenCalledWith(
+    'owner',
+    'GET',
+    '/v1/recalls?conversationId=chat&messageId=old-answer',
+    undefined,
+    5000,
+  );
+});

@@ -655,13 +655,17 @@ it('keeps explicit personal rules separate from original mail and research conte
   expect(mockChat).not.toHaveBeenCalled();
 });
 
-it('shows the recorded personal memory status without learning from displayed mail content', () => {
+it('shows recorded memory only on demand without learning from displayed mail content', async () => {
   mockRows[0].memory = { status: 'available', count: 2 };
   mount();
   chooseMail();
   expect(
-    screen.getByText('2 persönliche Erinnerungen bei der Analyse berücksichtigt.'),
-  ).toBeInTheDocument();
+    screen.queryByText(/Der KI als persönlicher Kontext bereitgestellt/),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Brain-Info' }));
+  expect(
+    await screen.findByText(/Der KI als persönlicher Kontext bereitgestellt: 2 Einträge/),
+  ).toBeVisible();
   expect(mockRule).not.toHaveBeenCalled();
   expect(mockChat).not.toHaveBeenCalled();
 });

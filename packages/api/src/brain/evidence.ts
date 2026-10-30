@@ -1,3 +1,4 @@
+import { qualifyBrainCandidate } from './policy';
 import type { BrainCandidate } from './session';
 import type { BrainConversationMessage } from './conversation';
 import { compatibleBrainEvidence } from './conversation';
@@ -52,7 +53,7 @@ function normalizeCandidate(fact: BrainCandidate): BrainCandidate | undefined {
   if (
     result.validFrom &&
     result.validUntil &&
-    Date.parse(result.validFrom.trim()) > Date.parse(result.validUntil.trim())
+    Date.parse(result.validFrom.trim()) >= Date.parse(result.validUntil.trim())
   )
     return;
   return result;
@@ -96,5 +97,7 @@ export function validateContextualFacts(
       }
       return hasUser;
     })
+    .map((fact) => qualifyBrainCandidate(fact, messages))
+    .filter((fact): fact is BrainCandidate => fact !== undefined)
     .map((fact) => ({ ...fact, relatedIds: fact.relatedIds?.filter((id) => knownIds.has(id)) }));
 }

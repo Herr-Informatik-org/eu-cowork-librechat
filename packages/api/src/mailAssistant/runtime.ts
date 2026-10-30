@@ -1,3 +1,4 @@
+import { explicitPersonalMailRule } from '../brain/policy';
 import { z } from 'zod';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -751,7 +752,14 @@ export function createMailAssistantRuntime(
         'Die Brain-Freigabe wurde geändert. Bitte die Mail erneut prüfen.',
       );
     await audit(ownerId, 'model.complete', undefined, routeAudit);
-    return { ...result, memory: { status: memory.status, count: memory.count } };
+    return {
+      ...result,
+      memory: {
+        status: memory.status,
+        count: memory.count,
+        ...(memory.items ? { items: memory.items } : {}),
+      },
+    };
   };
   const adapter: MailRuntimeAdapter = {
     authorize: async (ownerId) => {
@@ -803,18 +811,43 @@ export function createMailAssistantRuntime(
         );
       }
     },
-    chat: async (ownerId, messages, input, beforeRequest) =>
-      (await analyze(ownerId, messages, beforeRequest, undefined, undefined, input)).draft,
-    analyzeDraft: async (ownerId, messages, userInstructions, beforeRequest, draftContext) =>
-      (
-        await analyze(
-          ownerId,
-          messages,
-          beforeRequest,
-          z.string().max(4000).parse(userInstructions),
-          draftContext,
-        )
-      ).draft,
+    chat: async (ownerId, messages, input, beforeRequest) => {
+      const result = await analyze(ownerId, messages, beforeRequest, undefined, undefined, input);
+      const rule = explicitPersonalMailRule(input.message, messages[0]?.sender);
+      if (!rule) return { text: result.draft, memory: result.memory };
+      await beforeRequest();
+      const req = await fresh(ownerId);
+      if (
+        req.config?.memory?.agent?.enabled === false ||
+        !(await isPersonalMailMemoryAllowed(req, deps.getRoleByName, Permissions.CREATE))
+      )
+        return { text: result.draft, memory: result.memory, learning: { status: 'disabled' } };
+      try {
+        await beforeRequest();
+        const node = await rememberPersonalMailRule(req, deps.getRoleByName, {
+          ...rule,
+          sender: messages[0].sender,
+        });
+        await beforeRequest();
+        return {
+          text: result.draft,
+          memory: result.memory,
+          learning: { status: 'saved', nodeId: node.id },
+        };
+      } catch {
+        return { text: result.draft, memory: result.memory, learning: { status: 'unavailable' } };
+      }
+    },
+    analyzeDraft: async (ownerId, messages, userInstructions, beforeRequest, draftContext) => {
+      const result = await analyze(
+        ownerId,
+        messages,
+        beforeRequest,
+        z.string().max(4000).parse(userInstructions),
+        draftContext,
+      );
+      return { text: result.draft, memory: result.memory };
+    },
     audit,
   };
   const store = createMongoMailStore({

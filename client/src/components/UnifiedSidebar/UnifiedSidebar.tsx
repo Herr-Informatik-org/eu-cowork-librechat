@@ -8,7 +8,6 @@ import { ChatContext, ChatFormProvider, ActivePanelProvider } from '~/Providers'
 import useUnifiedSidebarLinks from '~/hooks/Nav/useUnifiedSidebarLinks';
 import { useChatHelpers, useLocalize } from '~/hooks';
 import ExpandedPanel from './ExpandedPanel';
-import { BrainDialogProvider } from '~/components/Brain/Dialog';
 import Sidebar from './Sidebar';
 import { cn } from '~/utils';
 import store from '~/store';
@@ -195,7 +194,7 @@ function UnifiedSidebar() {
       </ActivePanelProvider>
     </SidebarChatProvider>
   );
-  return <BrainDialogProvider>{sidebar}</BrainDialogProvider>;
+  return sidebar;
 }
 
 export default memo(UnifiedSidebar);

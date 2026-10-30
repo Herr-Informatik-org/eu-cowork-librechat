@@ -519,6 +519,8 @@ export const brainLearning = (conversationId?: string) =>
   `${BASE_URL}/api/brain/learning${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ''}`;
 export const brainHistory = () => `${BASE_URL}/api/brain/history`;
 export const brainHistoryPause = () => `${brainHistory()}/pause`;
+export const brainQuality = () => `${BASE_URL}/api/brain/quality`;
+export const brainQualityApply = () => `${brainQuality()}/apply`;
 export const brainRebuild = () => `${BASE_URL}/api/brain/rebuild`;
 export const brainRebuildAction = (id: string, action: 'activate' | 'discard') =>
   `${brainRebuild()}/${encodeURIComponent(id)}/${action}`;
@@ -526,8 +528,8 @@ export const brainRebuildRollback = () => `${brainRebuild()}/rollback`;
 export const brainNode = (id: string, generationId?: string) =>
   `${brainNodes()}/${encodeURIComponent(id)}${generationId ? `?generationId=${encodeURIComponent(generationId)}` : ''}`;
 export const brainExport = () => `${BASE_URL}/api/brain/export`;
-export const brainRecalls = (conversationId: string) =>
-  `${BASE_URL}/api/brain/recalls?conversationId=${encodeURIComponent(conversationId)}`;
+export const brainRecalls = (conversationId: string, messageId?: string) =>
+  `${BASE_URL}/api/brain/recalls?conversationId=${encodeURIComponent(conversationId)}${messageId ? `&messageId=${encodeURIComponent(messageId)}` : ''}`;
 export const memory = (key: string, agentId?: string) =>
   `${memories()}/${encodeURIComponent(key)}${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''}`;
 export const memoryPreferences = () => `${memories()}/preferences`;

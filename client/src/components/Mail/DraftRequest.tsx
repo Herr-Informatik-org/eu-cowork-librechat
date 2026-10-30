@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { FilePenLine, ExternalLink, Loader2 } from 'lucide-react';
 import type { MailWorkspaceResult, MailWorkspaceContent } from 'librechat-data-provider';
 import { useMailDraftRequest } from '~/data-provider/Mail';
+import BrainUsage from '~/components/Brain/Usage';
 import { useLocalize } from '~/hooks';
 import { mailActionError } from './Followup';
 import { isMailEscape, isMailSubmitShortcut } from './Shortcuts';
@@ -268,6 +269,7 @@ function DraftRequest({
           {mailActionError(mutation.error, t('com_ui_mail_draft_request_error'))}
         </p>
       )}
+      {outcome?.memory && <BrainUsage usage={outcome.memory} />}
       {outcome && (
         <p ref={resultStatus} tabIndex={-1} role="status">
           {t(
