@@ -1,6 +1,6 @@
 import React from 'react';
 import { RecoilRoot } from 'recoil';
-import { ContentTypes } from 'librechat-data-provider';
+import { ContentTypes, ErrorTypes } from 'librechat-data-provider';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { TAttachment, TMessageContentParts } from 'librechat-data-provider';
 import ContentParts from '../ContentParts';
@@ -170,6 +170,28 @@ describe('ContentParts integration: MCP image hoist and grouping', () => {
     isSubmitting: false,
     isLatestMessage: true,
   };
+
+  it('keeps existing text, tool output and files visible beside a budget-stop notice', () => {
+    renderContentParts({
+      ...baseProps,
+      content: [
+        makeTextPart('Die Prüfung hat bereits Ergebnisse geliefert.'),
+        makeMcpToolCall('t1'),
+        {
+          type: ContentTypes.ERROR,
+          error: JSON.stringify({
+            type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+            status: 'incomplete',
+          }),
+        },
+      ],
+      attachments: [imageAttachment('t1')],
+    });
+
+    expect(screen.getByText('Die Prüfung hat bereits Ergebnisse geliefert.')).toBeInTheDocument();
+    expect(screen.getByText('com_error_agent_work_budget_exceeded')).toBeInTheDocument();
+    expect(screen.getByTestId('attachment-group')).toHaveAttribute('data-count', '1');
+  });
 
   it('groups 2+ MCP tool calls and hoists their attachments outside the collapsible', () => {
     const content = [makeMcpToolCall('t1'), makeMcpToolCall('t2')];

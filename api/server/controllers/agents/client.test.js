@@ -13,7 +13,7 @@ const mockFormatAgentMessages = jest.fn(() => ({
 }));
 
 const { Providers } = require('@librechat/agents');
-const { Constants, ContentTypes, EModelEndpoint } = require('librechat-data-provider');
+const { Constants, ContentTypes, EModelEndpoint, ErrorTypes } = require('librechat-data-provider');
 const { GenerationJobManager, createStreamServices } = require('@librechat/api');
 const AgentClient = require('./client');
 const { resolveConfigServers } = require('~/server/services/MCP');
@@ -57,6 +57,9 @@ jest.mock('@librechat/api', () => ({
   }),
   loadAgent: jest.fn(),
   maybePrewarmCodeSandbox: jest.fn(),
+  trackBrainLearning: jest.fn(({ action }) => action()),
+  learnConfiguredBrainWithUsage: jest.fn(),
+  hasAgentWorkBudgetExhausted: jest.fn(() => false),
 }));
 
 describe('AgentClient - interrupt discovery persistence', () => {
@@ -412,6 +415,191 @@ describe('AgentClient - startup telemetry', () => {
       ]),
     );
   });
+});
+
+describe('AgentClient - bounded run termination', () => {
+  const partialText = { type: ContentTypes.TEXT, text: 'Die Rechnung wurde gefunden.' };
+  const completedTool = {
+    type: ContentTypes.TOOL_CALL,
+    tool_call: {
+      id: 'read-invoice-1',
+      name: 'read_invoice_mcp_odoo',
+      args: '{"id":123}',
+      output: '{"id":123,"amount":42}',
+      progress: 1,
+    },
+  };
+
+  function createClient() {
+    const client = new AgentClient({
+      req: {
+        user: { id: 'user-123' },
+        body: {},
+        config: { endpoints: { [EModelEndpoint.agents]: {} } },
+      },
+      res: {},
+      agent: {
+        id: 'agent-123',
+        provider: EModelEndpoint.openAI,
+        model_parameters: { model: 'gpt-4' },
+        hide_sequential_outputs: false,
+      },
+      endpointTokenConfig: {},
+      eventHandlers: {},
+      contentParts: [],
+      collectedUsage: [],
+      artifactPromises: [],
+    });
+    client.conversationId = 'budget-conversation';
+    client.responseMessageId = 'budget-response';
+    client.parentMessageId = 'budget-user';
+    client.recordCollectedUsage = jest.fn().mockResolvedValue();
+    return client;
+  }
+
+  beforeEach(() => {
+    mockCreateRun.mockReset();
+    mockIsHITLEnabled.mockReturnValue(false);
+    require('@librechat/api').trackBrainLearning.mockClear();
+    require('@librechat/api').learnConfiguredBrainWithUsage.mockClear();
+    require('@librechat/api').hasAgentWorkBudgetExhausted.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    require('@librechat/api').hasAgentWorkBudgetExhausted.mockReturnValue(false);
+  });
+
+  it('retains completed text, tool output and artifact promises without a second graph run', async () => {
+    const client = createClient();
+    client.brainSession = {};
+    const attachment = { file_id: 'export-1', filename: 'offerte.csv' };
+    const artifact = Promise.resolve(attachment);
+    const error = Object.assign(new Error('Runtime limit details'), {
+      name: 'GraphRecursionError',
+      lc_error_code: 'GRAPH_RECURSION_LIMIT',
+    });
+    const processStream = jest.fn(async () => {
+      client.contentParts.push(partialText, completedTool);
+      client.artifactPromises.push(artifact);
+      throw error;
+    });
+    mockCreateRun.mockResolvedValue({
+      Graph: null,
+      processStream,
+      getCalibrationRatio: () => 0,
+    });
+
+    const result = await client.sendCompletion([]);
+
+    expect(result.completion).toEqual([
+      partialText,
+      completedTool,
+      {
+        type: ContentTypes.ERROR,
+        error: JSON.stringify({
+          type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+          status: 'incomplete',
+        }),
+      },
+    ]);
+    expect(client.artifactPromises).toEqual([artifact]);
+    await expect(Promise.all(client.artifactPromises)).resolves.toEqual([attachment]);
+    const { messages } = jest.requireActual('@librechat/agents').formatAgentMessages([
+      { role: 'assistant', content: result.completion },
+      { role: 'user', content: 'Fasse die vorhandenen Ergebnisse zusammen.' },
+    ]);
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: expect.arrayContaining([partialText]) }),
+      ]),
+    );
+    expect(
+      messages.some(
+        (message) =>
+          message.tool_call_id === completedTool.tool_call.id &&
+          message.content === completedTool.tool_call.output,
+      ),
+    ).toBe(true);
+    expect(mockCreateRun).toHaveBeenCalledTimes(1);
+    expect(mockCreateRun).toHaveBeenCalledWith(expect.objectContaining({ allowWorkBudget: true }));
+    expect(processStream).toHaveBeenCalledTimes(1);
+    const { trackBrainLearning, learnConfiguredBrainWithUsage } = require('@librechat/api');
+    expect(trackBrainLearning).toHaveBeenCalledTimes(1);
+    await expect(trackBrainLearning.mock.results[0].value).resolves.toEqual({
+      status: 'interrupted',
+      saved: 0,
+    });
+    expect(learnConfiguredBrainWithUsage).not.toHaveBeenCalled();
+  });
+
+  it('preserves pre-pause history when an explicitly resumed run reaches the limit', async () => {
+    const client = createClient();
+    const resume = jest
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('Runtime limit details'), { name: 'GraphRecursionError' }),
+      );
+    const processStream = jest.fn();
+    mockCreateRun.mockResolvedValue({
+      Graph: null,
+      resume,
+      processStream,
+      getCalibrationRatio: () => 0,
+    });
+
+    await client.resumeCompletion({
+      resumeValue: { answer: 'Fortsetzen' },
+      seedContent: [partialText, completedTool],
+    });
+
+    expect(client.contentParts.slice(0, 2)).toEqual([partialText, completedTool]);
+    expect(JSON.parse(client.contentParts[2].error)).toEqual({
+      type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+      status: 'incomplete',
+    });
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(processStream).not.toHaveBeenCalled();
+    expect(mockCreateRun).toHaveBeenCalledTimes(1);
+    expect(mockCreateRun).toHaveBeenCalledWith(
+      expect.objectContaining({ allowWorkBudget: true, resumeBudget: true }),
+    );
+  });
+
+  it.each(['halted', 'naturally_finished'])(
+    'keeps all completed parts after a proactive budget refusal (%s)',
+    async (outcome) => {
+      const client = createClient();
+      client.brainSession = {};
+      client.options.agent.hide_sequential_outputs = true;
+      const processStream = jest.fn(async () => {
+        client.contentParts.push(partialText, completedTool);
+      });
+      mockCreateRun.mockResolvedValue({
+        Graph: null,
+        processStream,
+        getCalibrationRatio: () => 0,
+        getHaltReason: () =>
+          outcome === 'halted' ? ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED : undefined,
+      });
+      require('@librechat/api').hasAgentWorkBudgetExhausted.mockReturnValue(
+        outcome === 'naturally_finished',
+      );
+
+      const result = await client.sendCompletion([]);
+
+      expect(result.completion.slice(0, 2)).toEqual([partialText, completedTool]);
+      expect(JSON.parse(result.completion[2].error)).toEqual({
+        type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+        status: 'incomplete',
+      });
+      expect(processStream).toHaveBeenCalledTimes(1);
+      expect(mockCreateRun).toHaveBeenCalledTimes(1);
+      expect(mockCreateRun).toHaveBeenCalledWith(
+        expect.objectContaining({ allowWorkBudget: true }),
+      );
+      expect(require('@librechat/api').learnConfiguredBrainWithUsage).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('AgentClient - titleConvo', () => {

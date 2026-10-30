@@ -1,5 +1,6 @@
 import { MemorySaver } from '@langchain/langgraph';
-import { FakeChatModel, Providers } from '@librechat/agents';
+import { executeHooks, FakeChatModel, Providers, Run } from '@librechat/agents';
+import type { HookRegistry } from '@librechat/agents';
 import { HumanMessage } from '@librechat/agents/langchain/messages';
 import type { BaseMessage } from '@librechat/agents/langchain/messages';
 import type { AppConfig, IUser } from '@librechat/data-schemas';
@@ -44,6 +45,7 @@ describe('local folder production graph wiring', () => {
     return createRun({
       runId: 'folder-run',
       hitlCapable,
+      allowWorkBudget: hitlCapable,
       signal: new AbortController().signal,
       user: { id: 'owner' } as IUser,
       requestBody: { conversationId: 'folder-chat' },
@@ -104,7 +106,10 @@ describe('local folder production graph wiring', () => {
         messages
           .filter((message) => message.getType() === 'human')
           .map((message) => message.content),
-      ).toEqual(['List my selected folder']);
+      ).toEqual([
+        'List my selected folder',
+        expect.stringContaining('Dieser Hinweis erteilt keine zusätzlichen Schreibrechte.'),
+      ]);
     },
     60_000,
   );
@@ -119,6 +124,28 @@ describe('local folder production graph wiring', () => {
     );
     expect(run.getInterrupt()).toBeUndefined();
   }, 60_000);
+
+  test('keeps folder approval below the budget and denies it after exhaustion', async () => {
+    const create = jest.spyOn(Run, 'create');
+    const run = await build();
+    const configuration = create.mock.calls[0][0];
+    const registry = configuration.hooks as HookRegistry;
+    expect(configuration.eagerEventToolExecution?.enabled).toBe(false);
+    const input = {
+      hook_event_name: 'PreToolUse' as const,
+      runId: 'folder-run',
+      executingAgentId: 'primary',
+      threadId: 'folder-chat',
+      toolName: call.name,
+      toolUseId: call.id,
+      toolInput: call.args,
+    };
+    run.Graph.config = { metadata: { langgraph_node: 'agent=primary', langgraph_step: 1 } };
+    expect(await executeHooks({ registry, input })).toMatchObject({ decision: 'ask' });
+    run.Graph.config.metadata!.langgraph_step = 45;
+    expect(await executeHooks({ registry, input })).toMatchObject({ decision: 'deny' });
+    expect(run.getInterrupt()).toBeUndefined();
+  });
 
   test('limits identical folder requests across actual checkpoint rebuilds', async () => {
     const config = {

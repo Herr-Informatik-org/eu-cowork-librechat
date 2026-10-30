@@ -89,6 +89,8 @@ const {
   hasYouTubeVideoParts,
   appendYouTubeVideoParts,
   resolveGoogleVideoError,
+  resolveAgentBudgetError,
+  hasAgentWorkBudgetExhausted,
   resolveYouTubeInjectionConfig,
   decrementPendingRequest,
   maybePrewarmCodeSandbox,
@@ -117,6 +119,7 @@ const {
   Permissions,
   VisionModes,
   ContentTypes,
+  ErrorTypes,
   ApprovalEvents,
   EModelEndpoint,
   PermissionTypes,
@@ -2339,6 +2342,7 @@ class AgentClient extends BaseClient {
     let run;
     /** @type {Promise<(TAttachment | null)[] | undefined>} */
     let memoryPromise;
+    let budgetStopped = false;
     const appConfig = this.options.req.config;
     const balanceConfig = getBalanceConfig(appConfig);
     const transactionsConfig = getTransactionsConfig(appConfig);
@@ -2651,6 +2655,7 @@ class AgentClient extends BaseClient {
           // opts into the tool-approval wiring. Non-resumable callers (OpenAI-compat, Responses)
           // leave this off so an approval-gated tool can't pause where there's no resume path.
           hitlCapable: true,
+          allowWorkBudget: true,
           localFolders: {
             grants: this.options.req?.body?.ephemeralAgent?.localFolders,
             history: this.options.req?._localFolderCalls,
@@ -2751,6 +2756,18 @@ class AgentClient extends BaseClient {
       this.options.startupTelemetry?.mark('run_input_prepared');
       await runAgents(initialMessages);
 
+      const budgetError = resolveAgentBudgetError({
+        code: hasAgentWorkBudgetExhausted(run)
+          ? ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED
+          : run?.getHaltReason?.(),
+      });
+      if (budgetError) {
+        budgetStopped = true;
+        this.contentParts.push({ type: ContentTypes.ERROR, error: budgetError });
+        // Keep every completed part; do not reshape or restart an incomplete run.
+        return;
+      }
+
       /**
        * Surface a completed `skill` tool_call content part per *manually*-
        * primed skill so the existing `SkillCall` frontend renderer shows
@@ -2817,9 +2834,12 @@ class AgentClient extends BaseClient {
           provider: this.options.agent?.provider,
           hasYouTubeVideo: this.injectedYouTubeVideo,
         });
+        const budgetError = resolveAgentBudgetError(err);
+        budgetStopped = budgetError != null;
         this.contentParts.push({
           type: ContentTypes.ERROR,
           [ContentTypes.ERROR]:
+            budgetError ??
             videoError ??
             `An error occurred while processing the request${err?.message ? `: ${err.message}` : ''}`,
         });
@@ -2849,7 +2869,7 @@ class AgentClient extends BaseClient {
           store: brainLearningStore,
           reportFailure: reportBrainFailure,
           action: () =>
-            abortController?.signal?.aborted
+            abortController?.signal?.aborted || budgetStopped
               ? Promise.resolve({ status: 'interrupted', saved: 0 })
               : learnConfiguredBrainWithUsage({
                   session,
@@ -3062,6 +3082,8 @@ class AgentClient extends BaseClient {
         // The resumed run can pause AGAIN (another tool, a follow-up question), and this
         // controller owns that lifecycle, so it must keep the HITL wiring on the rebuilt run.
         hitlCapable: true,
+        allowWorkBudget: true,
+        resumeBudget: true,
         localFolders: {
           grants: this.options.req?.body?.ephemeralAgent?.localFolders,
           history: this.options.req?._localFolderCalls,
@@ -3154,6 +3176,15 @@ class AgentClient extends BaseClient {
       // question). Re-arm the same interrupt gate so the cycle can repeat.
       await this.handleRunInterrupt(run, streamId);
 
+      const budgetError = resolveAgentBudgetError({
+        code: hasAgentWorkBudgetExhausted(run)
+          ? ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED
+          : run?.getHaltReason?.(),
+      });
+      if (budgetError) {
+        this.contentParts.push({ type: ContentTypes.ERROR, error: budgetError });
+        return;
+      }
       // Mirror chatCompletion: settle label fills before the filter below can
       // shift part positions out from under an in-flight fill's claimed index.
       await this.settleActivityLabels();
@@ -3180,7 +3211,9 @@ class AgentClient extends BaseClient {
         );
         this.contentParts.push({
           type: ContentTypes.ERROR,
-          [ContentTypes.ERROR]: `An error occurred while resuming the request${err?.message ? `: ${err.message}` : ''}`,
+          [ContentTypes.ERROR]:
+            resolveAgentBudgetError(err) ??
+            `An error occurred while resuming the request${err?.message ? `: ${err.message}` : ''}`,
         });
       }
     } finally {

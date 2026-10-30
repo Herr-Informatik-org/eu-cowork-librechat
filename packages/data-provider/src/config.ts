@@ -2647,6 +2647,8 @@ export enum ErrorTypes {
    * SSE stream 404 — job completed, expired, or was deleted before the subscriber connected
    */
   STREAM_EXPIRED = 'stream_expired',
+  /** A bounded agent run stopped before completing the requested work. */
+  AGENT_WORK_BUDGET_EXCEEDED = 'agent_work_budget_exceeded',
 }
 
 /**

@@ -2,7 +2,10 @@ import React from 'react';
 import { ErrorTypes } from 'librechat-data-provider';
 import { render, screen } from '@testing-library/react';
 import translation from '~/locales/en/translation.json';
+import germanTranslation from '~/locales/de/translation.json';
 import Error from '../Error';
+
+let mockLocale = 'en';
 
 /**
  * Resolves keys against the real English catalog rather than a stub, so a typed error whose
@@ -12,12 +15,42 @@ jest.mock('~/hooks', () => ({
   useLocalize:
     () =>
     (key: string): string =>
-      (jest.requireActual('~/locales/en/translation.json') as Record<string, string>)[key] ?? key,
+      (
+        (mockLocale === 'de'
+          ? jest.requireActual('~/locales/de/translation.json')
+          : jest.requireActual('~/locales/en/translation.json')) as Record<string, string>
+      )[key] ?? key,
 }));
 
 const catalog = translation as Record<string, string>;
 
 describe('Error — typed provider errors', () => {
+  beforeEach(() => {
+    mockLocale = 'en';
+  });
+
+  it('shows an honest German partial-result notice with no retry action', () => {
+    mockLocale = 'de';
+    render(
+      <Error
+        text={JSON.stringify({
+          type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+          status: 'incomplete',
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText(germanTranslation.com_error_agent_work_budget_exceeded),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/GraphRecursionError|recursionLimit|Troubleshooting URL/)).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('has an English fallback for the same persisted terminal reason', () => {
+    render(<Error text={JSON.stringify({ type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED })} />);
+    expect(screen.getByText(catalog.com_error_agent_work_budget_exceeded)).toBeInTheDocument();
+  });
   it('renders the localized copy for a rejected Google video', () => {
     /** The exact payload `resolveGoogleVideoError` emits from the server. */
     const payload = JSON.stringify({ type: ErrorTypes.GOOGLE_VIDEO_UNPROCESSABLE });

@@ -15,6 +15,16 @@
   Prüfbefunde. Eine vorbereitete Version wird erst über den vorhandenen
   Aktivierungsweg verwendet; Originale bleiben innerhalb der Rückkehrfrist erhalten.
 
+## 2026-10-30 — Lange Agentenaufträge mit erhaltenem Zwischenstand begrenzen
+
+- Lange Werkzeugabläufe im Chat erhalten einen Hinweis zum gebündelten Abrufen und zum
+  rechtzeitigen Abschluss. Die konfigurierte Arbeitsgrenze bleibt bestehen;
+  bereits ausgeführte Aktionen werden beim Erreichen der Grenze nicht automatisch
+  erneut gestartet.
+- Ein Budgetabbruch erscheint als verständlicher, ausdrücklich unvollständiger
+  Zwischenstand. Bisherige Antwortteile, Werkzeugresultate und erfolgreich
+  verarbeitete Dateien bleiben in derselben Antwort erhalten.
+
 ## 2026-10-30 — JSON- und XML-Exporte herunterladen
 
 - Dateikarten laden gespeicherte Dateien über den berechtigten Dateiweg herunter.
