@@ -664,7 +664,7 @@ it('shows recorded memory only on demand without learning from displayed mail co
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Brain-Info' }));
   expect(
-    await screen.findByText(/Der KI als persönlicher Kontext bereitgestellt: 2 Einträge/),
+    await screen.findByText('Der KI als persönlicher Kontext bereitgestellt (2):'),
   ).toBeVisible();
   expect(mockRule).not.toHaveBeenCalled();
   expect(mockChat).not.toHaveBeenCalled();
