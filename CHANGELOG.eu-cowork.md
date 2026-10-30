@@ -10,6 +10,28 @@
   Zwischenstand. Bisherige Antwortteile, Werkzeugresultate und erfolgreich
   verarbeitete Dateien bleiben in derselben Antwort erhalten.
 
+## 2026-10-30 — JSON- und XML-Exporte herunterladen
+
+- Dateikarten laden gespeicherte Dateien über den berechtigten Dateiweg herunter.
+  Externe Speicheradressen werden bei einer Downloadaktion nicht direkt geöffnet.
+- Downloadlinks in Antworten verwenden die zugehörigen Anhänge derselben Nachricht.
+  Sandbox-Verweise werden als Dateiauswahl aufgelöst, ohne das Schema im Browser
+  freizugeben. Mehrdeutige oder fehlende Dateien zeigen eine verständliche Meldung.
+- Dateiname und Originalinhalt bleiben erhalten. Freigaben, Kontozugriff und die
+  bestehende Zuordnung zum geschützten Code-Downloadweg werden weiter geprüft.
+
+
+## 2026-10-30 — Ruhige Mailvorschau mit sichtbaren Linkaktionen
+
+- Hinweise zu Vorschau, Linkprüfung und Bildern stehen hinter «Info» neben
+  «Kopieren». Die Mail selbst beginnt direkt unter der Werkzeugleiste.
+- Ein Klick auf einen freigegebenen Mail-Link zeigt das Ziel mit «In neuem Tab
+  öffnen» und einer Kopiermöglichkeit. Microsoft Safe Links bleiben erhalten.
+- Die Vorschau bleibt vom Anwendungsursprung getrennt. Nur eine statische,
+  per CSP-Hash freigegebene Klickvermittlung darf Linkindizes melden; Ziel und
+  aktuelle Freigabe werden nochmals im übergeordneten Fenster geprüft.
+
+
 ## 2026-10-29 — Kompakte lokale Ordnerauswahl
 
 - Ein kleiner Ordnerknopf zeigt den gewählten Namen und öffnet eine kompakte Liste

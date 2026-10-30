@@ -1,4 +1,52 @@
-import { isHttpDownloadTarget, triggerDownload } from '../downloadFile';
+import {
+  authenticatedCodeDownloadPath,
+  isHttpDownloadTarget,
+  triggerDownload,
+} from '../downloadFile';
+
+describe('authenticated code download paths', () => {
+  const origin = 'https://cowork.example';
+  const path = '/api/files/code/download/abcdefghijklmnopqrstu/ABCDEFGHIJKLMNOPQRSTU';
+
+  it('accepts only the exact application route and preserves deployment prefixes', () => {
+    expect(authenticatedCodeDownloadPath(path, '', origin)).toBe(path);
+    expect(authenticatedCodeDownloadPath(`${origin}${path}`, '', origin)).toBe(path);
+    expect(authenticatedCodeDownloadPath(`/cowork${path}`, '/cowork', origin)).toBe(
+      `/cowork${path}`,
+    );
+    expect(authenticatedCodeDownloadPath(path, '/cowork', origin)).toBeUndefined();
+  });
+
+  it('permits only an explicitly configured API origin with its deployment prefix', () => {
+    const apiBase = 'https://api.cowork.example/cowork';
+    expect(authenticatedCodeDownloadPath(`${apiBase}${path}`, apiBase, origin)).toBe(
+      `${apiBase}${path}`,
+    );
+    expect(
+      authenticatedCodeDownloadPath(`${origin}/cowork${path}`, apiBase, origin),
+    ).toBeUndefined();
+    expect(authenticatedCodeDownloadPath(`/cowork${path}`, apiBase, origin)).toBeUndefined();
+    expect(
+      authenticatedCodeDownloadPath(`https://other.example/cowork${path}`, apiBase, origin),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    'https://external.example/api/files/code/download/abcdefghijklmnopqrstu/ABCDEFGHIJKLMNOPQRSTU',
+    '//cowork.example/api/files/code/download/abcdefghijklmnopqrstu/ABCDEFGHIJKLMNOPQRSTU',
+    '/uploads/owner/file.json',
+    '/api/config',
+    '/api/files/code/download/short/file',
+    `${path}?next=https://external.example`,
+    `${path}#file.json`,
+    `/private/..${path}`,
+    path.replace('abcdefghijklmnopqrstu', '%61bcdefghijklmnopqrstu'),
+    `https://user:password@cowork.example${path}`,
+    `https://cowork.example\\@external.example${path}`,
+  ])('rejects untrusted or ambiguous download target %s', (target) => {
+    expect(authenticatedCodeDownloadPath(target, '', origin)).toBeUndefined();
+  });
+});
 
 describe('downloadFile utilities', () => {
   let clickSpy: jest.SpyInstance;

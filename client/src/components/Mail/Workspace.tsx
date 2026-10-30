@@ -573,6 +573,41 @@ const Detail = forwardRef<
       </details>
     </>
   );
+  const bodyActions = (
+    <>
+      {tab === 'draft' && !editing && (
+        <button
+          className="mail-button"
+          disabled={!data?.draft?.revision || data.draft.replyText === undefined || locked}
+          onClick={() => {
+            if (!data?.draft?.revision || data.draft.replyText === undefined) return;
+            onEditorChange({
+              result,
+              content: data,
+              body: data.draft.replyText,
+              revision: data.draft.revision,
+            });
+          }}
+        >
+          <FileText size={15} />
+          {t('com_ui_mail_edit')}
+        </button>
+      )}
+      <button
+        className="mail-button"
+        onClick={() =>
+          void navigator.clipboard
+            .writeText(editing && tab === 'draft' ? body : selectedBody?.body || '')
+            .then(() => setNotice(t('com_ui_mail_copied')))
+            .catch(() => setNotice(t('com_ui_mail_copy_error')))
+        }
+      >
+        <Copy size={15} />
+        {t('com_ui_mail_copy')}
+      </button>
+      {notice && <span role="status">{notice}</span>}
+    </>
+  );
   return (
     <article
       ref={detail}
@@ -806,41 +841,9 @@ const Detail = forwardRef<
       )}
       {tab !== 'chat' && selectedBody && (
         <section className="mail-body">
-          <div className="mail-body-actions">
-            {tab === 'draft' && !editing && (
-              <button
-                className="mail-button"
-                disabled={!data?.draft?.revision || data.draft.replyText === undefined || locked}
-                onClick={() => {
-                  if (!data?.draft?.revision || data.draft.replyText === undefined) return;
-                  onEditorChange({
-                    result,
-                    content: data,
-                    body: data.draft.replyText,
-                    revision: data.draft.revision,
-                  });
-                }}
-              >
-                <FileText size={15} />
-                {t('com_ui_mail_edit')}
-              </button>
-            )}
-            <button
-              className="mail-button"
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(editing && tab === 'draft' ? body : selectedBody.body)
-                  .then(() => setNotice(t('com_ui_mail_copied')))
-                  .catch(() => setNotice(t('com_ui_mail_copy_error')))
-              }
-            >
-              <Copy size={15} />
-              {t('com_ui_mail_copy')}
-            </button>
-            {notice && <span role="status">{notice}</span>}
-          </div>
           {tab === 'draft' && editing ? (
             <>
+              <div className="mail-body-actions">{bodyActions}</div>
               <label className="mail-edit-label">
                 {t('com_ui_mail_edit_hint')}
                 <textarea
@@ -885,6 +888,7 @@ const Detail = forwardRef<
             </>
           ) : (
             <MailImages
+              actions={bodyActions}
               key={`${data?.mailbox}:${result.id}:${result.revision}:${tab}:${data?.draft?.revision || ''}`}
               id={result.id}
               revision={result.revision}

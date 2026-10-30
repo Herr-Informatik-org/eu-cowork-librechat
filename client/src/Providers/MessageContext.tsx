@@ -1,7 +1,10 @@
 import { createContext, useContext } from 'react';
+import type { TAttachment } from 'librechat-data-provider';
 
 type MessageContext = {
   messageId: string;
+  /** Only attachments of this assistant message may resolve generated sandbox links. */
+  downloadAttachments?: readonly TAttachment[];
   nextType?: string;
   partIndex?: number;
   isExpanded: boolean;

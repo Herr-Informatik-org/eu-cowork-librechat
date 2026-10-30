@@ -21,6 +21,7 @@ import SubRow from '~/components/Chat/Messages/SubRow';
 import { fontSizeAtom } from '~/store/fontSize';
 import { MessageContext } from '~/Providers';
 import store from '~/store';
+import useAttachments from '~/hooks/Messages/useAttachments';
 
 type MessageRenderProps = {
   message?: TMessage;
@@ -132,15 +133,27 @@ const MessageRender = memo(function MessageRender({
 
   const { hasParallelContent } = useContentMetadata(msg);
   const messageId = msg?.messageId ?? '';
+  const { attachments: downloadAttachments } = useAttachments({
+    messageId,
+    attachments: msg?.attachments,
+  });
   const messageContextValue = useMemo(
     () => ({
       messageId,
+      downloadAttachments: msg?.isCreatedByUser ? undefined : downloadAttachments,
       isLatestMessage,
       isExpanded: false as const,
       isSubmitting,
       conversationId: conversation?.conversationId,
     }),
-    [messageId, conversation?.conversationId, isSubmitting, isLatestMessage],
+    [
+      messageId,
+      conversation?.conversationId,
+      isSubmitting,
+      isLatestMessage,
+      msg?.isCreatedByUser,
+      downloadAttachments,
+    ],
   );
 
   if (!msg) {

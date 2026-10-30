@@ -799,6 +799,62 @@ describe('File Routes - Delete with Agent Access', () => {
   });
 
   describe('GET /files/download/:userId/:file_id', () => {
+    it.each([
+      ['json', 'application/json', '{\r\n  "kunde": "Müller", "tickets": [1, 2]\r\n}\n'],
+      ['xml', 'application/xml', '<?xml version="1.0"?><kunde>Müller</kunde>\r\n'],
+      ['xml', 'text/xml', '<?xml version="1.0"?><tickets><id>160</id></tickets>\n'],
+    ])('downloads %s (%s) as an attachment without altering its bytes', async (ext, type, text) => {
+      const userFileId = uuidv4();
+      const filename = `kundendienst_letzte160_tickets.${ext}`;
+      const filepath = `/uploads/${otherUserId}/${userFileId}__${filename}`;
+      const bytes = Buffer.from(text, 'utf8');
+      const getDownloadStream = jest.fn().mockResolvedValue(Readable.from([bytes]));
+      getStrategyFunctions.mockReturnValue({ getDownloadStream });
+      await createFile({
+        user: otherUserId,
+        file_id: userFileId,
+        filename,
+        filepath,
+        bytes: bytes.length,
+        type,
+        source: FileSources.local,
+      });
+
+      const response = await request(app).get(`/files/download/${otherUserId}/${userFileId}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(bytes);
+      expect(response.headers['content-type']).toBe('application/octet-stream');
+      expect(response.headers['content-disposition']).toBe(
+        `attachment; filename="${filename}"; filename*=UTF-8''${filename}`,
+      );
+      expect(getDownloadStream).toHaveBeenCalledWith(expect.any(Object), filepath);
+    });
+
+    it.each([
+      ['json', 'application/json'],
+      ['xml', 'application/xml'],
+    ])('does not grant access to another owner through a %s download URL', async (ext, type) => {
+      const foreignFileId = uuidv4();
+      const getDownloadStream = jest.fn();
+      getStrategyFunctions.mockReturnValue({ getDownloadStream });
+      await createFile({
+        user: authorId,
+        file_id: foreignFileId,
+        filename: `private.${ext}`,
+        filepath: `/uploads/${authorId}/${foreignFileId}__private.${ext}`,
+        bytes: 10,
+        type,
+        source: FileSources.local,
+      });
+
+      const response = await request(app).get(`/files/download/${authorId}/${foreignFileId}`);
+
+      expect(response.status).toBe(403);
+      expect(getDownloadStream).not.toHaveBeenCalled();
+      expect(response.headers['content-disposition']).toBeUndefined();
+    });
+
     it('streams proxied downloads by default when a direct URL is available', async () => {
       const userFileId = uuidv4();
       const getDownloadURL = jest.fn().mockResolvedValue('https://cdn.example.com/file.pdf?signed');

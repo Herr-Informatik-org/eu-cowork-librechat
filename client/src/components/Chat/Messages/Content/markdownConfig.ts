@@ -14,6 +14,8 @@ import {
 import { Citation, CompositeCitation, HighlightedText } from '~/components/Web/Citation';
 import { Artifact, artifactPlugin } from '~/components/Artifacts/Artifact';
 import { code, a, p, img, table } from './MarkdownComponents';
+import GeneratedFileLink from './GeneratedFileLink';
+import { rehypeGeneratedFileLinks } from './generatedFileLinks';
 import { langSubset, remarkApproxTilde } from '~/utils';
 import { unicodeCitation } from '~/components/Web';
 
@@ -53,6 +55,7 @@ export const getRemarkPlugins = (): PluggableList => {
 export const getRehypePlugins = (): PluggableList => {
   if (rehypePluginsCache === null) {
     rehypePluginsCache = [
+      rehypeGeneratedFileLinks,
       [rehypeKatex],
       [rehypeHighlight, { detect: true, ignoreMissing: true, subset: langSubset }],
     ];
@@ -65,6 +68,7 @@ export const getMarkdownComponents = (): { [nodeType: string]: ElementType } => 
     markdownComponentsCache = {
       code,
       a,
+      'generated-file-link': GeneratedFileLink,
       p,
       img,
       table,

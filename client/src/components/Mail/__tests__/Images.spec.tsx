@@ -159,7 +159,8 @@ test('has no image action for mails without embedded images and refuses data ima
       />
     </QueryClientProvider>,
   );
-  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'com_ui_mail_images_load' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'com_ui_mail_preview_info' })).toBeInTheDocument();
   const doc = new DOMParser().parseFromString(frame(), 'text/html');
   expect(doc.body.querySelector('img[src]')).toBeNull();
   expect(load).not.toHaveBeenCalled();
