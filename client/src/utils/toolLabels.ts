@@ -19,6 +19,7 @@ export const TOOL_FRIENDLY_NAME_KEYS: Record<string, TranslationKeys> = {
   image_edit_oai: 'com_ui_tool_name_image_edit',
   gemini_image_gen: 'com_ui_tool_name_image_gen',
   file_search: 'com_ui_tool_name_file_search',
+  local_folder: 'com_ui_local_folder',
   code_interpreter: 'com_ui_tool_name_code_analysis',
   retrieval: 'com_ui_tool_name_file_search',
   ask_user_question: 'com_ui_tool_name_ask_user_question',

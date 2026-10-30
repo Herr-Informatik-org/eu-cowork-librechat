@@ -1544,6 +1544,8 @@ export type TRumConfig = {
 export type StartupConfigContext = 'share';
 
 export type TStartupConfig = {
+  /** Browser-local, read-only folder tools; exposed only after authentication. */
+  localFoldersEnabled?: boolean;
   appTitle: string;
   socialLogins?: string[];
   langfuseFanoutEnabled?: boolean;
@@ -1814,10 +1816,12 @@ export const memoryAgentSchema = z.union([
     enabled: z.boolean().optional(),
     id: z.string(),
   }),
-  z.object({
-    enabled: z.boolean().optional(),
-    inherit: z.literal(true),
-  }).strict(),
+  z
+    .object({
+      enabled: z.boolean().optional(),
+      inherit: z.literal(true),
+    })
+    .strict(),
 ]);
 
 export const memorySchema = z.object({
@@ -1830,10 +1834,12 @@ export const memorySchema = z.object({
   messageWindowSize: z.number().optional().default(5),
   agent: memoryAgentSchema.optional(),
   bootstrapAgent: memoryAgentSchema.optional(),
-  organizationContext: z.object({
-    text: z.string().max(20000),
-    version: z.string().trim().min(1).max(100),
-  }).optional(),
+  organizationContext: z
+    .object({
+      text: z.string().max(20000),
+      version: z.string().trim().min(1).max(100),
+    })
+    .optional(),
   useMcpContext: z.boolean().optional(),
 });
 

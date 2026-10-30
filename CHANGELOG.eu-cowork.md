@@ -10,6 +10,31 @@
   Zwischenstand. Bisherige Antwortteile, Werkzeugresultate und erfolgreich
   verarbeitete Dateien bleiben in derselben Antwort erhalten.
 
+## 2026-10-29 — Kompakte lokale Ordnerauswahl
+
+- Ein kleiner Ordnerknopf zeigt den gewählten Namen und öffnet eine kompakte Liste
+  mit verbundenen Ordnern, «Kein Ordner» und «Ordner öffnen…».
+- Der lange Hinweis unter dem Eingabefeld und im Werkzeugmenü entfällt. Laufender
+  Zugriff und Zugriffsfehler bleiben über Symbol und zugängliche Statusmeldung sichtbar.
+- Entfernen einzelner Freigaben oder aller Freigaben des aktuellen Chats bleibt
+  unmittelbar wirksam. Dateiverarbeitung, Berechtigungen und Grenzen bleiben erhalten.
+
+## 2026-10-29 — Lokale Ordner im Chat lesen
+
+- Hinter `EUCOWORK_LOCAL_FOLDERS=true` lassen sich bis zu drei lokale Ordner
+  im Chat verbinden. Browserfreigaben bleiben an Konto und Chat gebunden und
+  werden beim Entfernen, Abmelden oder Schliessen beendet.
+- Ein fester lesender Werkzeugweg fordert begrenzte Suchtreffer und Ausschnitte
+  im Browser an. Der Server prüft Besitzer, Generation, Aktion und Ausgabegrösse;
+  allgemeine Freigabe-Bypässe erlauben keinen direkten Dateizugriff.
+- Ein Browser-Worker verarbeitet UTF-8-Text und grosse Logs in Blöcken, PDFs über
+  Bytebereiche und Seiten, DOCX über den begrenzten Haupttext. Fortsetzungen und
+  nicht geprüfte Bereiche bleiben sichtbar; es gibt keine lokale Codeausführung.
+- Ergebnisse sind unzuverlässige Dokumentdaten im Chat, keine persönlichen
+  Benutzerangaben zum automatischen Lernen. Das Release wird zunächst nur auf
+  CWV01 über dessen gesonderten Updatehelfer bereitgestellt. Der gemeinsame
+  Build erhält den bereits installierten persönlichen Brain- und Mailstand.
+
 ## 2026-10-29 — Sichere Mailbearbeitung und manuelle Kundenrecherche
 
 - Ctrl/Cmd+Enter funktioniert auch beim Anfordern eines Antwortentwurfs.

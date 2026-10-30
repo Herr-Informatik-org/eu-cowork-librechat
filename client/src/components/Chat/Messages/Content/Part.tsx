@@ -31,6 +31,7 @@ import { ErrorMessage } from './MessageContent';
 import AskUserQuestion from './AskUserQuestion';
 import RetrievalCall from './RetrievalCall';
 import ToolApproval from './ToolApproval';
+import LocalFolderActionStatus from '~/localFolders/ActionStatus';
 import AgentHandoff from './AgentHandoff';
 import CodeAnalyze from './CodeAnalyze';
 import Container from './Container';
@@ -364,10 +365,12 @@ const Part = memo(function Part({
        *  still surfaces approve/reject/edit/respond. Only while the call is unresolved
        *  (no output yet). */
       if (toolCall.approval != null && (toolCall.output?.length ?? 0) === 0) {
+        const ApprovalCard =
+          toolCall.name === 'local_folder' ? LocalFolderActionStatus : ToolApproval;
         return (
           <>
             {card}
-            <ToolApproval
+            <ApprovalCard
               approval={toolCall.approval}
               toolCallId={toolCall.id ?? ''}
               args={toolCall.args}

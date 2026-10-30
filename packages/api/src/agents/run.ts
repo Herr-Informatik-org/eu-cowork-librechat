@@ -67,6 +67,13 @@ import { buildLangfuseConfig } from '~/langfuse/config';
 import { resolveConfigHeaders } from '~/utils/headers';
 import { applyTestRunHook } from '~/agents/testHook';
 import { isUserProvided } from '~/utils/common';
+import {
+  LOCAL_FOLDER_TOOL_NAME,
+  createLocalFolderTool,
+  createLocalFolderHook,
+  hasLocalFolderAccess,
+  parseLocalFolderGrants,
+} from '~/localFolders';
 
 /** Expected shape of JSON tool search results */
 interface ToolSearchJsonResult {
@@ -1091,6 +1098,7 @@ export async function createRun({
   activityLabel,
   hitlCapable = false,
   resumeBudget = false,
+  localFolders,
   toolInputValidationErrors,
   streaming = true,
   streamUsage = true,
@@ -1179,6 +1187,12 @@ export async function createRun({
   hitlCapable?: boolean;
   /** A resumed graph starts its step counter at the checkpoint's absolute step. */
   resumeBudget?: boolean;
+  /** Browser capability metadata, only supplied by the authenticated resumable chat controller. */
+  localFolders?: {
+    grants?: unknown;
+    history?: unknown;
+    getRemainingTokens?: () => number | undefined;
+  };
   /** Request-scoped tool input failures consumed by the completion handler. */
   toolInputValidationErrors?: Map<string, ToolInputValidationError>;
 } & Pick<
@@ -1215,6 +1229,37 @@ export async function createRun({
   /** Admin kill switch for the ask tool — see {@link isAskUserQuestionAdminDisabled}. */
   const askToolAdminDisabled = isAskUserQuestionAdminDisabled(appConfig);
   const mandatoryApproval = buildMandatoryApproval(appConfig?.mcpConfig, hitlCapable);
+  const folderGrants =
+    hitlCapable &&
+    user?.id &&
+    requestBody?.conversationId &&
+    hasLocalFolderAccess(localFolders?.grants)
+      ? parseLocalFolderGrants(localFolders?.grants)
+      : [];
+  const usesLocalFolders = folderGrants.length > 0;
+  const localFolderRun: { current?: Run<IState> } = {};
+  // getRunMessages returns only the current segment; budget against the full graph context.
+  const getFolderMessages = (): readonly BaseMessage[] =>
+    localFolderRun.current?.Graph.messages ?? messages ?? [];
+  const localFolderHook = createLocalFolderHook({
+    grants: folderGrants,
+    history: localFolders?.history,
+    hitlCapable,
+    userId: user?.id,
+    conversationId: requestBody?.conversationId,
+    signal,
+    getMessages: getFolderMessages,
+    getRemainingTokens: () => {
+      const live = localFolders?.getRemainingTokens?.();
+      if (typeof live === 'number' && Number.isFinite(live)) return Math.max(0, live);
+      const primary = agents[0];
+      const limit = primary?.maxContextTokens ?? primary?.baseContextTokens ?? 8192;
+      if (!tokenCounter) return 0;
+      const used = getFolderMessages().reduce((sum, message) => sum + tokenCounter(message), 0);
+      // Leave headroom for model output, tool schemas and message envelopes.
+      return Math.max(0, limit - used - 4096);
+    },
+  });
 
   const buildAgentInput = (agent: RunAgent, opts: { isSubagent?: boolean } = {}): AgentInputs => {
     const isSubagent = opts.isSubagent === true;
@@ -1354,6 +1399,13 @@ export async function createRun({
      * admin-disabled) it is stripped fail-closed with no replacement.
      */
     let tools = agent.tools;
+    // A browser capability can never be delegated, loaded from an agent registry or run eagerly.
+    tools = tools?.filter((tool) => (tool as { name?: string })?.name !== LOCAL_FOLDER_TOOL_NAME);
+    toolDefinitions = toolDefinitions.filter((tool) => tool.name !== LOCAL_FOLDER_TOOL_NAME);
+    if (toolRegistry?.has(LOCAL_FOLDER_TOOL_NAME)) {
+      toolRegistry = new Map(toolRegistry);
+      toolRegistry.delete(LOCAL_FOLDER_TOOL_NAME);
+    }
     // Remote programmatic bridges invoke inner MCP tools outside the approval hooks.
     // Protected writes must stay direct; non-resumable callers/subagents cannot approve.
     const unavailable = (name: string) =>
@@ -1412,6 +1464,9 @@ export async function createRun({
     };
     const directGraphTools = [
       ...(askGraphTools ?? []),
+      ...(!isSubagent && agent === agents[0] && usesLocalFolders
+        ? [createLocalFolderTool(folderGrants)]
+        : []),
       ...(!isSubagent ? (agent.brainTools ?? []) : []),
     ];
     if (directGraphTools.length > 0) {
@@ -1511,7 +1566,7 @@ export async function createRun({
         // listed by the admin) — approving the right to ask a question is a
         // pure double-pause; the tool has no side effects to gate.
         exemptAskUserQuestionFromApproval(
-          mandatoryApproval.enabled && !toolApprovalPolicy?.enabled
+          (mandatoryApproval.enabled || usesLocalFolders) && !toolApprovalPolicy?.enabled
             ? { enabled: true, mode: 'bypass' }
             : toolApprovalPolicy,
           ASK_USER_QUESTION_TOOL_NAME,
@@ -1554,6 +1609,10 @@ export async function createRun({
     hooks = hooks ?? new HookRegistry();
     // Independent of endpoint allow/bypass settings; denial wins in non-HITL routes.
     hooks.register('PreToolUse', { hooks: [mandatoryApproval.hook] });
+  }
+  if (usesLocalFolders) {
+    hooks = hooks ?? new HookRegistry();
+    hooks.register('PreToolUse', { hooks: [localFolderHook] });
   }
   if (process.env.HOSTED_USAGE_REQUIRED === 'true') {
     hooks = hooks ?? new HookRegistry();
@@ -1642,13 +1701,14 @@ export async function createRun({
     // `interrupt()` from its tool body, which must run inside the Pregel task
     // frame — a speculative eager execution could never pause the run.
     eagerEventToolExecution: {
-      enabled: !mandatoryApproval.enabled,
+      enabled: !mandatoryApproval.enabled && !usesLocalFolders,
       excludeToolNames: [
         CREATE_FILE_TOOL_NAME,
         EDIT_FILE_TOOL_NAME,
         Constants.EXECUTE_CODE,
         Constants.BASH_TOOL,
         ASK_USER_QUESTION_TOOL_NAME,
+        LOCAL_FOLDER_TOOL_NAME,
         /**
          * Background-capable tools: eager execution could launch the detached
          * task with speculative/partial args before the final tool call, and a
@@ -1720,6 +1780,7 @@ export async function createRun({
   };
   const run = await Run.create(runConfig);
   bindWorkBudget?.(run);
+  localFolderRun.current = run;
 
   applyCustomHandoffPromptKeyCompatibility(run, runConfig.graphConfig);
   applyTestRunHook(run, { messages, agents });

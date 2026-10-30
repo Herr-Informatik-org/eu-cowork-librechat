@@ -15,6 +15,7 @@ import type { RefillIntervalUnit } from './balance';
 import type { SettingDefinition } from './generate';
 import type { TMinimalFeedback } from './feedback';
 import type { ContentTypes } from './types/runs';
+import type { LocalFolderGrant } from './types/localFolders';
 
 export * from './schemas';
 
@@ -102,6 +103,8 @@ export type TEndpointOption = Pick<
 };
 
 export type TEphemeralAgent = {
+  /** At most three browser-owned read-only folders for this chat. */
+  localFolders?: LocalFolderGrant[];
   mcp?: string[];
   web_search?: boolean;
   file_search?: boolean;
