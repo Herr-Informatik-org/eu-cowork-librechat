@@ -64,6 +64,7 @@ type PartWithContextProps = {
   isCreatedByUser: boolean;
   isLast: boolean;
   partAttachments: TAttachment[] | undefined;
+  downloadAttachments?: TAttachment[];
   hideAttachments?: boolean;
   onToolExpand?: () => void;
 };
@@ -80,12 +81,14 @@ const PartWithContext = memo(function PartWithContext({
   isCreatedByUser,
   isLast,
   partAttachments,
+  downloadAttachments,
   hideAttachments,
   onToolExpand,
 }: PartWithContextProps) {
   const contextValue = useMemo(
     () => ({
       messageId,
+      downloadAttachments: isCreatedByUser ? undefined : downloadAttachments,
       isExpanded: true as const,
       conversationId,
       partIndex: idx,
@@ -93,7 +96,16 @@ const PartWithContext = memo(function PartWithContext({
       isSubmitting,
       isLatestMessage,
     }),
-    [messageId, conversationId, idx, nextType, isSubmitting, isLatestMessage],
+    [
+      messageId,
+      conversationId,
+      idx,
+      nextType,
+      isSubmitting,
+      isLatestMessage,
+      isCreatedByUser,
+      downloadAttachments,
+    ],
   );
 
   return (
@@ -273,11 +285,13 @@ const ContentParts = memo(function ContentParts({
             attachmentMap[getToolCallId(part)],
             getPartAgentId(part),
           )}
+          downloadAttachments={attachments}
         />
       );
     },
     [
       attachmentMap,
+      attachments,
       content,
       conversationId,
       effectiveIsSubmitting,
@@ -307,6 +321,7 @@ const ContentParts = memo(function ContentParts({
             attachmentMap[getToolCallId(part)],
             getPartAgentId(part),
           )}
+          downloadAttachments={attachments}
           hideAttachments
           onToolExpand={onToolExpand}
         />
@@ -314,6 +329,7 @@ const ContentParts = memo(function ContentParts({
     },
     [
       attachmentMap,
+      attachments,
       content,
       conversationId,
       effectiveIsSubmitting,

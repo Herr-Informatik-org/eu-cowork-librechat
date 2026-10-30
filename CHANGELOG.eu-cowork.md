@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-30 — JSON- und XML-Exporte herunterladen
+
+- Dateikarten laden gespeicherte Dateien über den berechtigten Dateiweg herunter.
+  Externe Speicheradressen werden bei einer Downloadaktion nicht direkt geöffnet.
+- Downloadlinks in Antworten verwenden die zugehörigen Anhänge derselben Nachricht.
+  Sandbox-Verweise werden als Dateiauswahl aufgelöst, ohne das Schema im Browser
+  freizugeben. Mehrdeutige oder fehlende Dateien zeigen eine verständliche Meldung.
+- Dateiname und Originalinhalt bleiben erhalten. Freigaben, Kontozugriff und die
+  bestehende Zuordnung zum geschützten Code-Downloadweg werden weiter geprüft.
+
+
 ## 2026-10-30 — Ruhige Mailvorschau mit sichtbaren Linkaktionen
 
 - Hinweise zu Vorschau, Linkprüfung und Bildern stehen hinter «Info» neben

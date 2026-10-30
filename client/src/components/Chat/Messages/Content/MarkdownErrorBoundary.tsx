@@ -7,6 +7,8 @@ import type { PluggableList } from 'unified';
 import { code, codeNoExecution, a, p, table } from './MarkdownComponents';
 import { langSubset, remarkApproxTilde } from '~/utils';
 import { CodeBlockProvider } from '~/Providers';
+import GeneratedFileLink from './GeneratedFileLink';
+import { rehypeGeneratedFileLinks } from './generatedFileLinks';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -47,6 +49,7 @@ class MarkdownErrorBoundary extends React.Component<
       const { content, codeExecution = true } = this.props;
 
       const rehypePlugins: PluggableList = [
+        rehypeGeneratedFileLinks,
         [
           rehypeHighlight,
           {
@@ -74,6 +77,7 @@ class MarkdownErrorBoundary extends React.Component<
                 a,
                 p,
                 table,
+                'generated-file-link': GeneratedFileLink,
               } as {
                 [nodeType: string]: React.ElementType;
               }
