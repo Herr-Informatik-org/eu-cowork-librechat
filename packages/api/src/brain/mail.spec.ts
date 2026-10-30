@@ -1,3 +1,5 @@
+import { mailAnalysisSchema } from '../mailAssistant/engine';
+import { brainUsageSchema } from './usage';
 import type { ServerRequest } from '~/types';
 import type { BrainNode } from 'librechat-data-provider';
 import { readPersonalMailContext, rememberPersonalMailRule } from './mail';
@@ -123,4 +125,53 @@ it('preserves dates so the model can resolve explicitly changed rules within the
     createdAt: '2026-10-01T12:00:00Z',
     updatedAt: '2026-10-27T12:00:00Z',
   });
+});
+
+it('preserves a project preference selected by the shared recall without exposing another contact', async () => {
+  fetchBrain.mockResolvedValue({
+    nodes: [
+      node('atlas-rule', 'Projekt Atlas'),
+      node('foreign-contact', 'Mail: other@example.com'),
+    ],
+  });
+  const result = await readPersonalMailContext(req(), roles, {
+    query: 'Schreibe eine Antwort zu Projekt Atlas.',
+    sender: 'a@example.com',
+  });
+  expect(result.count).toBe(1);
+  expect(result.context).toContain('Projekt Atlas');
+  expect(result.context).not.toContain('foreign-contact');
+  expect(result.items?.map((item) => item.id)).toEqual(['atlas-rule']);
+});
+
+it('accepts cleared validity dates from the service JSON through the mail analysis contract', async () => {
+  const cleared = JSON.parse(
+    JSON.stringify({
+      ...node('cleaned-rule', 'Mail'),
+      title: 'Kurze Mailantworten',
+      status: 'active',
+      validFrom: null,
+      validUntil: null,
+    }),
+  ) as BrainNode;
+  fetchBrain.mockResolvedValue({ nodes: [cleared] });
+  const { context: _context, ...memory } = await readPersonalMailContext(req(), roles, {
+    query: 'Eine kurze Antwort schreiben.',
+    sender: 'a@example.com',
+  });
+  expect(memory.items?.[0].validFrom).toBeUndefined();
+  expect(memory.items?.[0].validUntil).toBeUndefined();
+  expect(JSON.stringify(memory)).not.toContain('validUntil');
+  expect(brainUsageSchema.safeParse(memory).success).toBe(true);
+  expect(
+    mailAnalysisSchema.safeParse({
+      priority: 'normal',
+      action: 'reply',
+      summary: 'Antwort nötig',
+      reason: 'Eine Rückfrage ist offen',
+      questions: [],
+      draft: '',
+      memory,
+    }).success,
+  ).toBe(true);
 });

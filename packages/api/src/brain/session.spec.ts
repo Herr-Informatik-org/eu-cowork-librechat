@@ -207,6 +207,39 @@ describe('personal Brain scope and grounding', () => {
         });
     },
   );
+  it('binds every recall to the original authored contact rather than later model search text', async () => {
+    const scopes: Array<string[] | undefined> = [];
+    jest.spyOn(global, 'fetch').mockImplementation(async (_url, request) => {
+      const body = JSON.parse(String(request?.body));
+      scopes.push(body.applicableScopes);
+      return new Response(
+        JSON.stringify({
+          context: 'Regel für Anna',
+          nodes: [],
+          edges: [],
+          recall: {},
+          hasMore: false,
+          suggestedIds: [],
+          stopReason: 'fertig',
+        }),
+      );
+    });
+    const session = createBrainSession({
+      userId: 'owner',
+      conversationId: 'conversation',
+      messageId: 'response',
+      source: { ...source, text: 'Schreibe eine E-Mail an anna@example.test.' },
+      contextBudgetTokens: 12000,
+      canWrite: false,
+      canUpdate: false,
+    });
+    await session.initialize();
+    await session.tools[0].invoke({ query: 'E-Mail an bernd@example.test', seedIds: [] });
+    expect(scopes).toEqual([
+      ['Mail: anna@example.test', 'Mail'],
+      ['Mail: anna@example.test', 'Mail'],
+    ]);
+  });
   it('replaces legacy writes without mutating the shared tool registry', () => {
     const original = new Map([
       [

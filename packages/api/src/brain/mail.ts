@@ -67,11 +67,7 @@ export async function readPersonalMailContext(
     const lines: string[] = [];
     const items: BrainUsageItem[] = [];
     for (const node of result.nodes) {
-      if (
-        selected.has(node.id) ||
-        (node.scope?.startsWith('Mail: ') && node.scope !== scope) ||
-        (node.kind === 'preference' && node.scope && ![scope, 'Mail'].includes(node.scope))
-      )
+      if (selected.has(node.id) || (node.scope?.startsWith('Mail: ') && node.scope !== scope))
         continue;
       const line = JSON.stringify({
         id: node.id,

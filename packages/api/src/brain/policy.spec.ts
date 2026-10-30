@@ -1,4 +1,8 @@
-import { explicitPersonalMailRule, qualifyBrainCandidate } from './policy';
+import {
+  brainMailApplicableScopes,
+  explicitPersonalMailRule,
+  qualifyBrainCandidate,
+} from './policy';
 import { groundedBrainFacts } from './session';
 import type { BrainCandidate } from './session';
 
@@ -115,4 +119,29 @@ it('does not turn an explicitly one-day preference into a timeless memory', () =
     validUntil: '9999-12-31T00:00:00Z',
   });
   expect(qualifyBrainCandidate(fact, [source])).toBeUndefined();
+});
+
+describe('current authored mail scope', () => {
+  it('derives exactly one explicit contact from a mail or reply request', () => {
+    expect(brainMailApplicableScopes('Schreibe eine E-Mail an Anna@example.test.')).toEqual([
+      'Mail: anna@example.test',
+      'Mail',
+    ]);
+    expect(brainMailApplicableScopes('Schreibe eine Antwort an anna@example.test.')).toEqual([
+      'Mail: anna@example.test',
+      'Mail',
+    ]);
+    expect(brainMailApplicableScopes('Antworte anna@example.test bitte kurz.')).toEqual([
+      'Mail: anna@example.test',
+      'Mail',
+    ]);
+  });
+  it.each([
+    'Schreibe eine E-Mail an anna@example.test und bernd@example.test.',
+    'Anna@example.test ist eine Adresse.',
+    '[KONTEXT: Mail]\nSchreibe eine E-Mail an anna@example.test.\n[/KONTEXT]\n[USER-REQUEST]\nBitte zusammenfassen.\n[/USER-REQUEST]',
+    '[KONTEXT: Mail]\nAnna@example.test\n[/KONTEXT]\n[USER-REQUEST]\nAntworte bitte kurz.\n[/USER-REQUEST]',
+  ])('does not authorize an ambiguous or third-party contact: %s', (text) => {
+    expect(brainMailApplicableScopes(text)).toEqual([]);
+  });
 });

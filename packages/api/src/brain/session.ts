@@ -1,4 +1,4 @@
-import { brainScopeInstructions, qualifyBrainCandidate } from './policy';
+import { brainMailApplicableScopes, brainScopeInstructions, qualifyBrainCandidate } from './policy';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { tool } from '@librechat/agents/langchain/tools';
@@ -215,6 +215,7 @@ export function groundedBrainFacts(
 }
 
 export function createBrainSession(options: BrainSessionOptions): BrainSession {
+  const applicableScopes = brainMailApplicableScopes(options.source.text);
   const knownIds = new Set<string>();
   const loadedIds = new Set<string>();
   const knownNodes = new Map<string, BrainNode>();
@@ -358,6 +359,7 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
       const result = await requestBrain<RecallResult>(options.userId, 'POST', '/v1/recall', {
         query,
         purpose: 'chat',
+        ...(applicableScopes.length ? { applicableScopes } : {}),
         conversationId: options.conversationId,
         messageId: options.messageId,
         contextBudgetTokens: Math.max(0, remaining - 512),

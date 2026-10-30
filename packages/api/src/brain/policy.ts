@@ -12,6 +12,32 @@ export function personalMailScope(sender: string): string {
   return `Mail: ${address.length <= 150 ? address : createHash('sha256').update(address).digest('hex')}`;
 }
 
+/** Derive contact applicability only from the current authored mail task, never a model query. */
+export function brainMailApplicableScopes(text: string): string[] {
+  const authored = brainAuthoredText(text);
+  const replyTask = /\b(?:antworte|beantworte|antworten|beantworten|reply|respond)\b/i.test(
+    authored,
+  );
+  const mailTask =
+    /\b(?:schreibe|schreib|schreiben|formuliere|verfasse|entwirf|write|compose|draft)\b/i.test(
+      authored,
+    ) && /\b(?:(?:e-?)?mails?|emails?|antwort|reply)\b/i.test(authored);
+  if (!replyTask && !mailTask) return [];
+  const addresses = [
+    ...new Set(
+      (authored.match(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []).map(
+        (address) => address.toLowerCase(),
+      ),
+    ),
+  ];
+  if (addresses.length !== 1) return [];
+  try {
+    return [personalMailScope(addresses[0]), 'Mail'];
+  } catch {
+    return [];
+  }
+}
+
 const mailWords = /\b(?:(?:e-?)?mails?|mailantwort\w*|email\w*)\b/i;
 const globalWords =
   /\b(?:generell|grundsätzlich|grundsaetzlich|allgemein|überall|ueberall|in allen (?:antworten|chats)|generally|all responses)\b/i;

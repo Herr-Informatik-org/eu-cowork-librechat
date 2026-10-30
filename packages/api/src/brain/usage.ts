@@ -48,8 +48,8 @@ export function brainUsageItem(node: BrainNode): BrainUsageItem {
     status: node.status,
     basis: node.basis,
     claimState: node.claimState,
-    validFrom: node.validFrom,
-    validUntil: node.validUntil,
+    validFrom: node.validFrom ?? undefined,
+    validUntil: node.validUntil ?? undefined,
     updatedAt: node.updatedAt,
     sources: node.sources.map(({ type, conversationId, messageId }) => ({
       type,
