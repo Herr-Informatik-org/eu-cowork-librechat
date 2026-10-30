@@ -1,5 +1,17 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-30 — Geschützte Supportanalyse für OPS vorbereiten
+
+- Die eigene Supportroute verwendet ein festes EuRouter-Profil ohne Werkzeuge,
+  persönliches Brain, Dateien, Skills oder fremde Agenten. Ein Statusaufruf prüft
+  Identität und Profil, ohne eine Modellanfrage auszulösen.
+- Ein wiederholbarer Einrichtungshelfer erstellt ausschliesslich ein neues internes
+  Dienstkonto, einen privaten Agenten und einen geschützten internen Schlüssel.
+  Andere Remote-Agentenrouten bleiben für dieses Konto gesperrt; veränderte oder
+  bereits anderweitig verwendete Einrichtungsobjekte werden nicht überschrieben.
+- Die Funktion bleibt ohne ausdrückliche Laufzeitkonfiguration ausgeschaltet.
+
+
 ## 2026-10-30 — Persönliches Wissen gezielter nutzen und weiterentwickeln
 
 - Chat und Mail verwenden den gemeinsamen Brain-Abruf mit passendem Geltungsbereich.

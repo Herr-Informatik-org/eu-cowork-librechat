@@ -5,6 +5,7 @@ const {
   createRequireApiKeyAuth,
   createRemoteAgentAuth,
   createCheckRemoteAgentAccess,
+  restrictSupportServiceRoute,
 } = require('@librechat/api');
 const { getEffectivePermissions } = require('~/server/services/PermissionService');
 const { getAppConfig } = require('~/server/services/Config');
@@ -15,13 +16,16 @@ const apiKeyMiddleware = createRequireApiKeyAuth({
   findUser: db.findUser,
 });
 
-const requireRemoteAgentAuth = createRemoteAgentAuth({
+const authenticateRemoteAgent = createRemoteAgentAuth({
   apiKeyMiddleware,
   findUser: db.findUser,
   getRolesByNames: db.findRolesByNames,
   updateUser: db.updateUser,
   getAppConfig,
 });
+
+const requireRemoteAgentAuth = (req, res, next) =>
+  authenticateRemoteAgent(req, res, () => restrictSupportServiceRoute(req, res, next));
 
 const checkRemoteAgentsFeature = generateCheckAccess({
   permissionType: PermissionTypes.REMOTE_AGENTS,

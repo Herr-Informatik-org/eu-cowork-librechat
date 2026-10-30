@@ -23,6 +23,7 @@ const {
   GetModelController,
 } = require('~/server/controllers/agents/openai');
 const { configMiddleware } = require('~/server/middleware');
+const SupportAnalysisController = require('~/server/controllers/agents/support');
 const {
   checkAgentPermission,
   preAuthTenantMiddleware,
@@ -36,6 +37,17 @@ router.use(preAuthTenantMiddleware);
 router.use(requireRemoteAgentAuth);
 router.use(configMiddleware);
 router.use(checkRemoteAgentsFeature);
+
+router.post('/support-analysis', checkAgentPermission, SupportAnalysisController);
+router.get(
+  '/support-status',
+  (req, _res, next) => {
+    req.body = { model: process.env.KISUNO_SUPPORT_AGENT_ID };
+    next();
+  },
+  checkAgentPermission,
+  SupportAnalysisController.status,
+);
 
 /**
  * @route POST /v1/chat/completions

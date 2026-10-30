@@ -21,6 +21,7 @@ jest.mock(
   '@librechat/api',
   () => ({
     isEnabled: jest.fn((val) => val === 'true' || val === true),
+    isSupportServiceIdentity: jest.fn(() => false),
     checkEmailConfig: jest.fn(),
     isEmailDomainAllowed: jest.fn(),
     math: jest.fn((val, fallback) => (val ? Number(val) : fallback)),
@@ -73,6 +74,7 @@ jest.mock('~/server/services/Config', () => ({ getAppConfig: jest.fn() }));
 jest.mock('~/server/utils', () => ({ sendEmail: jest.fn() }));
 
 const {
+  isSupportServiceIdentity,
   checkEmailConfig,
   shouldUseSecureCookie,
   isEmailDomainAllowed,
@@ -694,6 +696,7 @@ describe('resetPassword', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     checkEmailConfig.mockReturnValue(false);
+    findUser.mockResolvedValue({ _id: 'user-reset', email: 'user@example.com', role: 'USER' });
   });
 
   it('should only accept password reset tokens for password reset', async () => {
@@ -1391,5 +1394,48 @@ describe('registerUser - allowedDomains admin-panel override', () => {
     expect(result.message).toMatch(/cannot be used/i);
     // Domain check must happen before any DB user lookup.
     expect(findUser).not.toHaveBeenCalled();
+  });
+});
+
+describe('support service identity cannot become an interactive account', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    isSupportServiceIdentity.mockReturnValue(true);
+    isEmailDomainAllowed.mockReturnValue(true);
+    checkEmailConfig.mockReturnValue(false);
+    getAppConfig.mockResolvedValue({});
+    findUser.mockResolvedValue({
+      _id: 'service-user',
+      email: 'support-runtime@kisuno.invalid',
+      role: 'KISUNO_SUPPORT_RUNTIME',
+    });
+  });
+  afterEach(() => isSupportServiceIdentity.mockReturnValue(false));
+
+  test('does not issue a password reset link when SMTP is disabled', async () => {
+    const result = await requestPasswordReset({
+      body: { email: 'support-runtime@kisuno.invalid' },
+      ip: '127.0.0.1',
+    });
+    expect(result).not.toHaveProperty('link');
+    expect(createToken).not.toHaveBeenCalled();
+    expect(updateUser).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  test('rejects an already issued valid password reset token', async () => {
+    findToken.mockResolvedValue({
+      token: bcrypt.hashSync('synthetic-reset-token', 10),
+      userId: 'service-user',
+      type: 'password_reset',
+    });
+    const result = await resetPassword(
+      'service-user',
+      'synthetic-reset-token',
+      'synthetic-new-password',
+    );
+    expect(result).toBeInstanceOf(Error);
+    expect(updateUser).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 });
