@@ -1,5 +1,15 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-30 — Lange Agentenaufträge mit erhaltenem Zwischenstand begrenzen
+
+- Lange Werkzeugabläufe erhalten einen Hinweis zum gebündelten Abrufen und zum
+  rechtzeitigen Abschluss. Die konfigurierte Arbeitsgrenze bleibt bestehen;
+  bereits ausgeführte Aktionen werden beim Erreichen der Grenze nicht automatisch
+  erneut gestartet.
+- Ein Budgetabbruch erscheint als verständlicher, ausdrücklich unvollständiger
+  Zwischenstand. Bisherige Antwortteile, Werkzeugresultate und erfolgreich
+  verarbeitete Dateien bleiben in derselben Antwort erhalten.
+
 ## 2026-10-29 — Sichere Mailbearbeitung und manuelle Kundenrecherche
 
 - Ctrl/Cmd+Enter funktioniert auch beim Anfordern eines Antwortentwurfs.

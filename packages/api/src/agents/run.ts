@@ -61,7 +61,8 @@ import { getAgentCheckpointer } from '~/agents/checkpointer';
 import { getOpenAIConfig } from '~/endpoints/openai/config';
 import { buildHITLRunWiring } from '~/agents/hitl/runtime';
 import { buildMandatoryApproval } from '~/agents/hitl/mandatory';
-import { resolveSubagentMaxTurns } from '~/agents/config';
+import { resolveRecursionLimit, resolveSubagentMaxTurns } from '~/agents/config';
+import { installAgentWorkBudget } from '~/agents/budget';
 import { buildLangfuseConfig } from '~/langfuse/config';
 import { resolveConfigHeaders } from '~/utils/headers';
 import { applyTestRunHook } from '~/agents/testHook';
@@ -1089,6 +1090,7 @@ export async function createRun({
   steering,
   activityLabel,
   hitlCapable = false,
+  resumeBudget = false,
   toolInputValidationErrors,
   streaming = true,
   streamUsage = true,
@@ -1175,6 +1177,8 @@ export async function createRun({
    * final response / `[DONE]` with the tool call left unresolved).
    */
   hitlCapable?: boolean;
+  /** A resumed graph starts its step counter at the checkpoint's absolute step. */
+  resumeBudget?: boolean;
   /** Request-scoped tool input failures consumed by the completion handler. */
   toolInputValidationErrors?: Map<string, ToolInputValidationError>;
 } & Pick<
@@ -1581,6 +1585,35 @@ export async function createRun({
     }
   }
 
+  let bindWorkBudget: ((run: object) => void) | undefined;
+  // Only a single-agent path exposes an unambiguous model step. Other paths retain their
+  // existing hard limit and the controller's partial-result error handling.
+  const rootAgentInput = agentInputs[0];
+  const hasBudgetedTools = [
+    rootAgentInput.tools,
+    rootAgentInput.toolDefinitions,
+    rootAgentInput.graphTools,
+    rootAgentInput.subagentConfigs,
+  ].some((tools) => (tools?.length ?? 0) > 0);
+  if (graphConfig.type === 'standard' && hasBudgetedTools) {
+    hooks ??= new HookRegistry();
+    const agentId = agentInputs[0].agentId;
+    bindWorkBudget = installAgentWorkBudget({
+      registry: hooks,
+      runId: runId ?? '',
+      agentId,
+      limit: resolveRecursionLimit(agentsEndpointConfig, agents[0]),
+      resumed: resumeBudget,
+      readModelStep: () => {
+        const metadata = run.Graph?.config?.metadata;
+        if (metadata?.langgraph_node !== `agent=${agentId}`) {
+          return undefined;
+        }
+        return typeof metadata.langgraph_step === 'number' ? metadata.langgraph_step : undefined;
+      },
+    });
+  }
+
   /**
    * Built as a variable (not an inline literal) so the extra
    * `subagentUsageSink` field passes assignability against SDK versions
@@ -1686,6 +1719,7 @@ export async function createRun({
       isSteerPreemptSupported() && { preemption: steering.preemption }),
   };
   const run = await Run.create(runConfig);
+  bindWorkBudget?.(run);
 
   applyCustomHandoffPromptKeyCompatibility(run, runConfig.graphConfig);
   applyTestRunHook(run, { messages, agents });

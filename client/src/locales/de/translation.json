@@ -607,6 +607,7 @@
   "com_error_no_user_key": "Kein API-Key gefunden. Bitte gebe einen API-Key ein und versuche es erneut.",
   "com_error_refusal": "Antwort von Sicherheitsfiltern verweigert. Formulieren Sie Ihre Nachricht um und versuchen Sie es erneut. Sollte dies bei der Verwendung von Claude Sonnet 4.5 oder Opus 4.1 häufig auftreten, versuchen Sie es mit Sonnet 4, da hier andere Nutzungsbeschränkungen gelten.",
   "com_error_stream_expired": "Der Antwort-Stream ist abgelaufen oder wurde bereits abgeschlossen. Bitte versuche es erneut.",
+  "com_error_agent_work_budget_exceeded": "Zwischenstand – Arbeitsgrenze erreicht. Die Antwort ist noch nicht abgeschlossen. Bisherige Ergebnisse und verfügbare Dateien bleiben erhalten. Dieser Durchlauf startet keine weiteren Werkzeuge. Für weitere Arbeit kannst du eine neue Nachricht mit dem nächsten konkreten Schritt senden.",
   "com_error_token_balance": "Nicht genügend Guthaben. Verfügbares Guthaben: {{0}}. Prompt-Tokens: {{1}}. Kosten: {{2}}.",
   "com_file_pages": "Seiten: {{pages}}",
   "com_file_source": "Datei",
