@@ -1097,6 +1097,7 @@ export async function createRun({
   steering,
   activityLabel,
   hitlCapable = false,
+  allowWorkBudget = false,
   resumeBudget = false,
   localFolders,
   toolInputValidationErrors,
@@ -1185,6 +1186,8 @@ export async function createRun({
    * final response / `[DONE]` with the tool call left unresolved).
    */
   hitlCapable?: boolean;
+  /** Only callers that persist and expose budget stops as incomplete may opt in. */
+  allowWorkBudget?: boolean;
   /** A resumed graph starts its step counter at the checkpoint's absolute step. */
   resumeBudget?: boolean;
   /** Browser capability metadata, only supplied by the authenticated resumable chat controller. */
@@ -1654,7 +1657,7 @@ export async function createRun({
     rootAgentInput.graphTools,
     rootAgentInput.subagentConfigs,
   ].some((tools) => (tools?.length ?? 0) > 0);
-  if (graphConfig.type === 'standard' && hasBudgetedTools) {
+  if (allowWorkBudget && graphConfig.type === 'standard' && hasBudgetedTools) {
     hooks ??= new HookRegistry();
     const agentId = agentInputs[0].agentId;
     bindWorkBudget = installAgentWorkBudget({

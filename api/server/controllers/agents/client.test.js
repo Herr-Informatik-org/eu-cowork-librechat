@@ -521,6 +521,7 @@ describe('AgentClient - bounded run termination', () => {
       ),
     ).toBe(true);
     expect(mockCreateRun).toHaveBeenCalledTimes(1);
+    expect(mockCreateRun).toHaveBeenCalledWith(expect.objectContaining({ allowWorkBudget: true }));
     expect(processStream).toHaveBeenCalledTimes(1);
     const { trackBrainLearning, learnConfiguredBrainWithUsage } = require('@librechat/api');
     expect(trackBrainLearning).toHaveBeenCalledTimes(1);
@@ -559,7 +560,9 @@ describe('AgentClient - bounded run termination', () => {
     expect(resume).toHaveBeenCalledTimes(1);
     expect(processStream).not.toHaveBeenCalled();
     expect(mockCreateRun).toHaveBeenCalledTimes(1);
-    expect(mockCreateRun).toHaveBeenCalledWith(expect.objectContaining({ resumeBudget: true }));
+    expect(mockCreateRun).toHaveBeenCalledWith(
+      expect.objectContaining({ allowWorkBudget: true, resumeBudget: true }),
+    );
   });
 
   it.each(['halted', 'naturally_finished'])(
@@ -591,6 +594,9 @@ describe('AgentClient - bounded run termination', () => {
       });
       expect(processStream).toHaveBeenCalledTimes(1);
       expect(mockCreateRun).toHaveBeenCalledTimes(1);
+      expect(mockCreateRun).toHaveBeenCalledWith(
+        expect.objectContaining({ allowWorkBudget: true }),
+      );
       expect(require('@librechat/api').learnConfiguredBrainWithUsage).not.toHaveBeenCalled();
     },
   );

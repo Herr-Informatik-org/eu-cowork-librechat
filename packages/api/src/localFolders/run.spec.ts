@@ -45,6 +45,7 @@ describe('local folder production graph wiring', () => {
     return createRun({
       runId: 'folder-run',
       hitlCapable,
+      allowWorkBudget: hitlCapable,
       signal: new AbortController().signal,
       user: { id: 'owner' } as IUser,
       requestBody: { conversationId: 'folder-chat' },

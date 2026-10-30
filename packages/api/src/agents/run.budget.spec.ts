@@ -19,6 +19,7 @@ describe('host work budget wiring', () => {
       });
       await createRun({
         runId: 'host-budget',
+        allowWorkBudget: true,
         signal: new AbortController().signal,
         agents: [
           {
@@ -53,9 +54,36 @@ describe('host work budget wiring', () => {
     const create = jest.spyOn(Run, 'create').mockResolvedValue({} as Run<IState>);
     await createRun({
       runId: 'plain-chat',
+      allowWorkBudget: true,
       signal: new AbortController().signal,
       agents: [{ id: 'agent', provider: Providers.OPENAI } as Agent],
     });
     expect(create.mock.calls[0][0].hooks).toBeUndefined();
   });
+
+  it.each([undefined, false])(
+    'keeps unsupported callers on the unchanged hard limit when allowWorkBudget is %s',
+    async (allowWorkBudget) => {
+      const create = jest.spyOn(Run, 'create').mockResolvedValue({} as Run<IState>);
+      const appConfig = {
+        endpoints: { agents: { recursionLimit: 100, maxRecursionLimit: 100 } },
+      } as AppConfig;
+      const result = await createRun({
+        runId: 'api-caller',
+        allowWorkBudget,
+        signal: new AbortController().signal,
+        appConfig,
+        agents: [
+          {
+            id: 'agent',
+            provider: Providers.OPENAI,
+            toolDefinitions: [{ name: 'read_records' }],
+          } as Agent,
+        ],
+      });
+      expect(create.mock.calls[0][0].hooks).toBeUndefined();
+      expect(hasAgentWorkBudgetExhausted(result)).toBe(false);
+      expect(appConfig.endpoints?.agents).toEqual({ recursionLimit: 100, maxRecursionLimit: 100 });
+    },
+  );
 });

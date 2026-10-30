@@ -2655,6 +2655,7 @@ class AgentClient extends BaseClient {
           // opts into the tool-approval wiring. Non-resumable callers (OpenAI-compat, Responses)
           // leave this off so an approval-gated tool can't pause where there's no resume path.
           hitlCapable: true,
+          allowWorkBudget: true,
           localFolders: {
             grants: this.options.req?.body?.ephemeralAgent?.localFolders,
             history: this.options.req?._localFolderCalls,
@@ -3081,6 +3082,7 @@ class AgentClient extends BaseClient {
         // The resumed run can pause AGAIN (another tool, a follow-up question), and this
         // controller owns that lifecycle, so it must keep the HITL wiring on the rebuilt run.
         hitlCapable: true,
+        allowWorkBudget: true,
         resumeBudget: true,
         localFolders: {
           grants: this.options.req?.body?.ephemeralAgent?.localFolders,

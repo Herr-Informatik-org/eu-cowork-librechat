@@ -2,7 +2,7 @@
 
 ## 2026-10-30 — Lange Agentenaufträge mit erhaltenem Zwischenstand begrenzen
 
-- Lange Werkzeugabläufe erhalten einen Hinweis zum gebündelten Abrufen und zum
+- Lange Werkzeugabläufe im Chat erhalten einen Hinweis zum gebündelten Abrufen und zum
   rechtzeitigen Abschluss. Die konfigurierte Arbeitsgrenze bleibt bestehen;
   bereits ausgeführte Aktionen werden beim Erreichen der Grenze nicht automatisch
   erneut gestartet.
