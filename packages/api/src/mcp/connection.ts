@@ -21,6 +21,7 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { MCPOAuthTokens } from './oauth/types';
 import type * as t from './types';
 import { createSSRFSafeUndiciConnect, isSSRFTarget, resolveHostnameSSRF } from '~/auth';
+import { recordToolHints } from '~/agents/workmode/hints';
 import { runOutsideTracing } from '~/utils/tracing';
 import { isAddressAllowed } from '~/auth/domain';
 import { sanitizeUrlForLogging } from './utils';
@@ -2373,10 +2374,12 @@ export class MCPConnection extends EventEmitter {
     timeoutMs: number,
   ): Promise<MCPListToolsResult | null> {
     try {
-      return await this.client.listTools(cursor != null ? { cursor } : undefined, {
+      const page = await this.client.listTools(cursor != null ? { cursor } : undefined, {
         timeout: timeoutMs,
         maxTotalTimeout: timeoutMs,
       });
+      recordToolHints(this.serverName, page?.tools ?? [], this.userId);
+      return page;
     } catch (error) {
       this.emitError(error, 'Failed to fetch tools');
       return null;

@@ -1,5 +1,5 @@
 import { memo, useRef, useMemo, useCallback, Fragment } from 'react';
-import { ContentTypes } from 'librechat-data-provider';
+import { ContentTypes, isPlanToolPart } from 'librechat-data-provider';
 import type {
   TMessageContentParts,
   SearchResultData,
@@ -340,7 +340,7 @@ const ContentParts = memo(function ContentParts({
     let prevType: string | undefined;
     let activeAgentId: string | undefined;
     content.forEach((part, idx) => {
-      if (!part) {
+      if (!part || isPlanToolPart(part)) {
         return;
       }
       if (prevType === ContentTypes.STEER && part.type !== ContentTypes.STEER) {

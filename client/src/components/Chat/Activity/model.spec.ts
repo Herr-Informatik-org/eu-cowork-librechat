@@ -81,3 +81,22 @@ test('a real pending question takes priority over previous writing', () => {
     stage: 'question',
   });
 });
+
+test('a proposal waiting for a decision asks for input instead of showing a running tool', () => {
+  const content: NonNullable<TMessage['content']> = [
+    {
+      type: ContentTypes.TOOL_CALL,
+      tool_call: {
+        id: 'call-1',
+        name: 'update_record_mcp_odoo',
+        args: '{}',
+        type: ToolCallTypes.TOOL_CALL,
+        approval: { actionId: 'a1', allowed_decisions: ['approve', 'reject'] },
+      },
+    },
+  ];
+  expect(activityFromMessages([{ ...response, content }])).toMatchObject({
+    state: 'needs-input',
+    stage: 'question',
+  });
+});

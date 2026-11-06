@@ -37,6 +37,7 @@ import useSteering from '~/hooks/Chat/useSteering';
 import FileFormChat from './Files/FileFormChat';
 import InFlightSteers from './InFlightSteers';
 import TextareaHeader from './TextareaHeader';
+import PlanBar from '~/components/Chat/Plan';
 import PromptsCommand from './PromptsCommand';
 import SkillsCommand from './SkillsCommand';
 import AudioRecorder from './AudioRecorder';
@@ -48,6 +49,7 @@ import StopButton from './StopButton';
 import SendButton from './SendButton';
 import EditBadges from './EditBadges';
 import BadgeRow from './BadgeRow';
+import { WorkModeSwitch } from './WorkMode';
 import Mention from './Mention';
 import store from '~/store';
 import { hasReadyImageAttachments } from '~/utils/imageAttachments';
@@ -522,6 +524,7 @@ const ChatForm = memo(function ChatForm({
               onRestoreToComposer={restoreReclaimedSteer}
             />
           )}
+          <PlanBar index={index} />
           <div className={cn('flex w-full items-center', isRTL && 'flex-row-reverse')}>
             <Mention
               index={index}
@@ -672,6 +675,7 @@ const ChatForm = memo(function ChatForm({
                     Array.isArray(conversation?.messages) && conversation.messages.length >= 1
                   }
                 />
+                <WorkModeSwitch conversationId={conversationId} endpoint={endpoint} />
                 <div className="mx-auto flex" />
                 <TokenUsage index={index} conversation={conversation} isSubmitting={isSubmitting} />
                 {SpeechToText && (

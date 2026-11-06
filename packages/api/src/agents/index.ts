@@ -39,4 +39,8 @@ export * from './load';
 export * from './hitl';
 export * from './steering';
 export * from './activityLabels';
+export * from './workmode';
 export * from './toolValidation';
+export * from './followup';
+export * from './plan';
+export * from './guidance';

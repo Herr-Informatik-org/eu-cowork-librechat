@@ -560,3 +560,55 @@ describe('ToolCallGroup image hoisting', () => {
     expect(screen.getByTestId('stacked-icons')).toBeInTheDocument();
   });
 });
+
+describe('ToolCallGroup readable steps (V2)', () => {
+  const renderInner = (_p: TMessageContentParts, idx: number) => (
+    <div data-testid={`inner-${idx}`} key={idx}>
+      {'inner'}
+    </div>
+  );
+  const fileParts = [0, 1, 2].map((idx) => ({
+    part: makePart(`f${idx}`, 'content', 'read_file'),
+    idx,
+  }));
+
+  it('summarizes same-kind steps instead of "Used N tools"', () => {
+    renderGroup({
+      parts: fileParts,
+      isSubmitting: false,
+      isLast: false,
+      lastContentIdx: 2,
+      renderPart: renderInner,
+    });
+    expect(screen.getByRole('button', { name: 'com_ui_steps_file_read_done' })).toBeInTheDocument();
+  });
+
+  it('names the running run of steps while the group is active', () => {
+    renderGroup({
+      parts: [...fileParts.slice(0, 2), { part: makePart('f2', '', 'read_file'), idx: 2 }],
+      isSubmitting: true,
+      isLast: true,
+      lastContentIdx: 2,
+      renderPart: renderInner,
+    });
+    expect(
+      screen.getByRole('button', { name: 'com_ui_steps_file_read_running …' }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows only the last two finished steps until earlier ones are requested', () => {
+    renderGroup({
+      parts: fileParts,
+      isSubmitting: false,
+      isLast: false,
+      lastContentIdx: 2,
+      renderPart: renderInner,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'com_ui_steps_file_read_done' }));
+    expect(screen.queryByTestId('inner-0')).not.toBeInTheDocument();
+    expect(screen.getByTestId('inner-1')).toBeInTheDocument();
+    expect(screen.getByTestId('inner-2')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'com_ui_steps_show_earlier' }));
+    expect(screen.getByTestId('inner-0')).toBeInTheDocument();
+  });
+});

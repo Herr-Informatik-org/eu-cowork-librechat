@@ -119,6 +119,9 @@ jest.mock('~/utils', () => {
 });
 
 const MCP_DELIMITER = '_mcp_';
+/** `getTinyImage` reads a record, so the group header uses the readable step summary (V2). */
+const STEPS_DONE = 'com_ui_steps_read_done';
+const STEPS_RUNNING = 'com_ui_steps_read_running …';
 
 const makeMcpToolCall = (id: string, hasOutput = true): TMessageContentParts =>
   ({
@@ -251,7 +254,7 @@ describe('ContentParts integration: MCP image hoist and grouping', () => {
       </RecoilRoot>,
     );
 
-    const toggle = screen.getByRole('button', { name: 'Used 2 tools' });
+    const toggle = screen.getByRole('button', { name: STEPS_DONE });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.click(toggle);
@@ -263,7 +266,7 @@ describe('ContentParts integration: MCP image hoist and grouping', () => {
       </RecoilRoot>,
     );
 
-    expect(screen.getByRole('button', { name: 'Used 2 tools' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: STEPS_DONE })).toHaveAttribute(
       'aria-expanded',
       'true',
     );
@@ -279,7 +282,7 @@ describe('ContentParts integration: MCP image hoist and grouping', () => {
       </RecoilRoot>,
     );
 
-    const toggle = screen.getByRole('button', { name: 'Used 2 tools' });
+    const toggle = screen.getByRole('button', { name: STEPS_RUNNING });
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
     fireEvent.click(screen.getAllByTestId('progress-text')[0]);
@@ -295,7 +298,7 @@ describe('ContentParts integration: MCP image hoist and grouping', () => {
       </RecoilRoot>,
     );
 
-    expect(screen.getByRole('button', { name: 'Used 2 tools' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: STEPS_DONE })).toHaveAttribute(
       'aria-expanded',
       'true',
     );
@@ -337,7 +340,7 @@ describe('ContentParts integration: MCP image hoist and grouping', () => {
       </RecoilRoot>,
     );
 
-    const toggle = screen.getByRole('button', { name: 'Used 2 tools' });
+    const toggle = screen.getByRole('button', { name: STEPS_DONE });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.click(toggle);
@@ -349,7 +352,7 @@ describe('ContentParts integration: MCP image hoist and grouping', () => {
       </RecoilRoot>,
     );
 
-    expect(screen.getByRole('button', { name: 'Used 2 tools' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: STEPS_DONE })).toHaveAttribute(
       'aria-expanded',
       'true',
     );

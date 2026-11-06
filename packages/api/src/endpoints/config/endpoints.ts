@@ -10,6 +10,7 @@ import type { AppConfig } from '@librechat/data-schemas';
 import type { ServerRequest, TCustomEndpointsConfig } from '~/types';
 import type { GetAppConfigOptions } from '~/app/service';
 import { loadCustomEndpointsConfig as defaultLoadCustomEndpoints } from '~/endpoints/custom';
+import { resolveWorkModeConfig } from '~/agents/workmode/policy';
 import { getAppConfigOptionsFromUser } from '~/app/service';
 
 type PartialEndpointEntry = Partial<TConfig> & Record<string, unknown>;
@@ -70,13 +71,15 @@ export function createEndpointsConfigService(deps: EndpointsConfigDeps): {
     }
 
     if (mergedConfig[EModelEndpoint.agents] && appConfig?.endpoints?.[EModelEndpoint.agents]) {
-      const { disableBuilder, capabilities, allowedProviders } =
+      const { disableBuilder, capabilities, allowedProviders, toolApproval } =
         appConfig.endpoints[EModelEndpoint.agents];
+      const workModes = resolveWorkModeConfig(toolApproval);
       mergedConfig[EModelEndpoint.agents] = {
         ...mergedConfig[EModelEndpoint.agents],
         allowedProviders,
         disableBuilder,
         capabilities,
+        ...(workModes != null && { workModes: { default: workModes.defaultMode } }),
       };
     }
 

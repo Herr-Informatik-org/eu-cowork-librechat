@@ -58,6 +58,8 @@ const {
   buildSteerMedia,
   stampSteerPartMedia,
   createActivityLabelWiring,
+  continueOpenPlan,
+  resolveNextSteps,
   resolveActivityConfig,
   getCustomEndpointConfig,
   mapCollectedMetadataToUsage,
@@ -1335,11 +1337,10 @@ class AgentClient extends BaseClient {
           .filter(Boolean)
           .join('\n'),
       );
+      const contextWindow = this.options.agent.maxContextTokens || 8192;
       this.brainSession.setContextBudget(
-        Math.max(
-          0,
-          (this.options.agent.maxContextTokens || 8192) - promptTokenTotal - contextOverhead - 1024,
-        ),
+        Math.max(0, contextWindow - promptTokenTotal - contextOverhead - 1024),
+        contextWindow,
       );
       try {
         this.brainContext = await this.brainSession.initialize();
@@ -1859,8 +1860,28 @@ class AgentClient extends BaseClient {
     });
 
     const completion = filterMalformedContentParts(this.contentParts);
+    const nextSteps = this.takeNextSteps(opts.abortController);
+    if (nextSteps) {
+      this.metadata = { ...this.metadata, nextSteps };
+    }
     const metadata = this.buildResponseMetadata();
     return metadata ? { completion, metadata } : { completion };
+  }
+
+  /**
+   * Follow-up suggestions cut from this turn's answer, only for a turn that
+   * finished on its own (no pause, stop, error, or open plan).
+   * @param {AbortController} [abortController]
+   * @returns {import('librechat-data-provider').TNextStep[] | undefined}
+   */
+  takeNextSteps(abortController) {
+    return resolveNextSteps({
+      sink: this.options.nextStepsSink,
+      contentParts: this.contentParts,
+      request: this.options.req?.body?.text,
+      paused: this.run?.getInterrupt?.() != null,
+      stopped: abortController?.signal?.aborted === true || this.run?.getHaltReason?.() != null,
+    });
   }
 
   /**
@@ -2630,6 +2651,7 @@ class AgentClient extends BaseClient {
           // opts into the tool-approval wiring. Non-resumable callers (OpenAI-compat, Responses)
           // leave this off so an approval-gated tool can't pause where there's no resume path.
           hitlCapable: true,
+          workMode: this.options.req?.body?.workMode,
           toolInputValidationErrors: this.toolInputValidationErrors,
           // Mid-run steering: drain queued user messages at each tool-batch
           // boundary and inject them into graph state. The offset wrapper
@@ -2713,6 +2735,19 @@ class AgentClient extends BaseClient {
             [Callback.TOOL_ERROR]: logToolError,
           },
         });
+        // Stop reminder: one more pass when the model ended with open plan steps.
+        if (agents.length === 1) {
+          await continueOpenPlan({
+            run,
+            messages,
+            config,
+            streamOptions: { callbacks: { [Callback.TOOL_ERROR]: logToolError } },
+            contentParts: this.contentParts,
+            indexOffset: this.steerOffsetState,
+            signal: abortController.signal,
+          });
+        }
+        await this.options.nextStepsSink?.flush();
 
         // HITL: if the run paused for tool approval, mark the job
         // `requires_action` + emit the prompt and leave the turn unfinalized
@@ -3036,6 +3071,8 @@ class AgentClient extends BaseClient {
         // The resumed run can pause AGAIN (another tool, a follow-up question), and this
         // controller owns that lifecycle, so it must keep the HITL wiring on the rebuilt run.
         hitlCapable: true,
+        // Replayed from the paused request (RESUME_CONTEXT_KEYS), never from the resume POST.
+        workMode: this.options.req?.body?.workMode,
         toolInputValidationErrors: this.toolInputValidationErrors,
         // Steering stays live across a pause/resume cycle: steers queued while
         // the resumed segment runs drain at its tool-batch boundaries.
@@ -3116,6 +3153,7 @@ class AgentClient extends BaseClient {
         { callbacks: { [Callback.TOOL_ERROR]: logToolError } },
         commandOptions,
       );
+      await this.options.nextStepsSink?.flush();
 
       config.signal = null;
 

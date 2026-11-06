@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useEffect, useCallback } from 'react';
 import { useRecoilValue } from 'recoil';
 import { Button } from '@librechat/client';
 import { TriangleAlert } from 'lucide-react';
@@ -6,13 +6,16 @@ import {
   Constants,
   dataService,
   actionDelimiter,
-  actionDomainSeparator,
   splitToolCallName,
+  actionDomainSeparator,
+  BLOCKED_OUTPUT_PREFIX,
 } from 'librechat-data-provider';
 import type { TAttachment } from 'librechat-data-provider';
 import { useLocalize, useProgress, useExpandCollapse } from '~/hooks';
 import { ToolIcon, getToolIconType, isError } from './ToolOutput';
+import { getStepLabel, getProposalTitle, formatStepDuration } from '~/utils/toolSteps';
 import { useMCPIconMap, useMCPServerNames } from '~/hooks/MCP';
+import { useExclusiveDetail, trackStepDuration } from './Steps';
 import { useToolCallIntent } from './Parts/intent';
 import { AttachmentGroup } from './Parts';
 import ToolCallInfo from './ToolCallInfo';
@@ -67,14 +70,14 @@ export default function ToolCall({
   const brainActivity = brainActivityKey ? localize(brainActivityKey) : undefined;
   const autoExpand = useRecoilValue(store.autoExpandTools) && brainActivityKey == null;
   const hasOutput = (output?.length ?? 0) > 0;
-  const [showInfo, setShowInfo] = useState(() => autoExpand && hasOutput);
+  const [showInfo, setShowInfo] = useExclusiveDetail(toolCallId, () => autoExpand && hasOutput);
   const { style: expandStyle, ref: expandRef } = useExpandCollapse(showInfo);
 
   useEffect(() => {
     if (autoExpand && hasOutput) {
       setShowInfo(true);
     }
-  }, [autoExpand, hasOutput]);
+  }, [autoExpand, hasOutput, setShowInfo]);
 
   const parsedAuthUrl = useMemo(() => {
     if (!auth) {
@@ -195,7 +198,7 @@ export default function ToolCall({
       }
       return next;
     });
-  }, [onExpand]);
+  }, [onExpand, setShowInfo]);
 
   const subtitle = useMemo(() => {
     if (isMCPToolCall && mcpServerName) {
@@ -211,6 +214,14 @@ export default function ToolCall({
    *  the `tool_intents` capability); persists as the settled label —
    *  completion is a UI state, not a tense change. */
   const intent = useToolCallIntent(_args);
+  /** Readable fallback without a model label ("Sucht Datensätze"), V2. */
+  const stepRunning = getStepLabel(name, 'running', localize);
+  const stepDone = getStepLabel(name, 'done', localize);
+  /** Held back by the approval policy (plan mode, a rejection): never claim it ran. */
+  const blocked = typeof output === 'string' && output.startsWith(BLOCKED_OUTPUT_PREFIX);
+  const duration = formatStepDuration(
+    trackStepDuration(toolCallId, progress >= 1 || hasOutput || showCancelled),
+  );
 
   const getFinishedText = () => {
     if (cancelled) {
@@ -219,8 +230,14 @@ export default function ToolCall({
     if (brainActivity != null) {
       return brainActivity;
     }
+    if (blocked) {
+      return `${intent ?? getProposalTitle(name, localize)} · ${localize('com_ui_step_not_run')}`;
+    }
     if (intent != null) {
       return intent;
+    }
+    if (stepDone != null) {
+      return stepDone;
     }
     if (isMCPToolCall === true) {
       return localize('com_assistants_completed_function', { 0: function_name });
@@ -246,6 +263,7 @@ export default function ToolCall({
           if (progress < 1 && !showCancelled) {
             return (
               brainActivity ??
+              stepRunning ??
               (function_name
                 ? localize('com_assistants_running_var', { 0: function_name })
                 : localize('com_assistants_running_action'))
@@ -265,6 +283,7 @@ export default function ToolCall({
           inProgressText={
             brainActivity ??
             intent ??
+            stepRunning ??
             (function_name
               ? localize('com_assistants_running_var', { 0: function_name })
               : localize('com_assistants_running_action'))
@@ -275,6 +294,7 @@ export default function ToolCall({
           finishedText={getFinishedText()}
           subtitle={subtitle}
           errorSuffix={errorState && !cancelled ? localize('com_ui_tool_failed') : undefined}
+          duration={showCancelled || errorState || blocked ? undefined : duration}
           icon={
             <ToolIcon
               type={toolIconType}

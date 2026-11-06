@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, TextareaAutosize } from '@librechat/client';
-import { Check, X, Pencil, MessageSquare, TriangleAlert } from 'lucide-react';
+import { Pencil, TriangleAlert } from 'lucide-react';
+import { SystemRoles, PROPOSAL_REJECTED_REASON } from 'librechat-data-provider';
 import type { Agents } from 'librechat-data-provider';
-import type { TranslationKeys } from '~/hooks';
+import type { ProposalStatus } from './Proposal';
 import { useApprovalContext, useResumeSubmit } from './ApprovalContext';
+import { ProposalCard, rememberDecision } from './Proposal';
+import { AuthContext } from '~/hooks/AuthContext';
 import { useLocalize } from '~/hooks';
 import { cn, logger } from '~/utils';
 
@@ -16,23 +19,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-type DecisionType = Agents.ToolApprovalDecisionType;
+type Choice = 'approve' | 'reject';
 
-const DECISION_ICON: Record<DecisionType, React.ComponentType<{ className?: string }>> = {
-  approve: Check,
-  reject: X,
-  edit: Pencil,
-  respond: MessageSquare,
-};
-
-const DECISION_LABEL: Record<DecisionType, TranslationKeys> = {
-  approve: 'com_ui_approve',
-  reject: 'com_ui_reject',
-  edit: 'com_ui_edit',
-  respond: 'com_ui_respond',
-};
-
-/** Pretty-print tool args as JSON for the `edit` textarea seed. */
+/** Pretty-print tool args as JSON for the administrator's edit textarea. */
 function seedArgs(args: string | Record<string, unknown> | undefined): string {
   if (args == null) {
     return '{}';
@@ -52,27 +41,41 @@ function seedArgs(args: string | Record<string, unknown> | undefined): string {
   }
 }
 
+function parseEdit(text: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Renders approve / reject / edit / respond controls for a paused tool call,
- * scoped to the decisions the server allows. Records its decision in the
- * batch {@link useApprovalContext}; the lead card additionally renders the
- * single submit button covering every paused call in the action.
+ * A paused tool call as a proposal card (V5): «Verwerfen» / «Übernehmen», no
+ * autofocus, the status badge stays after the decision and takes the focus.
+ * A single paused call submits on click; several calls of one action share the
+ * lead card's submit. Editing the arguments is reserved for administrators.
  */
 export default function ToolApproval({
   approval,
   toolCallId,
   args,
+  name = '',
 }: {
   approval: NonNullable<Agents.ToolCall['approval']>;
   toolCallId: string;
   args: string | Record<string, unknown> | undefined;
+  name?: string;
 }) {
   const localize = useLocalize();
+  const auth = useContext(AuthContext);
+  const isAdmin = auth?.user?.role === SystemRoles.ADMIN;
   const { actionId, allowed_decisions: allowedDecisions, description } = approval;
   const {
     registerToolCall,
     unregisterToolCall,
     setDecision,
+    getDecision,
     isReady,
     getStatus,
     getLeadToolCallId,
@@ -80,10 +83,10 @@ export default function ToolApproval({
   } = useApprovalContext();
   const { submitToolApproval } = useResumeSubmit();
 
-  const [active, setActive] = useState<DecisionType | null>(null);
+  const [choice, setChoice] = useState<Choice | null>(null);
+  const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(() => seedArgs(args));
-  const [responseText, setResponseText] = useState('');
-  const [reason, setReason] = useState('');
+  const badgeRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     registerToolCall(actionId, toolCallId);
@@ -94,184 +97,178 @@ export default function ToolApproval({
 
   const status = getStatus(actionId);
   const locked = status === 'submitting' || status === 'submitted' || status === 'expired';
+  const showActions = status !== 'submitted' && status !== 'expired';
+  const submitting = status === 'submitting';
+  const count = getRegisteredCount(actionId);
+  const batched = count > 1;
+  const isLead = getLeadToolCallId(actionId) === toolCallId;
+  const canApprove = allowedDecisions.includes('approve');
+  const canReject = allowedDecisions.includes('reject');
+  const canEdit = isAdmin && allowedDecisions.includes('edit');
+  const editedArgs = useMemo(() => (editing ? parseEdit(editText) : null), [editing, editText]);
 
-  /** Recompute and store this card's decision whenever inputs change. A null
-   *  resolution (e.g. invalid edit JSON) clears it so submit stays disabled. */
-  useEffect(() => {
+  const buildResolution = (next: Choice): Agents.ToolApprovalResolution | null => {
+    if (next === 'reject') {
+      return { tool_call_id: toolCallId, decision: 'reject', reason: PROPOSAL_REJECTED_REASON };
+    }
+    if (!editing) {
+      return { tool_call_id: toolCallId, decision: 'approve' };
+    }
+    return editedArgs != null
+      ? { tool_call_id: toolCallId, decision: 'edit', editedArguments: editedArgs }
+      : null;
+  };
+
+  const decide = (next: Choice) => {
     if (locked) {
       return;
     }
-    if (active == null) {
+    if (batched && choice === next) {
+      setChoice(null);
       setDecision(actionId, toolCallId, null);
       return;
     }
-    if (active === 'approve') {
-      setDecision(actionId, toolCallId, { tool_call_id: toolCallId, decision: 'approve' });
+    const resolution = buildResolution(next);
+    if (resolution == null) {
       return;
     }
-    if (active === 'reject') {
-      setDecision(actionId, toolCallId, {
-        tool_call_id: toolCallId,
-        decision: 'reject',
-        reason: reason.trim() || undefined,
-      });
-      return;
+    setChoice(next);
+    setDecision(actionId, toolCallId, resolution);
+    if (!batched) {
+      submitToolApproval(actionId);
     }
-    if (active === 'respond') {
-      const trimmed = responseText.trim();
-      setDecision(
-        actionId,
-        toolCallId,
-        trimmed.length > 0
-          ? { tool_call_id: toolCallId, decision: 'respond', responseText: trimmed }
-          : null,
-      );
-      return;
-    }
-    if (active === 'edit') {
-      try {
-        const parsed = JSON.parse(editText) as unknown;
-        setDecision(
-          actionId,
-          toolCallId,
-          isPlainObject(parsed)
-            ? { tool_call_id: toolCallId, decision: 'edit', editedArguments: parsed }
-            : null,
-        );
-      } catch {
-        setDecision(actionId, toolCallId, null);
-      }
-    }
-  }, [active, editText, responseText, reason, locked, setDecision, actionId, toolCallId]);
+  };
 
-  const editIsValid = useMemo(() => {
-    if (active !== 'edit') {
-      return true;
+  /** Keep an approved edit in sync while an administrator keeps typing. */
+  useEffect(() => {
+    if (locked || choice !== 'approve' || !editing) {
+      return;
     }
-    try {
-      return isPlainObject(JSON.parse(editText));
-    } catch {
-      return false;
-    }
-  }, [active, editText]);
+    setDecision(
+      actionId,
+      toolCallId,
+      editedArgs != null
+        ? { tool_call_id: toolCallId, decision: 'edit', editedArguments: editedArgs }
+        : null,
+    );
+  }, [locked, choice, editing, editedArgs, setDecision, actionId, toolCallId]);
 
-  const isLead = getLeadToolCallId(actionId) === toolCallId;
-  const count = getRegisteredCount(actionId);
+  useEffect(() => {
+    if (status !== 'submitted') {
+      return;
+    }
+    const decided = getDecision(actionId, toolCallId)?.decision ?? choice;
+    if (decided == null) {
+      return;
+    }
+    rememberDecision(toolCallId, decided === 'reject' ? 'rejected' : 'approved');
+    badgeRef.current?.focus();
+  }, [status, getDecision, actionId, toolCallId, choice]);
+
+  const cardStatus: ProposalStatus = (() => {
+    if (status === 'submitted') {
+      return choice === 'reject' ? 'rejected' : 'approved';
+    }
+    if (status === 'submitting' || status === 'expired' || status === 'error') {
+      return status;
+    }
+    return 'open';
+  })();
+
   const ready = isReady(actionId);
-
-  const submitLabel = useMemo(() => {
-    if (status === 'submitting') {
-      return localize('com_ui_submitting');
-    }
-    if (count > 1) {
-      return localize('com_ui_submit_decisions', { 0: count });
-    }
-    return localize('com_ui_submit');
-  }, [status, count, localize]);
-
-  if (status === 'submitted') {
-    return null;
-  }
+  const submitLabel =
+    status === 'submitting'
+      ? localize('com_ui_submitting')
+      : localize('com_ui_proposal_submit_n', { 0: count });
 
   return (
-    <div
-      className="my-2 flex w-full flex-col gap-2 rounded-lg border border-border-light bg-surface-secondary p-3"
-      data-testid="tool-approval"
-      data-tool-call-id={toolCallId}
+    <ProposalCard
+      name={name}
+      args={editing && editedArgs != null ? editedArgs : args}
+      description={description}
+      status={cardStatus}
+      compact={status === 'submitted'}
+      badgeRef={badgeRef}
     >
-      {description != null && description.length > 0 && (
-        <p className="text-sm text-text-secondary">{description}</p>
-      )}
-      <div className="flex flex-wrap gap-2">
-        {allowedDecisions.map((decision) => {
-          const Icon = DECISION_ICON[decision];
-          return (
-            <Button
-              key={decision}
-              size="sm"
-              variant={active === decision ? 'default' : 'outline'}
-              disabled={locked}
-              aria-pressed={active === decision}
-              onClick={() => setActive((prev) => (prev === decision ? null : decision))}
-              className="inline-flex items-center gap-1.5"
-            >
-              <Icon className="h-4 w-4" aria-hidden="true" />
-              {localize(DECISION_LABEL[decision])}
-            </Button>
-          );
-        })}
-      </div>
-
-      {active === 'edit' && (
+      {canEdit && editing && !locked && (
         <div className="flex flex-col gap-1">
           <TextareaAutosize
             value={editText}
-            disabled={locked}
             onChange={(e) => setEditText(e.target.value)}
             minRows={3}
             maxRows={16}
             className={cn(
               'w-full resize-none rounded-md border bg-surface-primary p-2 font-mono text-xs',
-              editIsValid ? 'border-border-light' : 'border-red-500',
+              editedArgs != null ? 'border-border-light' : 'border-red-500',
             )}
             aria-label={localize('com_ui_edit')}
           />
-          {!editIsValid && (
+          {editedArgs == null && (
             <span className="text-xs text-text-warning">{localize('com_ui_invalid_json')}</span>
           )}
         </div>
       )}
-
-      {active === 'respond' && (
-        <TextareaAutosize
-          value={responseText}
-          disabled={locked}
-          onChange={(e) => setResponseText(e.target.value)}
-          minRows={2}
-          maxRows={12}
-          placeholder={localize('com_ui_tool_response_placeholder')}
-          className="w-full resize-none rounded-md border border-border-light bg-surface-primary p-2 text-sm"
-          aria-label={localize('com_ui_respond')}
-        />
+      {showActions && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {canEdit && (
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-pressed={editing}
+              disabled={submitting}
+              onClick={() => setEditing((prev) => !prev)}
+              className="mr-auto inline-flex items-center gap-1.5"
+            >
+              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+              {localize('com_ui_edit')}
+            </Button>
+          )}
+          {canReject && (
+            <Button
+              size="sm"
+              variant="outline"
+              aria-pressed={batched ? choice === 'reject' : undefined}
+              disabled={submitting}
+              onClick={() => decide('reject')}
+            >
+              {submitting && !batched && choice === 'reject'
+                ? localize('com_ui_submitting')
+                : localize('com_ui_proposal_reject')}
+            </Button>
+          )}
+          {canApprove && (
+            <Button
+              size="sm"
+              variant={batched && choice !== 'approve' ? 'outline' : 'submit'}
+              aria-pressed={batched ? choice === 'approve' : undefined}
+              disabled={submitting || (editing && editedArgs == null)}
+              onClick={() => decide('approve')}
+            >
+              {submitting && !batched && choice === 'approve'
+                ? localize('com_ui_submitting')
+                : localize('com_ui_proposal_approve')}
+            </Button>
+          )}
+        </div>
       )}
-
-      {active === 'reject' && (
-        <TextareaAutosize
-          value={reason}
-          disabled={locked}
-          onChange={(e) => setReason(e.target.value)}
-          minRows={1}
-          maxRows={6}
-          placeholder={localize('com_ui_reject_reason_placeholder')}
-          className="w-full resize-none rounded-md border border-border-light bg-surface-primary p-2 text-sm"
-          aria-label={localize('com_ui_reject')}
-        />
-      )}
-
-      {isLead && (
-        <div className="mt-1 flex items-center gap-3">
+      {batched && isLead && showActions && (
+        <div className="flex items-center justify-end">
           <Button
             size="sm"
             variant="submit"
-            disabled={!ready || locked}
+            disabled={!ready || submitting}
             onClick={() => submitToolApproval(actionId)}
           >
             {submitLabel}
           </Button>
-          {status === 'expired' && (
-            <span className="flex items-center text-xs text-text-warning">
-              <TriangleAlert className="mr-1.5 h-4 w-4" aria-hidden="true" />
-              {localize('com_ui_approval_expired')}
-            </span>
-          )}
-          {status === 'error' && (
-            <span className="flex items-center text-xs text-text-warning">
-              <TriangleAlert className="mr-1.5 h-4 w-4" aria-hidden="true" />
-              {localize('com_ui_approval_error')}
-            </span>
-          )}
         </div>
       )}
-    </div>
+      {(status === 'expired' || status === 'error') && (
+        <p className="flex items-center text-xs text-text-warning">
+          <TriangleAlert className="mr-1.5 h-4 w-4" aria-hidden="true" />
+          {localize(status === 'expired' ? 'com_ui_approval_expired' : 'com_ui_approval_error')}
+        </p>
+      )}
+    </ProposalCard>
   );
 }

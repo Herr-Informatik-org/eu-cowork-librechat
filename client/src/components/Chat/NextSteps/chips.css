@@ -1,0 +1,80 @@
+/* Suggestion chips: compact pills that fade in with a short stagger. Durations come
+   from the Kisuno motion tokens, so reduced motion shows them at once. */
+.kisuno-next-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  max-width: 100%;
+}
+
+.kisuno-next-step {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.875rem;
+  max-width: min(100%, 26rem);
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border-light);
+  border-radius: 9999px;
+  background: var(--surface-primary);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--kisuno-fast, 110ms) var(--kisuno-ease-out, ease-out),
+    background-color var(--kisuno-fast, 110ms) var(--kisuno-ease-out, ease-out),
+    color var(--kisuno-fast, 110ms) var(--kisuno-ease-out, ease-out);
+  animation: kisuno-note-in var(--kisuno-base, 170ms) var(--kisuno-ease-out, ease-out) backwards;
+  animation-delay: calc(var(--kisuno-stagger, 0) * 35ms);
+}
+
+.kisuno-next-step-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.kisuno-next-step:focus-visible {
+  outline: 2px solid var(--ring-primary, currentColor);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .kisuno-next-step:hover {
+    border-color: var(--border-heavy);
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kisuno-next-step {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .kisuno-next-step {
+    border-color: ButtonText;
+  }
+}
+
+/* Conversation starters on the empty chat share the stagger, not the pill shape. */
+.kisuno-starter {
+  transition:
+    border-color var(--kisuno-fast, 110ms) var(--kisuno-ease-out, ease-out),
+    background-color var(--kisuno-fast, 110ms) var(--kisuno-ease-out, ease-out),
+    color var(--kisuno-fast, 110ms) var(--kisuno-ease-out, ease-out);
+  animation: kisuno-message-in var(--kisuno-slow, 260ms) var(--kisuno-ease-out, ease-out) backwards;
+  animation-delay: calc(var(--kisuno-stagger, 0) * 35ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kisuno-starter {
+    animation: none;
+    transition: none;
+  }
+}

@@ -652,4 +652,41 @@ describe('ToolCall', () => {
       expect(liveRegion!.className).toContain('sr-only');
     });
   });
+
+  describe('readable steps (V2)', () => {
+    it('labels a finished Odoo search without a model intent', () => {
+      renderWithRecoil(
+        <ToolCall {...mockProps} name="search_records_mcp_odoo" output='[{"id":1}]' />,
+      );
+      expect(screen.getByTestId('progress-text')).toHaveTextContent('com_ui_step_search_done');
+    });
+
+    it('labels a running Odoo read with the running form', () => {
+      renderWithRecoil(
+        <ToolCall
+          {...mockProps}
+          name="get_record_mcp_odoo"
+          output=""
+          initialProgress={0.1}
+          isSubmitting={true}
+        />,
+      );
+      expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
+        'com_ui_step_read_running',
+      );
+    });
+
+    it('never claims a held-back write ran', () => {
+      renderWithRecoil(
+        <ToolCall
+          {...mockProps}
+          name="update_record_mcp_odoo"
+          output="Blocked: Arbeitsmodus Planen: Diese Änderung wurde nicht ausgeführt."
+        />,
+      );
+      expect(screen.getByTestId('progress-text')).toHaveTextContent(
+        'com_ui_proposal_title_update · com_ui_step_not_run',
+      );
+    });
+  });
 });

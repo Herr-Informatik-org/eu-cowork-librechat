@@ -773,6 +773,15 @@ export const tExampleSchema = z.object({
 
 export type TExample = z.infer<typeof tExampleSchema>;
 
+export const nextStepSchema = z.object({
+  /** The suggested next instruction, without a trailing ellipsis. */
+  text: z.string(),
+  /** The person still has to complete the text (the model ended the line with «…»). */
+  needsInput: z.boolean().optional(),
+});
+
+export type TNextStep = z.infer<typeof nextStepSchema>;
+
 export const tMessageSchema = z.object({
   messageId: z.string(),
   endpoint: z.string().optional(),
@@ -855,6 +864,12 @@ export const tMessageSchema = z.object({
    * request time and counted in the user message token count.
    */
   quotes: z.array(z.string()).optional(),
+  /**
+   * Validated follow-up suggestions the model appended to a complete answer
+   * (`<naechste_schritte>` block, cut from the stream by the server). Rendered
+   * as chips under the latest answer; never part of `content`, export or search.
+   */
+  nextSteps: z.array(nextStepSchema).optional(),
 });
 
 /**

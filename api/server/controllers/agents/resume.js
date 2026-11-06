@@ -366,6 +366,10 @@ async function finalizeResumedTurn({
   if (client?.contextMeta != null) {
     responseMessage.contextMeta = client.contextMeta;
   }
+  const nextSteps = preemptIncomplete ? undefined : client?.takeNextSteps?.();
+  if (nextSteps) {
+    responseMessage.nextSteps = nextSteps;
+  }
 
   // Win terminal ownership BEFORE the outcome-defining response write. Stop
   // and completion both write the same Mongo row; a later liveness read cannot

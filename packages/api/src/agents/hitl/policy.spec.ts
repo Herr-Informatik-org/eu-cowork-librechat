@@ -27,16 +27,38 @@ describe('resolveToolApprovalPolicy', () => {
     expect(resolveToolApprovalPolicy({ endpoint: undefined })).toBeUndefined();
   });
 
-  test('ignores the reserved agent/skills layers for now (behaviour-preserving)', () => {
-    const endpoint: TToolApprovalPolicy = { enabled: true, mode: 'bypass' };
+  test('merges the agent layer: mode/reason override, lists union, enabled stays endpoint-owned', () => {
+    const endpoint: TToolApprovalPolicy = {
+      enabled: true,
+      mode: 'bypass',
+      deny: ['rm'],
+      ask: ['mcp_*'],
+    };
     const resolved = resolveToolApprovalPolicy({
       endpoint,
-      agent: { enabled: true, mode: 'default', ask: ['shell'] },
-      skills: [{ deny: ['delete_*'] }],
+      agent: { enabled: false, mode: 'default', ask: ['shell'], allow: ['grep'], reason: 'r' },
     });
-    // Until merge lands, the result must still be exactly the endpoint policy so
-    // enabling the seam can't change runtime behaviour.
-    expect(resolved).toBe(endpoint);
+    expect(resolved).toEqual({
+      enabled: true,
+      mode: 'default',
+      deny: ['rm'],
+      ask: ['mcp_*', 'shell'],
+      allow: ['grep'],
+      reason: 'r',
+    });
+    expect(endpoint.ask).toEqual(['mcp_*']);
+  });
+
+  test('skills only tighten: ask/deny are added, allow and mode are ignored', () => {
+    const resolved = resolveToolApprovalPolicy({
+      endpoint: { enabled: true, mode: 'default' },
+      skills: [{ deny: ['delete_*'], allow: ['everything'], mode: 'bypass' }],
+    });
+    expect(resolved).toEqual({ enabled: true, mode: 'default', deny: ['delete_*'] });
+  });
+
+  test('without an endpoint baseline no layer applies', () => {
+    expect(resolveToolApprovalPolicy({ agent: { allow: ['x'] } })).toBeUndefined();
   });
 });
 

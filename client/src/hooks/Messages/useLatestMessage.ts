@@ -193,3 +193,30 @@ export function useGetLatestMessage(
     [queryClient, conversationId, messagesQueryId],
   );
 }
+
+/**
+ * Arbitrary projection of the branch tail. Like {@link useLatestMessageMeta},
+ * structural sharing keeps an unchanged projection referentially stable, so a
+ * consumer re-renders only when its slice of the tail actually changes.
+ */
+export function useLatestMessageSelect<TData>(
+  index: string | number,
+  project: (message: TMessage | null) => TData,
+): TData | null {
+  const conversationId = useRecoilValue(store.conversationIdByIndex(index));
+  const messagesQueryId = useLatestMessagesQueryId(index, conversationId);
+  const siblingIndexes = useLatestMessageSiblingIndexes(messagesQueryId, conversationId);
+  const select = useCallback(
+    (messages: TMessage[]): TData =>
+      project(
+        selectActiveBranchTail(
+          messages,
+          conversationId,
+          (parentId) => siblingIndexes[getParentLookupKey(parentId)] ?? 0,
+        ),
+      ),
+    [conversationId, siblingIndexes, project],
+  );
+
+  return useMessagesCacheSelect(messagesQueryId, select);
+}

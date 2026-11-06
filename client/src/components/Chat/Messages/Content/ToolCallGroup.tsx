@@ -13,6 +13,8 @@ import { useLocalize, useExpandCollapse, scheduleMessageContentLayoutReconcile }
 import { cn, getToolDisplayLabel, getActivityLabelPart, getActivityLabelText } from '~/utils';
 import { useMCPIconMap, useMCPServerNames } from '~/hooks/MCP';
 import { isBashProgrammaticToolCall } from './routing';
+import { summarizeSteps } from '~/utils/toolSteps';
+import { getFoldedStepStart } from './Steps/fold';
 import { ASK_USER_QUESTION } from '~/utils/approval';
 import { StackedToolIcons } from './ToolOutput';
 import { AttachmentGroup } from './Parts';
@@ -166,6 +168,11 @@ export default function ToolCallGroup({
     [toolMetadata, labelSettled],
   );
   const toolNames = useMemo(() => toolMetadata.map((m) => m.name), [toolMetadata]);
+  /** Readable summary by step kind (V2): "Liest 3 Dateien …", then "3 Dateien gelesen". */
+  const stepSummary = useMemo(
+    () => summarizeSteps(toolNames, !allCompleted && isSubmitting, localize),
+    [toolNames, allCompleted, isSubmitting, localize],
+  );
   const iconToolNames = useMemo(() => toolMetadata.map((m) => m.iconName), [toolMetadata]);
 
   /** Subagent tool calls get their own label verb ("Running/Ran N agents")
@@ -321,7 +328,7 @@ export default function ToolCallGroup({
         ? localize('com_ui_asked_n_questions', { 0: String(count) })
         : localize('com_ui_asking_n_questions', { 0: String(count) });
     }
-    return localize('com_ui_used_n_tools', { 0: String(count) });
+    return stepSummary ?? localize('com_ui_used_n_tools', { 0: String(count) });
   };
   /** The generated line wins over the generic category verb — but only once
    *  it exists. An unfilled label part leaves the block rendering exactly as
@@ -334,6 +341,17 @@ export default function ToolCallGroup({
     () => isSubmitting && toolMetadata.some((m) => m && !m.hasOutput),
     [toolMetadata, isSubmitting],
   );
+
+  /** Finished groups show only the last two steps; earlier ones fold behind a button. */
+  const [showEarlier, setShowEarlier] = useState(false);
+  const foldStart = useMemo(
+    () =>
+      allCompleted && !hasActiveToolCall && !showEarlier
+        ? getFoldedStepStart(parts.map(({ part }) => getToolMeta(part) != null))
+        : { start: 0, hidden: 0 },
+    [allCompleted, hasActiveToolCall, showEarlier, parts],
+  );
+  const visibleParts = foldStart.start > 0 ? parts.slice(foldStart.start) : parts;
 
   useEffect(() => {
     if (hasActiveToolCall && !userOverride) {
@@ -409,7 +427,16 @@ export default function ToolCallGroup({
         {shouldRenderBody && (
           <div className="overflow-hidden" ref={expandRef}>
             <div className="py-0.5 pl-4">
-              {parts.map(({ part, idx }) =>
+              {foldStart.hidden > 0 && (
+                <button
+                  type="button"
+                  className="kisuno-steps-earlier my-1 rounded text-xs text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-heavy"
+                  onClick={() => setShowEarlier(true)}
+                >
+                  {localize('com_ui_steps_show_earlier', { 0: String(foldStart.hidden) })}
+                </button>
+              )}
+              {visibleParts.map(({ part, idx }) =>
                 renderPart(part, idx, isLast && idx === lastContentIdx, handleToolExpand),
               )}
             </div>

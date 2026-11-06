@@ -331,6 +331,8 @@ function feedSubagentAggregator(aggregator, event) {
  *   used to persist the breakdown only when the final call emitted usage.
  * @param {Array<TTokenUsageEvent>} [options.usageEmitSink] - Array collecting each emitted
  *   `on_token_usage` payload (incl. cost) so the response's usage rollup can be persisted.
+ * @param {import('@librechat/api').NextStepsSink} [options.nextStepsSink] - Cuts the
+ *   `<naechste_schritte>` block out of text deltas and keeps it for the response message.
  * @returns {Record<string, t.EventHandler>} The default handlers.
  * @throws {Error} If the request is not found.
  */
@@ -351,6 +353,7 @@ function getDefaultHandlers({
   usageCost = null,
   contextUsageSink = null,
   usageEmitSink = null,
+  nextStepsSink = null,
 }) {
   if (!res || !aggregateContent) {
     throw new Error(
@@ -390,6 +393,17 @@ function getDefaultHandlers({
     }
     return emitForJob({ event: UsageEvents.ON_TOKEN_USAGE, data: payload });
   };
+  /** Aggregates and emits one text delta; also the path for text the next-steps filter releases late. */
+  const forwardMessageDelta = async (data, metadata) => {
+    const event = GraphEvents.ON_MESSAGE_DELTA;
+    aggregateContent({ event, data });
+    if (checkIfLastAgent(metadata?.last_agent_id, metadata?.langgraph_node)) {
+      await emitForJob({ event, data });
+    } else if (!metadata?.hide_sequential_outputs) {
+      await emitForJob({ event, data });
+    }
+  };
+  nextStepsSink?.bind(forwardMessageDelta);
   const handlers = {
     [GraphEvents.CHAT_MODEL_END]: new ModelEndHandler(
       collectedUsage,
@@ -405,6 +419,7 @@ function getDefaultHandlers({
        * @param {GraphRunnableConfig['configurable']} [metadata] The runnable metadata.
        */
       handle: async (event, data, metadata) => {
+        await nextStepsSink?.onRunStep(data?.id, data?.stepDetails?.type === StepTypes.TOOL_CALLS);
         aggregateContent({ event, data });
         if (data?.stepDetails.type === StepTypes.TOOL_CALLS) {
           await emitForJob({ event, data });
@@ -490,17 +505,16 @@ function getDefaultHandlers({
     },
     [GraphEvents.ON_MESSAGE_DELTA]: {
       /**
-       * Handle ON_MESSAGE_DELTA event.
+       * Handle ON_MESSAGE_DELTA event. A `<naechste_schritte>` block is cut out
+       * before aggregation and emission, so it never streams, persists or replays.
        * @param {string} event - The event name.
        * @param {StreamEventData} data - The event data.
        * @param {GraphRunnableConfig['configurable']} [metadata] The runnable metadata.
        */
       handle: async (event, data, metadata) => {
-        aggregateContent({ event, data });
-        if (checkIfLastAgent(metadata?.last_agent_id, metadata?.langgraph_node)) {
-          await emitForJob({ event, data });
-        } else if (!metadata?.hide_sequential_outputs) {
-          await emitForJob({ event, data });
+        const visible = nextStepsSink ? nextStepsSink.filter(data, metadata) : data;
+        if (visible != null) {
+          await forwardMessageDelta(visible, metadata);
         }
       },
     },

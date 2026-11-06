@@ -4,6 +4,7 @@ import type { TranslationKeys } from '~/hooks';
 import { getToolDisplayLabel } from '~/utils/toolLabels';
 import { useActivityTracking } from './useActivity';
 import useSecondTick from '~/hooks/useSecondTick';
+import { getStepLabel } from '~/utils/toolSteps';
 import { formatElapsed } from '~/utils/elapsed';
 import { useMCPServerNames } from '~/hooks/MCP';
 import { activityLabel } from './model';
@@ -68,7 +69,8 @@ function ActivityRow({ activity }: { activity: ConversationActivity }) {
   const label = localize(labelKey);
   const tool =
     active && activity.stage === 'tool' && activity.tool
-      ? getToolDisplayLabel(activity.tool, localize, serverNames)
+      ? (getStepLabel(activity.tool, 'running', localize) ??
+        getToolDisplayLabel(activity.tool, localize, serverNames))
       : undefined;
   const showElapsed = elapsedMs >= SHOW_ELAPSED_AFTER_MS && activity.state !== 'needs-input';
 

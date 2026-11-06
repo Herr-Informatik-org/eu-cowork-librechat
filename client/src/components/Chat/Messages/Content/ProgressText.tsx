@@ -43,6 +43,7 @@ export default function ProgressText({
   icon: iconProp,
   subtitle,
   errorSuffix,
+  duration,
   hasInput = true,
   popover = false,
   isExpanded = false,
@@ -56,6 +57,8 @@ export default function ProgressText({
   icon?: React.ReactNode;
   subtitle?: string;
   errorSuffix?: string;
+  /** Formatted duration of a finished step ("0.4 s"), shown after the label. */
+  duration?: string;
   hasInput?: boolean;
   popover?: boolean;
   isExpanded?: boolean;
@@ -104,6 +107,11 @@ export default function ProgressText({
         {subtitle && <span className="font-normal text-text-secondary">{subtitle}</span>}
         {errorSuffix && (
           <span className="font-normal text-red-600 dark:text-red-400">· {errorSuffix}</span>
+        )}
+        {duration != null && progress >= 1 && !error && (
+          <span className="kisuno-elapsed shrink-0 text-xs font-normal text-text-secondary">
+            {duration}
+          </span>
         )}
         {hasInput && (
           <ChevronDown

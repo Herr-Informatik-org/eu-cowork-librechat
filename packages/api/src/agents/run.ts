@@ -1,7 +1,9 @@
 import { logger } from '@librechat/data-schemas';
 import { Run, Providers, Constants, HookRegistry } from '@librechat/agents';
 import {
+  SystemRoles,
   KnownEndpoints,
+  PLAN_TOOL_NAME,
   EModelEndpoint,
   MAX_SUBAGENT_DEPTH,
   MAX_SUBAGENT_RUN_CONFIGS,
@@ -32,6 +34,7 @@ import type {
   AgentSubagentsConfig,
   ReasoningResponseKey,
   SummarizationConfig,
+  WorkMode,
 } from 'librechat-data-provider';
 import type { BaseMessage } from '@librechat/agents/langchain/messages';
 import type { AppConfig, IUser } from '@librechat/data-schemas';
@@ -61,6 +64,8 @@ import { getAgentCheckpointer } from '~/agents/checkpointer';
 import { getOpenAIConfig } from '~/endpoints/openai/config';
 import { buildHITLRunWiring } from '~/agents/hitl/runtime';
 import { buildMandatoryApproval } from '~/agents/hitl/mandatory';
+import { buildChatGuidance } from '~/agents/guidance';
+import { resolveWorkModeRun } from '~/agents/workmode/run';
 import { resolveSubagentMaxTurns } from '~/agents/config';
 import { buildLangfuseConfig } from '~/langfuse/config';
 import { resolveConfigHeaders } from '~/utils/headers';
@@ -1089,6 +1094,7 @@ export async function createRun({
   steering,
   activityLabel,
   hitlCapable = false,
+  workMode,
   toolInputValidationErrors,
   streaming = true,
   streamUsage = true,
@@ -1175,6 +1181,12 @@ export async function createRun({
    * final response / `[DONE]` with the tool call left unresolved).
    */
   hitlCapable?: boolean;
+  /**
+   * Work mode from the request body (untrusted). Applied only when the agents
+   * endpoint enables `toolApproval.workModes` and the caller is HITL-capable;
+   * invalid values fall back to the configured default.
+   */
+  workMode?: WorkMode | string;
   /** Request-scoped tool input failures consumed by the completion handler. */
   toolInputValidationErrors?: Map<string, ToolInputValidationError>;
 } & Pick<
@@ -1252,7 +1264,15 @@ export async function createRun({
     const toolInstructions = joinInstructionMap(agent.toolContextMap);
     const dynamicToolInstructions = joinInstructionMap(agent.dynamicToolContextMap);
 
-    const systemContent = [toolInstructions, agent.instructions ?? ''].join('\n').trim();
+    const guidance = buildChatGuidance({
+      agent,
+      appConfig,
+      chat: hitlCapable && !isSubagent,
+      primary: agent.id === agents[0]?.id,
+    });
+    const systemContent = [toolInstructions, agent.instructions ?? '', guidance.instructions]
+      .join('\n')
+      .trim();
 
     const additionalInstructions = [dynamicToolInstructions, agent.additional_instructions ?? '']
       .join('\n')
@@ -1409,6 +1429,7 @@ export async function createRun({
     const directGraphTools = [
       ...(askGraphTools ?? []),
       ...(!isSubagent ? (agent.brainTools ?? []) : []),
+      ...guidance.tools,
     ];
     if (directGraphTools.length > 0) {
       /**
@@ -1488,12 +1509,20 @@ export async function createRun({
   // Per-agent truth resolved by initializeAgent (admin capability AND builder
   // opt-in AND code env) — the run opts in when any reachable agent did.
   const statefulCodeSessions = anyAgentHasStatefulSessions(agents);
-  // Resolve the effective policy through the single seam so per-agent / per-skill
-  // sources can layer in later without touching this call site (see
-  // `resolveToolApprovalPolicy`). Only the endpoint layer is wired today, so this
-  // is identical to reading `toolApproval` directly.
+  // Resolve the effective policy through the single seam (`resolveToolApprovalPolicy`).
+  // The per-request work mode (plan/ask/auto) is the `agent` layer; without
+  // `toolApproval.workModes` this is identical to reading `toolApproval` directly.
+  const workModeRun = resolveWorkModeRun({
+    policy: agentsEndpointConfig?.toolApproval,
+    requested: workMode,
+    hitlCapable,
+    agents,
+    userId: user?.id,
+    allowEdit: user?.role === SystemRoles.ADMIN,
+  });
   const toolApprovalPolicy = resolveToolApprovalPolicy({
-    endpoint: agentsEndpointConfig?.toolApproval,
+    endpoint: workModeRun?.endpoint ?? agentsEndpointConfig?.toolApproval,
+    agent: workModeRun?.layer,
   });
   // Gate HITL to callers that actually implement the pause/resume lifecycle. The
   // OpenAI-compatible + Responses controllers also call createRun/processStream but never
@@ -1507,10 +1536,13 @@ export async function createRun({
         // listed by the admin) — approving the right to ask a question is a
         // pure double-pause; the tool has no side effects to gate.
         exemptAskUserQuestionFromApproval(
-          mandatoryApproval.enabled && !toolApprovalPolicy?.enabled
-            ? { enabled: true, mode: 'bypass' }
-            : toolApprovalPolicy,
-          ASK_USER_QUESTION_TOOL_NAME,
+          exemptAskUserQuestionFromApproval(
+            mandatoryApproval.enabled && !toolApprovalPolicy?.enabled
+              ? { enabled: true, mode: 'bypass' }
+              : toolApprovalPolicy,
+            ASK_USER_QUESTION_TOOL_NAME,
+          ),
+          PLAN_TOOL_NAME,
         ),
         {
           userId: user?.id,
@@ -1550,6 +1582,10 @@ export async function createRun({
     hooks = hooks ?? new HookRegistry();
     // Independent of endpoint allow/bypass settings; denial wins in non-HITL routes.
     hooks.register('PreToolUse', { hooks: [mandatoryApproval.hook] });
+  }
+  if (workModeRun != null) {
+    hooks = hooks ?? new HookRegistry();
+    hooks.register('PreToolUse', { hooks: [workModeRun.hook] });
   }
   if (process.env.HOSTED_USAGE_REQUIRED === 'true') {
     hooks = hooks ?? new HookRegistry();
@@ -1609,7 +1645,7 @@ export async function createRun({
     // `interrupt()` from its tool body, which must run inside the Pregel task
     // frame — a speculative eager execution could never pause the run.
     eagerEventToolExecution: {
-      enabled: !mandatoryApproval.enabled,
+      enabled: !mandatoryApproval.enabled && workModeRun == null,
       excludeToolNames: [
         CREATE_FILE_TOOL_NAME,
         EDIT_FILE_TOOL_NAME,

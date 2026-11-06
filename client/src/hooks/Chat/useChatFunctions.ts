@@ -34,6 +34,7 @@ import {
   getRouteChatProjectId,
 } from '~/utils';
 import useFocusRegeneratedResponse from '~/hooks/Chat/useFocusRegeneratedResponse';
+import { getSubmitWorkMode } from '~/components/Chat/Input/WorkMode/store';
 import useSetFilesToDelete from '~/hooks/Files/useSetFilesToDelete';
 import useGetSender from '~/hooks/Conversations/useGetSender';
 import { beginConversationActivity } from '~/store/activity';
@@ -688,6 +689,7 @@ export default function useChatFunctions({
       initialResponse,
       isTemporary,
       ephemeralAgent,
+      workMode: getSubmitWorkMode(conversationId),
       editedContent,
       editPrefixLength,
       addedConvo,

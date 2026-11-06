@@ -104,6 +104,18 @@ describe('Message Operations', () => {
       expect(savedMessage?.text).toBe('Hello, world!');
     });
 
+    it('persists validated next steps beside, not inside, the content', async () => {
+      const nextSteps = [
+        { text: 'Fasse das Protokoll zusammen' },
+        { text: 'Schreibe Frau Meier:', needsInput: true },
+      ];
+      await saveMessage(mockCtx, { ...mockMessageData, nextSteps });
+
+      const saved = await Message.findOne({ messageId: 'msg123', user: 'user123' }).lean();
+      expect(saved?.nextSteps).toEqual(nextSteps);
+      expect(saved?.content).toBeUndefined();
+    });
+
     it('should throw an error for unauthenticated user', async () => {
       mockCtx.userId = null as unknown as string;
       await expect(saveMessage(mockCtx, mockMessageData)).rejects.toThrow('User not authenticated');

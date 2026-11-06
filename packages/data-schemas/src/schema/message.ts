@@ -158,6 +158,15 @@ const messageSchema: Schema<IMessage> = new Schema(
      * count), so they are not duplicated into the stored `text`.
      */
     quotes: { type: [String], default: undefined },
+    /**
+     * Follow-up suggestions the server cut from the answer stream and validated.
+     * UI metadata only — kept out of `content`, so never exported, indexed for
+     * search, or replayed into the model's history.
+     */
+    nextSteps: {
+      type: [{ _id: false, text: { type: String }, needsInput: { type: Boolean } }],
+      default: undefined,
+    },
     /*
     attachments: {
       type: [

@@ -15,10 +15,8 @@ const DEFAULT_REVIEW_DECISIONS: Agents.ToolApprovalDecisionType[] = ['approve', 
 /**
  * Layered sources that combine into the effective tool-approval policy for a turn.
  *
- * Only {@link ToolApprovalPolicyLayers.endpoint} is consumed today; `agent` and
- * `skills` are reserved seams so future per-agent / per-skill plumbing lands in
- * {@link resolveToolApprovalPolicy} rather than being threaded through the run
- * call site.
+ * `endpoint` is the admin baseline; `agent` carries the per-request work-mode
+ * layer (see `agents/workmode`); `skills` may only tighten.
  */
 export interface ToolApprovalPolicyLayers {
   /**
@@ -27,37 +25,66 @@ export interface ToolApprovalPolicyLayers {
    */
   endpoint?: TToolApprovalPolicy;
   /**
-   * Per-agent override (not yet wired). Layered over `endpoint` to refine
-   * `mode`/`allow`/`deny`/`ask`/`reason` for a specific agent. Must NOT flip
-   * `enabled` — enablement stays endpoint-level by design.
+   * Per-agent / per-request layer over `endpoint`: may set `mode`/`reason` and
+   * ADD `allow`/`deny`/`ask` entries. Must NOT flip `enabled` — enablement stays
+   * endpoint-level by design.
    */
   agent?: TToolApprovalPolicy;
   /**
-   * Skill-contributed policy (not yet wired). May only TIGHTEN — contribute
-   * `ask`/`deny` entries — never grant `bypass` or widen `allow`, so a selected
-   * skill can never silently auto-approve a tool.
+   * Skill-contributed policy. May only TIGHTEN — contribute `ask`/`deny`
+   * entries — never grant `bypass` or widen `allow`, so a selected skill can
+   * never silently auto-approve a tool.
    */
   skills?: TToolApprovalPolicy[];
+}
+
+function unionList(base: string[] | undefined, extra: string[] | undefined): string[] | undefined {
+  if (!extra?.length) {
+    return base;
+  }
+  if (!base?.length) {
+    return [...extra];
+  }
+  return Array.from(new Set([...base, ...extra]));
 }
 
 /**
  * Resolve the effective tool-approval policy for a turn from its layered sources.
  *
- * This is the single seam where policy sources combine, kept out of the run call
- * site so adding per-agent or per-skill policy later is a change to ONE function
- * rather than to `createRun`. Intended precedence once those layers are wired:
- *   - `endpoint` is the baseline and owns the `enabled` kill switch;
- *   - `agent` overrides `mode`/`allow`/`deny`/`ask`/`reason`;
+ * The single seam where policy sources combine, kept out of the run call site:
+ *   - `endpoint` is the baseline and owns the `enabled` kill switch and `hooks`;
+ *     without it nothing applies;
+ *   - `agent` may override `mode`/`reason` and adds to `allow`/`deny`/`ask`.
+ *     Lists are unioned, never replaced, so an admin `deny` or `ask` keeps
+ *     winning (the SDK evaluates deny, then ask, then allow);
  *   - `skills` may only tighten (add `ask`/`deny`), never loosen.
  *
- * Today only `endpoint` is consumed, so the result is identical to reading
- * `endpoints.agents.toolApproval` directly — `agent`/`skills` are accepted but
- * not yet merged. Behaviour-preserving until those layers ship.
+ * Returns the endpoint object itself when no other layer contributes.
  */
 export function resolveToolApprovalPolicy(
   layers: ToolApprovalPolicyLayers,
 ): TToolApprovalPolicy | undefined {
-  return layers.endpoint;
+  const { endpoint, agent, skills } = layers;
+  if (endpoint == null || (agent == null && !skills?.length)) {
+    return endpoint;
+  }
+  const merged: NonNullable<TToolApprovalPolicy> = { ...endpoint };
+  if (agent != null) {
+    if (agent.mode != null) {
+      merged.mode = agent.mode;
+    }
+    if (agent.reason != null) {
+      merged.reason = agent.reason;
+    }
+    merged.allow = unionList(merged.allow, agent.allow);
+    merged.deny = unionList(merged.deny, agent.deny);
+    merged.ask = unionList(merged.ask, agent.ask);
+  }
+  for (const skill of skills ?? []) {
+    merged.deny = unionList(merged.deny, skill?.deny);
+    merged.ask = unionList(merged.ask, skill?.ask);
+  }
+  return merged;
 }
 
 /**
@@ -247,6 +274,9 @@ export const RESUME_CONTEXT_KEYS = [
   // (#14253). It rides top-level on req.body and flows into model_parameters via the
   // build spread, so replaying it here restores the stable id. Replay-only.
   'modelLabel',
+  // Work mode (plan/ask/auto) feeds the approval policy of the rebuilt run. Replayed so a
+  // crafted resume cannot switch a paused `plan` or `ask` turn to a looser mode. Replay-only.
+  'workMode',
 ] as const;
 
 export type ResumeContext = Partial<Record<(typeof RESUME_CONTEXT_KEYS)[number], unknown>> & {

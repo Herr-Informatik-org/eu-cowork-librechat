@@ -1,0 +1,187 @@
+/* Docked plan bar above the composer. Open/close and folding animate height (the one
+   allowed exception); everything else is opacity and transform on Kisuno tokens. */
+.kisuno-plan {
+  margin: 0 0.5rem 0.5rem;
+  border: 1px solid var(--border-light);
+  border-radius: 1rem;
+  background: var(--surface-secondary);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  animation: kisuno-note-in var(--kisuno-base, 170ms) var(--kisuno-ease-out, ease-out);
+}
+
+.kisuno-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 1rem;
+  text-align: left;
+  cursor: pointer;
+}
+.kisuno-plan-head:focus-visible {
+  outline: 2px solid var(--ring-primary, currentColor);
+  outline-offset: -2px;
+}
+
+.kisuno-plan-icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.kisuno-plan-title {
+  flex-shrink: 0;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.kisuno-plan-count {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.kisuno-plan-meter {
+  position: relative;
+  flex-shrink: 0;
+  width: 3rem;
+  height: 0.25rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--border-light);
+}
+.kisuno-plan-meter > span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #1f775b;
+  transform-origin: left center;
+  transition: transform var(--kisuno-slow, 260ms) var(--kisuno-ease-out, ease-out);
+}
+.dark .kisuno-plan-meter > span {
+  background: #77cbb0;
+}
+
+.kisuno-plan-current {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  animation: kisuno-note-in var(--kisuno-fast, 110ms) var(--kisuno-ease-out, ease-out);
+}
+
+.kisuno-plan-chevron {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: transform var(--kisuno-base, 170ms) var(--kisuno-ease-in-out, ease-in-out);
+}
+.kisuno-plan-head[aria-expanded='true'] .kisuno-plan-chevron {
+  transform: rotate(180deg);
+}
+
+.kisuno-plan-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--kisuno-base, 170ms) var(--kisuno-ease-in-out, ease-in-out);
+}
+.kisuno-plan-body[data-open] {
+  grid-template-rows: 1fr;
+  transition-duration: var(--kisuno-slow, 260ms);
+}
+.kisuno-plan-body-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.kisuno-plan-steps {
+  max-height: 12rem;
+  margin: 0;
+  padding: 0 0.75rem 0.25rem;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.kisuno-plan-step {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--kisuno-base, 170ms) var(--kisuno-ease-in-out, ease-in-out),
+    opacity var(--kisuno-base, 170ms) var(--kisuno-ease-out, ease-out);
+}
+.kisuno-plan-step[data-folded] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.kisuno-plan-step-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.1875rem 0;
+}
+.kisuno-plan-step-inner .kisuno-plan-icon {
+  margin-top: 0.125rem;
+}
+.kisuno-plan-step-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kisuno-plan-step[data-state='running'] .kisuno-plan-step-text {
+  color: var(--text-primary);
+}
+.kisuno-plan-step[data-state='done'] {
+  color: var(--text-tertiary);
+}
+.kisuno-plan-step[data-state='done'] .kisuno-plan-icon {
+  color: #1f775b;
+}
+.dark .kisuno-plan-step[data-state='done'] .kisuno-plan-icon {
+  color: #77cbb0;
+}
+
+.kisuno-plan-toggle {
+  margin: 0 0.75rem 0.5rem 2.25rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.kisuno-plan-toggle:focus-visible {
+  outline: 2px solid var(--ring-primary, currentColor);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .kisuno-plan-head:hover,
+  .kisuno-plan-toggle:hover {
+    background: var(--surface-hover);
+  }
+}
+
+@keyframes kisuno-plan-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.kisuno-plan-spin {
+  animation: kisuno-plan-spin 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kisuno-plan,
+  .kisuno-plan-current,
+  .kisuno-plan-spin {
+    animation: none;
+  }
+  .kisuno-plan-body,
+  .kisuno-plan-step,
+  .kisuno-plan-chevron,
+  .kisuno-plan-meter > span {
+    transition: none;
+  }
+}

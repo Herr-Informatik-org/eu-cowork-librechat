@@ -14,6 +14,7 @@ import type { Agent, EToolResources } from './types/assistants';
 import type { RefillIntervalUnit } from './balance';
 import type { SettingDefinition } from './generate';
 import type { TMinimalFeedback } from './feedback';
+import type { WorkMode } from './config';
 import type { ContentTypes } from './types/runs';
 
 export * from './schemas';
@@ -160,6 +161,8 @@ export type TPayload = Partial<TMessage> &
      * server may create only if this observed predecessor is still current or
      * the conversation is still idle after its cleanup. */
     expectedPredecessorCreatedAt?: number;
+    /** Work mode chosen under the composer; the server enforces it in the tool-approval policy. */
+    workMode?: WorkMode;
   };
 
 export type TEditedContent =
@@ -222,6 +225,8 @@ export type TSubmission = {
   /** Client-only carry-through for a receipt-bound queued recovery. */
   recoverySteerId?: string;
   expectedPredecessorCreatedAt?: number;
+  /** Work mode of the conversation at submit time (Planen / Fragen / Auto). */
+  workMode?: WorkMode;
   /** Opaque client-only queue restoration metadata; intentionally omitted by
    * `createPayload`. */
   queuedMessageOrigin?: unknown;
@@ -524,6 +529,8 @@ export type TConfig = {
   disableBuilder?: boolean;
   retrievalModels?: string[];
   capabilities?: string[];
+  /** Agents only: present when the server enforces work modes; `default` is the server fallback. */
+  workModes?: { default: WorkMode };
   customParams?: {
     defaultParamsEndpoint?: string;
     reasoningFormat?: ReasoningParameterFormat;

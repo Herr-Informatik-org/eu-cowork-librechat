@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react';
-import { EModelEndpoint, Constants } from 'librechat-data-provider';
+import { EModelEndpoint } from 'librechat-data-provider';
 import {
   useGetAssistantDocsQuery,
   useGetEndpointsQuery,
@@ -7,7 +7,13 @@ import {
 } from '~/data-provider';
 import { useChatContext, useAgentsMapContext, useAssistantsMapContext } from '~/Providers';
 import { getIconEndpoint, getEntity, getModelSpec } from '~/utils';
-import { useSubmitMessage } from '~/hooks';
+import { insertIntoComposer } from '~/components/Chat/NextSteps';
+import { useSubmitMessage, useLocalize } from '~/hooks';
+import '~/components/Chat/NextSteps/chips.css';
+
+/** Model cards may list more starters than the agent builder allows (four). */
+const MAX_VISIBLE_STARTERS = 6;
+const OPEN_ENDING = /\s*(?:…|\.{3})$/;
 
 const ConversationStarters = () => {
   const { conversation } = useChatContext();
@@ -61,9 +67,17 @@ const ConversationStarters = () => {
     return documentsMap.get(entity?.id ?? '')?.conversation_starters ?? [];
   }, [documentsMap, isAgent, entity, modelSpec]);
 
+  const localize = useLocalize();
   const { submitMessage } = useSubmitMessage();
+  /** A starter ending in «…» needs the person's details: it goes to the composer instead. */
   const sendConversationStarter = useCallback(
-    (text: string) => submitMessage({ text }),
+    (text: string) => {
+      if (OPEN_ENDING.test(text)) {
+        insertIntoComposer({ text: text.replace(OPEN_ENDING, ''), needsInput: true });
+        return;
+      }
+      submitMessage({ text });
+    },
     [submitMessage],
   );
 
@@ -72,19 +86,22 @@ const ConversationStarters = () => {
   }
 
   return (
-    <div className="mb-8 mt-2 flex w-full flex-wrap items-stretch justify-center gap-2 px-4">
-      {conversation_starters
-        .slice(0, Constants.MAX_CONVO_STARTERS)
-        .map((text: string, index: number) => (
-          <button
-            key={index}
-            onClick={() => sendConversationStarter(text)}
-            style={{ animationDelay: `${index * 75}ms`, animationFillMode: 'backwards' }}
-            className="flex max-w-[16rem] cursor-pointer items-center justify-center rounded-2xl border border-border-medium bg-surface-secondary px-4 py-2.5 text-center text-sm text-text-secondary shadow-sm transition-colors duration-200 fade-in hover:border-border-heavy hover:bg-surface-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-primary"
-          >
-            <span className="line-clamp-2 text-balance break-words">{text}</span>
-          </button>
-        ))}
+    <div
+      role="group"
+      aria-label={localize('com_assistants_conversation_starters')}
+      className="mb-8 mt-2 flex w-full flex-wrap items-stretch justify-center gap-2 px-4"
+    >
+      {conversation_starters.slice(0, MAX_VISIBLE_STARTERS).map((text: string, index: number) => (
+        <button
+          key={index}
+          type="button"
+          onClick={() => sendConversationStarter(text)}
+          style={{ '--kisuno-stagger': index } as React.CSSProperties}
+          className="kisuno-starter flex max-w-[16rem] cursor-pointer items-center justify-center rounded-2xl border border-border-medium bg-surface-secondary px-4 py-2.5 text-center text-sm text-text-secondary shadow-sm hover:border-border-heavy hover:bg-surface-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-primary"
+        >
+          <span className="line-clamp-2 text-balance break-words">{text}</span>
+        </button>
+      ))}
     </div>
   );
 };

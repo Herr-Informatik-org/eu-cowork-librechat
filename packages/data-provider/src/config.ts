@@ -844,6 +844,23 @@ export const toolApprovalHookConfigSchema = z.object({
 
 export type TToolApprovalHookConfig = z.infer<typeof toolApprovalHookConfigSchema>;
 
+/**
+ * Per-conversation work mode chosen under the composer and enforced server-side:
+ * - `plan`: read-only tools run; writes are blocked and described as plan steps.
+ * - `ask`: every write pauses as a proposal card.
+ * - `auto`: routine writes run; deleting, sending and executing pause as a card.
+ */
+export const workModeSchema = z.enum(['plan', 'ask', 'auto']);
+export type WorkMode = z.infer<typeof workModeSchema>;
+
+/** Enables the work-mode layer of the tool-approval policy; `default` applies when a request carries no valid mode. */
+export const workModesConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  default: workModeSchema.optional(),
+});
+
+export type TWorkModesConfig = z.infer<typeof workModesConfigSchema>;
+
 export const toolApprovalPolicySchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -864,6 +881,12 @@ export const toolApprovalPolicySchema = z
      * module list per override. Honored only when `enabled` is true.
      */
     hooks: z.array(toolApprovalHookConfigSchema).optional(),
+    /**
+     * Work modes (Planen / Fragen / Auto) layered over this policy per request.
+     * Honored only for the web chat (HITL-capable callers); an explicit
+     * `enabled: false` above still disables everything.
+     */
+    workModes: workModesConfigSchema.optional(),
   })
   .optional();
 
@@ -935,6 +958,10 @@ export const agentsEndpointSchema = baseEndpointSchema
       /** Durable checkpointer backing HITL resume. Defaults to the app's MongoDB
        *  when `toolApproval.enabled` is set; ignored otherwise. */
       checkpointer: checkpointerSchema,
+      /** Chat only: ask the model for follow-up suggestions shown as chips. On unless `false`. */
+      nextSteps: z.boolean().optional(),
+      /** Chat only: offer the `plan_aktualisieren` tool and its docked plan bar. On unless `false`. */
+      plan: z.boolean().optional(),
     }),
   )
   .default({

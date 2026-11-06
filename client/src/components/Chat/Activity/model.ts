@@ -28,6 +28,8 @@ export function activityFromMessages(messages: TMessage[], responseId?: string) 
     const hasOutput =
       ('output' in call && call.output != null && call.output !== '') ||
       ('function' in call && call.function.output != null && call.function.output !== '');
+    if (!hasOutput && 'approval' in call && call.approval != null)
+      return { state: 'needs-input', stage: 'question', messageId } as const;
     if (!hasOutput && call.progress !== 1)
       return { state: 'running', stage: 'tool', tool, messageId } as const;
     return { state: 'running', stage: 'thinking', messageId } as const;

@@ -1,0 +1,93 @@
+/* Proposal card (V5): status changes fade between colors, never jump. Colors follow the
+   activity badge (done = green, needs input = amber, error = red). */
+.kisuno-proposal {
+  border: 1px solid var(--border-light);
+  background: var(--surface-secondary);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  transition:
+    border-color var(--kisuno-base, 170ms) var(--kisuno-ease-out, ease-out),
+    background-color var(--kisuno-base, 170ms) var(--kisuno-ease-out, ease-out);
+  animation: kisuno-message-in var(--kisuno-base, 170ms) var(--kisuno-ease-out, ease-out);
+}
+.kisuno-proposal[data-status='open'],
+.kisuno-proposal[data-status='submitting'] {
+  border-color: var(--border-heavy);
+}
+.kisuno-proposal[data-status='approved'] {
+  border-color: rgba(31, 119, 91, 0.45);
+}
+.kisuno-proposal[data-status='error'] {
+  border-color: rgba(181, 70, 70, 0.5);
+}
+.kisuno-proposal[data-status='expired'] {
+  border-color: rgba(146, 94, 13, 0.45);
+}
+.kisuno-proposal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: var(--surface-tertiary);
+  outline: none;
+}
+.kisuno-proposal-badge:focus-visible {
+  box-shadow: 0 0 0 2px var(--border-heavy);
+}
+.kisuno-proposal-badge[data-status='approved'] {
+  color: #1f775b;
+  background: rgba(31, 119, 91, 0.1);
+  animation: kisuno-proposal-pop var(--kisuno-slow, 260ms) cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.kisuno-proposal-badge[data-status='expired'] {
+  color: #925e0d;
+  background: rgba(146, 94, 13, 0.1);
+}
+.dark .kisuno-proposal-badge[data-status='approved'] {
+  color: #77cbb0;
+  background: rgba(119, 203, 176, 0.12);
+}
+.dark .kisuno-proposal-badge[data-status='expired'] {
+  color: #e6b865;
+  background: rgba(230, 184, 101, 0.12);
+}
+.kisuno-proposal-fields {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
+}
+.kisuno-proposal-fields dt {
+  color: var(--text-secondary);
+}
+.kisuno-proposal-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+@keyframes kisuno-proposal-pop {
+  from {
+    transform: scale(0.85);
+  }
+}
+@media (max-width: 480px) {
+  .kisuno-proposal-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kisuno-proposal-fields dd {
+    margin-bottom: 0.25rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kisuno-proposal,
+  .kisuno-proposal-badge[data-status='approved'] {
+    animation: none;
+    transition: none;
+  }
+}

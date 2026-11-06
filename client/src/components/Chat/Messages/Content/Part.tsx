@@ -30,6 +30,7 @@ import { isBashProgrammaticToolCall } from './routing';
 import { ErrorMessage } from './MessageContent';
 import AskUserQuestion from './AskUserQuestion';
 import RetrievalCall from './RetrievalCall';
+import { ProposalOutcome } from './Proposal';
 import ToolApproval from './ToolApproval';
 import AgentHandoff from './AgentHandoff';
 import CodeAnalyze from './CodeAnalyze';
@@ -364,13 +365,26 @@ const Part = memo(function Part({
        *  still surfaces approve/reject/edit/respond. Only while the call is unresolved
        *  (no output yet). */
       if (toolCall.approval != null && (toolCall.output?.length ?? 0) === 0) {
+        /** The proposal card names the step and its values; the tool card above it
+         *  would announce the step as already running while it awaits a decision. */
+        return (
+          <ToolApproval
+            approval={toolCall.approval}
+            toolCallId={toolCall.id ?? ''}
+            args={toolCall.args}
+            name={toolCall.name}
+          />
+        );
+      }
+      if ((toolCall.output?.length ?? 0) > 0) {
         return (
           <>
             {card}
-            <ToolApproval
-              approval={toolCall.approval}
-              toolCallId={toolCall.id ?? ''}
+            <ProposalOutcome
+              toolCallId={toolCallId}
+              name={toolCall.name ?? ''}
               args={toolCall.args}
+              output={toolCall.output}
             />
           </>
         );

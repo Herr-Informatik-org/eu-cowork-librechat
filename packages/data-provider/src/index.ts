@@ -15,6 +15,8 @@ export * from './generate';
 export * from './models';
 /* mcp */
 export * from './mcp';
+/* tool risk (work modes, proposal cards) */
+export * from './risk';
 /* RBAC */
 export * from './permissions';
 export * from './roles';
@@ -59,3 +61,5 @@ export * from './feedback';
 export * from './parameterSettings';
 /* code-execution sandbox */
 export * from './codeEnvRef';
+/* agent work plan */
+export * from './plan';
