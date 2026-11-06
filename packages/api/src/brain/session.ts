@@ -1,13 +1,14 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
+import { logger } from '@librechat/data-schemas';
 import { tool } from '@librechat/agents/langchain/tools';
 import type { BrainNode, BrainEdge, BrainRecall, BrainKind } from 'librechat-data-provider';
 import type { GenericTool } from '@librechat/agents';
 import type { BrainConversationMessage } from './conversation';
+import { isBrainTimeout, requestBrain, isBrainConfigured, brainRecallTimeoutMs } from './client';
+import { brainAuthoredText, buildBrainRecallQuery } from './query';
 import { validateContextualFacts } from './evidence';
 import { containsBrainCredential } from './safety';
-import { isBrainConfigured, requestBrain } from './client';
-import { brainAuthoredText, buildBrainRecallQuery } from './query';
 
 export interface BrainSourceMessage {
   id: string;
@@ -93,6 +94,20 @@ interface BrainSearchResult {
   stopReason: string;
   suggestedIds?: string[];
   output: string;
+}
+
+type BrainRecallPhase = 'initial' | 'search';
+type BrainRecallOutcome = 'ok' | 'timeout' | 'error' | 'skipped';
+
+/** Operator timing line: constants and counts only, never query text, memory content or ids. */
+function logBrainRecall(
+  phase: BrainRecallPhase,
+  outcome: BrainRecallOutcome,
+  startedAt: number,
+  nodes = 0,
+): void {
+  const durationMs = Date.now() - startedAt;
+  logger.info(`[Brain] Abrufdauer ${JSON.stringify({ phase, outcome, durationMs, nodes })}`);
 }
 
 export interface BrainSession {
@@ -323,11 +338,15 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
           stopReason: result.stopReason,
         })}`;
   const count = options.countTokens ?? (async (text: string) => Buffer.byteLength(text, 'utf8'));
+  /** Background history imports keep the regular deadline and do not add timing lines. */
+  const logRecall: typeof logBrainRecall = options.historical ? () => undefined : logBrainRecall;
   const search = async (
     query: string,
     seedIds: string[] = [],
     initial = false,
   ): Promise<BrainSearchResult> => {
+    const phase: BrainRecallPhase = initial ? 'initial' : 'search';
+    const startedAt = Date.now();
     const liveBudget = options.getBudget?.();
     if (liveBudget && liveBudget.revision !== budgetRevision) {
       budgetRevision = liveBudget.revision;
@@ -340,6 +359,7 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
         : options.contextBudgetTokens - usedTokens,
     );
     if (searchInFlight || remaining < 128) {
+      logRecall(phase, 'skipped', startedAt);
       return {
         context: '',
         nodes: [],
@@ -350,15 +370,24 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
     }
     searchInFlight = true;
     try {
-      const result = await requestBrain<RecallResult>(options.userId, 'POST', '/v1/recall', {
-        query,
-        conversationId: options.conversationId,
-        messageId: options.messageId,
-        contextBudgetTokens: Math.max(0, remaining - 512),
-        initialBudgetTokens: Math.min(1600, remaining),
-        excludeIds: [...loadedIds],
-        seedIds: seedIds.filter((id) => knownIds.has(id)),
-        ...(options.historical ? { recordTrace: false } : {}),
+      const result = await requestBrain<RecallResult>(
+        options.userId,
+        'POST',
+        '/v1/recall',
+        {
+          query,
+          conversationId: options.conversationId,
+          messageId: options.messageId,
+          contextBudgetTokens: Math.max(0, remaining - 512),
+          initialBudgetTokens: Math.min(1600, remaining),
+          excludeIds: [...loadedIds],
+          seedIds: seedIds.filter((id) => knownIds.has(id)),
+          ...(options.historical ? { recordTrace: false } : {}),
+        },
+        options.historical ? undefined : brainRecallTimeoutMs(),
+      ).catch((error: unknown): never => {
+        logRecall(phase, isBrainTimeout(error) ? 'timeout' : 'error', startedAt);
+        throw error;
       });
       const output = renderSearch(result, initial);
       const actualTokens = await count(output);
@@ -375,6 +404,7 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
           usedTokens += fallbackTokens;
           usedSinceSnapshot += fallbackTokens;
         }
+        logRecall(phase, 'ok', startedAt);
         return { ...stopped, output: fallbackTokens <= remaining ? fallback : '' };
       }
       usedTokens += actualTokens;
@@ -387,6 +417,7 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
       for (const id of result.suggestedIds) {
         knownIds.add(id);
       }
+      logRecall(phase, 'ok', startedAt, result.nodes.length);
       return { ...result, output };
     } finally {
       searchInFlight = false;

@@ -162,6 +162,22 @@ export function isBrainConfigured(): boolean {
   return Boolean(process.env.BRAIN_API_URL && process.env.BRAIN_SHARED_SECRET);
 }
 
+/** Chat recall runs before the first answer token; a slow Brain must not hold the answer back. */
+export function brainRecallTimeoutMs(): number {
+  const configured = Number(process.env.BRAIN_RECALL_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.min(Math.max(Math.round(configured), 300), 10000)
+    : 1500;
+}
+
+/** True when the Brain request was aborted by its own deadline rather than rejected by the service. */
+export function isBrainTimeout(error: unknown): boolean {
+  if (!(error instanceof BrainServiceError) || error.upstreamStatus !== undefined) return false;
+  const { cause } = error;
+  const name = cause != null && typeof cause === 'object' && 'name' in cause ? cause.name : '';
+  return name === 'TimeoutError' || name === 'AbortError';
+}
+
 export function signBrainRequest({
   method,
   path,

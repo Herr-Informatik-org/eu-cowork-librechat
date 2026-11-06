@@ -12,9 +12,9 @@ import type { BrainSession, BrainSessionOptions } from './session';
 import { checkAccess } from '~/middleware/access';
 import { createBrainSession } from './session';
 import { isBrainSourcePersisted } from './source';
-import { requestBrain } from './client';
+import { syncLegacyBrainMemories } from './legacy';
 import type { BrainFailureReporter } from './diagnostics';
-import { classifyBrainFailure, createBrainFailureReporter } from './diagnostics';
+import { createBrainFailureReporter } from './diagnostics';
 import type { BrainStoredMessage, BrainConversationMessage } from './conversation';
 import { conversationBranch, conversationMessages, conversationText } from './conversation';
 import {
@@ -230,34 +230,14 @@ export async function prepareBrainTurn({
     connectionHints,
     signal,
   });
-  try {
-    if (canWrite) {
-      const legacy = await dependencies.getUserMemories({ userId });
-      const personal = legacy.filter((entry) => !entry.agentId);
-      if (personal.length > 0) {
-        await requestBrain(userId, 'POST', '/v1/import', {
-          memories: personal.map(({ key, value, updated_at }) => ({
-            key,
-            value,
-            updatedAt: updated_at,
-          })),
-        });
-      }
-    }
-    return { session };
-  } catch (error) {
-    await reportFailure({
-      failure: classifyBrainFailure(error, 'recall'),
+  if (canWrite) {
+    syncLegacyBrainMemories({
       userId,
-      operation: 'recall',
-      stage: 'recall',
       conversationId,
       messageId,
-    }).catch(() => undefined);
-    return {
-      session,
-      context:
-        'Das persönliche Brain ist zurzeit nicht erreichbar. Verwende den aktuellen Chat; behaupte keinen erfolgten Erinnerungsabruf.',
-    };
+      reportFailure,
+      loadMemories: () => dependencies.getUserMemories({ userId }),
+    });
   }
+  return { session };
 }

@@ -1,6 +1,8 @@
-import { createBrainSession, groundedBrainFacts, isBrainChatEligible } from './session';
-import { attachBrainTools } from './runtime';
+import { logger } from '@librechat/data-schemas';
 import type { BrainCandidate } from './session';
+import { createBrainSession, groundedBrainFacts, isBrainChatEligible } from './session';
+import { brainRecallTimeoutMs } from './client';
+import { attachBrainTools } from './runtime';
 
 const source = {
   id: 'message-1',
@@ -166,6 +168,123 @@ describe('personal Brain scope and grounding', () => {
     await session.tools[0].invoke({ query: 'Projekt', seedIds: [] });
     expect(requests[2].contextBudgetTokens).toBe(requests[0].contextBudgetTokens);
   });
+  describe('chat recall deadline and timing', () => {
+    const recallResponse = () =>
+      new Response(
+        JSON.stringify({
+          context: 'Relevante Erinnerung',
+          nodes: [{ id: 'node-a' }, { id: 'node-b' }],
+          edges: [],
+          recall: {},
+          hasMore: false,
+          suggestedIds: [],
+          stopReason: 'fertig',
+        }),
+        { status: 200 },
+      );
+    const recallSession = () =>
+      createBrainSession({
+        userId: 'owner-secret-id',
+        conversationId: 'conversation',
+        messageId: 'response',
+        source,
+        recallQuery: 'Vertrauliche Suchanfrage',
+        contextBudgetTokens: 10000,
+        canWrite: false,
+        canUpdate: false,
+        countTokens: async (text) => text.length,
+      });
+    const timingLines = (spy: jest.SpyInstance) =>
+      spy.mock.calls.map(([line]) => String(line)).filter((line) => line.includes('Abrufdauer'));
+    afterEach(() => {
+      delete process.env.BRAIN_RECALL_TIMEOUT_MS;
+    });
+
+    it.each([
+      [undefined, 1500],
+      ['800', 800],
+      ['50', 300],
+      ['999999', 10000],
+      ['0', 1500],
+      ['kein Wert', 1500],
+    ])('bounds BRAIN_RECALL_TIMEOUT_MS=%s to %i ms', (configured, expected) => {
+      if (configured !== undefined) process.env.BRAIN_RECALL_TIMEOUT_MS = configured;
+      expect(brainRecallTimeoutMs()).toBe(expected);
+    });
+
+    it('uses the short recall deadline for the initial recall and brain_search', async () => {
+      const timeoutSpy = jest.spyOn(AbortSignal, 'timeout');
+      jest.spyOn(global, 'fetch').mockImplementation(async () => recallResponse());
+      const session = recallSession();
+      await session.initialize();
+      await session.tools[0].invoke({ query: 'Präferenz', seedIds: [] });
+      expect(timeoutSpy.mock.calls).toEqual([[1500], [1500]]);
+    });
+
+    it('keeps the regular deadline and no timing line for background history sessions', async () => {
+      const timeoutSpy = jest.spyOn(AbortSignal, 'timeout');
+      const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => logger);
+      jest.spyOn(global, 'fetch').mockImplementation(async () => recallResponse());
+      const session = createBrainSession({
+        userId: 'owner',
+        conversationId: 'conversation',
+        messageId: 'response',
+        source,
+        historical: true,
+        contextBudgetTokens: 10000,
+        canWrite: false,
+        canUpdate: false,
+        countTokens: async (text) => text.length,
+      });
+      await session.tools[0].invoke({ query: 'Präferenz', seedIds: [] });
+      expect(timeoutSpy.mock.calls).toEqual([[5000]]);
+      expect(timingLines(infoSpy)).toEqual([]);
+    });
+
+    it('logs duration, outcome and node count without query text or ids', async () => {
+      const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => logger);
+      jest.spyOn(global, 'fetch').mockImplementation(async () => recallResponse());
+      const session = recallSession();
+      expect(await session.initialize()).toContain('Relevante Erinnerung');
+      const [line] = timingLines(infoSpy);
+      const timing = JSON.parse(line.slice(line.indexOf('{'))) as {
+        phase: string;
+        outcome: string;
+        durationMs: number;
+        nodes: number;
+      };
+      expect(timing).toMatchObject({ phase: 'initial', outcome: 'ok', nodes: 2 });
+      expect(typeof timing.durationMs).toBe('number');
+      expect(line).not.toMatch(/Vertrauliche|owner-secret-id|node-a|conversation/);
+    });
+
+    it('reports a timeout distinctly and rejects so the caller keeps its fallback', async () => {
+      const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => logger);
+      jest
+        .spyOn(global, 'fetch')
+        .mockRejectedValue(new DOMException('Synthetic deadline', 'TimeoutError'));
+      const session = recallSession();
+      await expect(session.initialize()).rejects.toMatchObject({ name: 'BrainServiceError' });
+      expect(session.context).toBe('');
+      expect(timingLines(infoSpy)).toEqual([expect.stringContaining('"outcome":"timeout"')]);
+    });
+
+    it('distinguishes service errors and skipped recalls', async () => {
+      const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => logger);
+      jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(new Response(JSON.stringify({ error: 'x' }), { status: 503 }));
+      const session = recallSession();
+      await expect(session.initialize()).rejects.toMatchObject({ name: 'BrainServiceError' });
+      session.setContextBudget(0);
+      await session.tools[0].invoke({ query: 'Präferenz', seedIds: [] });
+      expect(timingLines(infoSpy)).toEqual([
+        expect.stringContaining('"outcome":"error"'),
+        expect.stringContaining('"phase":"search","outcome":"skipped"'),
+      ]);
+    });
+  });
+
   it('replaces legacy writes without mutating the shared tool registry', () => {
     const original = new Map([
       [

@@ -2,7 +2,12 @@ import { createBrainSession } from './session';
 import { requestBrain } from './client';
 import type { BrainSessionOptions } from './session';
 
-jest.mock('./client', () => ({ requestBrain: jest.fn(), isBrainConfigured: () => true }));
+jest.mock('./client', () => ({
+  requestBrain: jest.fn(),
+  isBrainConfigured: () => true,
+  isBrainTimeout: () => false,
+  brainRecallTimeoutMs: () => 1500,
+}));
 const request = jest.mocked(requestBrain);
 const node = {
   kind: 'decision',
