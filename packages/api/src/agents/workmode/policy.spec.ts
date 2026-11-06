@@ -12,7 +12,10 @@ import {
   withWorkModeBaseline,
   createToolRiskClassifier,
   WORK_MODE_PLAN_REASON,
+  WORK_MODE_BRIDGE_REASON,
   WORK_MODE_CRITICAL_REASON,
+  WORK_MODE_ASK_BRIDGE_REASON,
+  WORK_MODE_PLAN_BRIDGE_REASON,
 } from './policy';
 import { recordToolHints, clearToolHints } from './hints';
 import { resolveToolApprovalPolicy, exemptAskUserQuestionFromApproval } from '../hitl/policy';
@@ -23,6 +26,7 @@ const ODOO = '_mcp_odoo-admin';
 const SEARCH = `search_records${ODOO}`;
 const UPDATE = `update_record${ODOO}`;
 const DELETE = `delete_record${ODOO}`;
+const BRIDGE = 'run_tools_with_code';
 
 const ENABLED: TToolApprovalPolicy = {
   enabled: true,
@@ -135,13 +139,18 @@ describe('work mode layer and hook', () => {
     expect([...names].sort()).toEqual(['a', 'b', 'c']);
   });
 
-  test('the layer only allows what the mode lets run alone', () => {
+  test('the layer only allows what the mode lets run alone, and only over bypass', () => {
     const classify = createToolRiskClassifier();
     const names = [SEARCH, UPDATE, DELETE, 'weird*name'];
-    expect(buildWorkModeLayer('plan', names, classify)).toEqual({ allow: [SEARCH] });
-    expect(buildWorkModeLayer('ask', names, classify)).toEqual({ allow: [SEARCH] });
-    expect(buildWorkModeLayer('auto', names, classify)).toEqual({ allow: [SEARCH, UPDATE] });
-    expect(buildWorkModeLayer('plan', [UPDATE], classify)).toEqual({});
+    expect(buildWorkModeLayer('plan', names, classify, 'bypass')).toEqual({ allow: [SEARCH] });
+    expect(buildWorkModeLayer('ask', names, classify, 'bypass')).toEqual({ allow: [SEARCH] });
+    expect(buildWorkModeLayer('auto', names, classify, 'bypass')).toEqual({
+      allow: [SEARCH, UPDATE],
+    });
+    expect(buildWorkModeLayer('plan', [UPDATE], classify, 'bypass')).toEqual({});
+    expect(buildWorkModeLayer('auto', names, classify, 'default')).toEqual({});
+    expect(buildWorkModeLayer('auto', names, classify, 'dontAsk')).toEqual({});
+    expect(buildWorkModeLayer('auto', names, classify, undefined)).toEqual({});
   });
 
   test('administrators may additionally edit the proposed arguments', async () => {
@@ -197,13 +206,47 @@ describe('server enforcement through the SDK hook fold', () => {
     });
   });
 
-  test('reads never ask, even under an admin default-ask mode', async () => {
+  test('bypass + auto: reads and routine writes run, critical asks', async () => {
+    await expect(decide('auto', SEARCH)).resolves.toMatchObject({ decision: 'allow' });
+    await expect(decide('auto', UPDATE)).resolves.toMatchObject({ decision: 'allow' });
+    await expect(decide('auto', DELETE)).resolves.toMatchObject({ decision: 'ask' });
+  });
+
+  test('default + auto: the admin baseline keeps asking, the mode never loosens it', async () => {
     const policy: TToolApprovalPolicy = {
       enabled: true,
       mode: 'default',
       workModes: { enabled: true },
     };
-    await expect(decide('ask', SEARCH, { policy })).resolves.toMatchObject({ decision: 'allow' });
+    await expect(decide('auto', SEARCH, { policy })).resolves.toMatchObject({ decision: 'ask' });
+    await expect(decide('auto', UPDATE, { policy })).resolves.toMatchObject({ decision: 'ask' });
+    await expect(decide('auto', DELETE, { policy })).resolves.toMatchObject({ decision: 'ask' });
+  });
+
+  test('dontAsk + auto: the admin baseline keeps denying unlisted tools', async () => {
+    const policy: TToolApprovalPolicy = {
+      enabled: true,
+      mode: 'dontAsk',
+      allow: [SEARCH],
+      workModes: { enabled: true },
+    };
+    await expect(decide('auto', SEARCH, { policy })).resolves.toMatchObject({ decision: 'allow' });
+    await expect(decide('auto', UPDATE, { policy })).resolves.toMatchObject({ decision: 'deny' });
+    await expect(decide('auto', DELETE, { policy })).resolves.toMatchObject({ decision: 'deny' });
+  });
+
+  test('batch bridges: blocked in plan and ask, a critical card in auto', async () => {
+    const plan = await decide('plan', BRIDGE);
+    expect(plan).toMatchObject({ decision: 'deny', reason: WORK_MODE_PLAN_BRIDGE_REASON });
+    expect(plan.reason?.startsWith(WORK_MODE_PLAN_MARKER)).toBe(true);
+    await expect(decide('ask', BRIDGE)).resolves.toMatchObject({
+      decision: 'deny',
+      reason: WORK_MODE_ASK_BRIDGE_REASON,
+    });
+    await expect(decide('auto', BRIDGE)).resolves.toMatchObject({
+      decision: 'ask',
+      reason: WORK_MODE_BRIDGE_REASON,
+    });
   });
 
   test('admin ask and deny lists keep winning over the mode layer', async () => {
@@ -222,10 +265,15 @@ describe('server enforcement through the SDK hook fold', () => {
     });
   });
 
-  test('MCP annotations reclassify a tool for its own user only', async () => {
-    recordToolHints('crm', [{ name: 'sync', annotations: { readOnlyHint: true } }], 'u1');
-    expect(createToolRiskClassifier('u1')('sync_mcp_crm')).toBe('read');
-    expect(createToolRiskClassifier('u2')('sync_mcp_crm')).toBe('write');
+  test('MCP annotations reclassify an unmatched tool for its own user only', async () => {
+    recordToolHints('crm', [{ name: 'partner_feed', annotations: { readOnlyHint: true } }], 'u1');
+    expect(createToolRiskClassifier('u1')('partner_feed_mcp_crm')).toBe('read');
+    expect(createToolRiskClassifier('u2')('partner_feed_mcp_crm')).toBe('write');
+  });
+
+  test('readOnlyHint never downgrades a name that writes', async () => {
+    recordToolHints('crm', [{ name: 'sync_partners', annotations: { readOnlyHint: true } }]);
+    expect(createToolRiskClassifier()('sync_partners_mcp_crm')).toBe('write');
   });
 
   test('is inactive for callers without an approval surface or with the feature off', () => {

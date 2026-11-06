@@ -31,7 +31,7 @@ describe('MCP annotations reach the work-mode classifier', () => {
     const listTools = jest.fn().mockResolvedValue({
       tools: [
         {
-          name: 'sync_partners',
+          name: 'partner_feed',
           inputSchema: { type: 'object', properties: {} },
           annotations: { readOnlyHint: true },
         },
@@ -44,9 +44,9 @@ describe('MCP annotations reach the work-mode classifier', () => {
     });
     await connectionWith(listTools).fetchTools();
 
-    expect(getToolHints('sync_partners_mcp_odoo-admin')).toEqual({ readOnlyHint: true });
+    expect(getToolHints('partner_feed_mcp_odoo-admin')).toEqual({ readOnlyHint: true });
     const classify = createToolRiskClassifier();
-    expect(classify('sync_partners_mcp_odoo-admin')).toBe('read');
+    expect(classify('partner_feed_mcp_odoo-admin')).toBe('read');
     expect(classify('archive_lead_mcp_odoo-admin')).toBe('critical');
   });
 
@@ -55,6 +55,6 @@ describe('MCP annotations reach the work-mode classifier', () => {
     const connection = connectionWith(listTools, 'u1');
     connection.on('error', () => undefined);
     await expect(connection.fetchTools()).resolves.toEqual([]);
-    expect(getToolHints('sync_partners_mcp_odoo-admin', 'u1')).toBeUndefined();
+    expect(getToolHints('partner_feed_mcp_odoo-admin', 'u1')).toBeUndefined();
   });
 });

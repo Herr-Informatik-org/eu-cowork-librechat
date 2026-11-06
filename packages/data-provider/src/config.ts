@@ -810,8 +810,9 @@ export type ToolApprovalMode = z.infer<typeof toolApprovalModeSchema>;
  *
  * Shape mirrors `@librechat/agents`'s `ToolPolicyConfig` so the host can map it
  * directly into `createToolPolicyHook(config)`. The SDK does the evaluation
- * (`deny → bypass → allow → ask → dontAsk → fallthrough(ask)`); this config
- * just describes the surface.
+ * (`deny → ask → allow → bypass → dontAsk → fallthrough(ask)`, see
+ * `createToolPolicyHook`); this config just describes the surface. An explicit
+ * `allow` entry therefore beats the `dontAsk` and `default` fallbacks.
  *
  * Conventions:
  * - All list entries are matched as globs (`*`). Use `mcp:server:*` to scope

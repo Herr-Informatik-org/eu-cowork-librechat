@@ -28,9 +28,53 @@ describe('tool risk', () => {
     expect(classifyToolName('search_and_update')).toBe('write');
   });
 
-  test('dry runs stay read even when the name mentions a write', () => {
+  test('dry runs stay read only in their narrow shapes', () => {
     expect(classifyToolName('validate_write')).toBe('read');
     expect(classifyToolName('preview_write')).toBe('read');
+    expect(classifyToolName('preview_invoice')).toBe('read');
+    expect(classifyToolName('dry_run_delete_partner')).toBe('read');
+    expect(classifyToolName('preview_and_send')).toBe('critical');
+  });
+
+  test('side effects are never read, wherever the verb stands', () => {
+    expect(classifyToolName('validate_invoice')).toBe('critical');
+    expect(classifyToolName('check_and_delete_x')).toBe('critical');
+    expect(classifyToolName('format_drive')).toBe('critical');
+    expect(classifyToolName('check_out_file')).toBe('write');
+    expect(classifyToolName('scan_device')).toBe('write');
+    expect(classifyToolName('report_incident')).toBe('write');
+    expect(classifyToolName('crm_create_lead')).toBe('write');
+  });
+
+  test('read tools of the internal Odoo bridge stay read', () => {
+    const reads = [
+      'search_records',
+      'read_record',
+      'get_model_fields',
+      'list_models',
+      'schema_catalog',
+      'fit_gap_report',
+      'upgrade_risk_report',
+      'business_pack_report',
+      'diagnose_access',
+      'diagnose_odoo_call',
+      'preview_write',
+      'validate_write',
+      'generate_json2_payload',
+      'build_domain',
+      'health_check',
+      'get_email',
+    ];
+    for (const name of reads) {
+      expect([name, classifyToolName(`${name}_mcp_odoo-twojo`)]).toEqual([name, 'read']);
+    }
+    expect(classifyToolName('execute_approved_write_mcp_odoo-twojo')).toBe('critical');
+    expect(classifyToolName('execute_method_mcp_odoo-twojo')).toBe('critical');
+  });
+
+  test('batch bridges are critical', () => {
+    expect(classifyToolName('run_tools_with_code')).toBe('critical');
+    expect(classifyToolName('run_tools_with_bash')).toBe('critical');
   });
 
   test('unknown names are treated as writes', () => {
@@ -46,8 +90,11 @@ describe('tool risk', () => {
     expect(classifyToolName('create_file')).toBe('write');
   });
 
-  test('MCP annotations override the name heuristic', () => {
-    expect(classifyToolRisk('delete_cache_mcp_x', { readOnlyHint: true })).toBe('read');
+  test('MCP annotations only raise the class or rescue an unmatched name', () => {
+    expect(classifyToolRisk('delete_cache_mcp_x', { readOnlyHint: true })).toBe('critical');
+    expect(classifyToolRisk('sync_partners_mcp_x', { readOnlyHint: true })).toBe('write');
+    expect(classifyToolRisk('partner_feed_mcp_x', { readOnlyHint: true })).toBe('read');
+    expect(classifyToolRisk('search_records_mcp_x', { readOnlyHint: false })).toBe('write');
     expect(classifyToolRisk('get_token_mcp_x', { destructiveHint: true })).toBe('critical');
     expect(classifyToolRisk('weather_mcp_x', { readOnlyHint: false, destructiveHint: false })).toBe(
       'write',

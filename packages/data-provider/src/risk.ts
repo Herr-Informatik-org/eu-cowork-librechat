@@ -25,10 +25,21 @@ export const PROPOSAL_REJECTED_REASON = 'Die Person hat diesen Vorschlag verworf
 /** Prefix the agents SDK puts in front of every blocked tool result. */
 export const BLOCKED_OUTPUT_PREFIX = 'Blocked: ';
 
+/** Batch bridges that run many tool calls from code. Their inner calls skip `PreToolUse`. */
+export const PROGRAMMATIC_BRIDGE_TOOLS: ReadonlySet<string> = new Set<string>([
+  String(Constants.PROGRAMMATIC_TOOL_CALLING),
+  String(Constants.BASH_PROGRAMMATIC_TOOL_CALLING),
+]);
+
+export function isProgrammaticBridgeTool(name: string): boolean {
+  return PROGRAMMATIC_BRIDGE_TOOLS.has(name);
+}
+
 /**
  * Native and host tools with a fixed class. Personal assistant memory (Brain,
  * memory tools) counts as `read`: it is the person's own knowledge store, not
- * business data, and learning runs without confirmation by design.
+ * business data, and learning runs without confirmation by design. The batch
+ * bridges are critical: no single inner call can be confirmed on a card.
  */
 const NATIVE_TOOL_RISK: Readonly<Record<string, ToolRisk>> = {
   web_search: 'read',
@@ -55,40 +66,35 @@ const NATIVE_TOOL_RISK: Readonly<Record<string, ToolRisk>> = {
   bash_tool: 'write',
   create_file: 'write',
   edit_file: 'write',
-  [Constants.PROGRAMMATIC_TOOL_CALLING]: 'write',
-  [Constants.BASH_PROGRAMMATIC_TOOL_CALLING]: 'write',
+  [Constants.PROGRAMMATIC_TOOL_CALLING]: 'critical',
+  [Constants.BASH_PROGRAMMATIC_TOOL_CALLING]: 'critical',
 };
 
+/** Unambiguous side-effect verbs: critical wherever they appear in the name. */
 const CRITICAL_VERBS: ReadonlySet<string> = new Set([
   'delete',
   'remove',
   'unlink',
   'destroy',
   'purge',
-  'drop',
   'erase',
   'trash',
   'wipe',
   'truncate',
+  'format',
   'send',
-  'email',
-  'mail',
-  'post',
   'publish',
   'reply',
   'forward',
   'invite',
-  'share',
   'notify',
   'execute',
   'exec',
-  'run',
-  'call',
   'invoke',
   'approve',
   'confirm',
+  'validate',
   'cancel',
-  'sign',
   'submit',
   'pay',
   'transfer',
@@ -102,21 +108,30 @@ const CRITICAL_VERBS: ReadonlySet<string> = new Set([
   'deploy',
 ]);
 
+/** Also nouns (`get_email`, `read_post`): critical only as the leading verb. */
+const LEADING_CRITICAL_VERBS: ReadonlySet<string> = new Set([
+  'drop',
+  'email',
+  'mail',
+  'post',
+  'share',
+  'run',
+  'call',
+  'sign',
+]);
+
+/** Unambiguous change verbs: write wherever they appear in the name. */
 const WRITE_VERBS: ReadonlySet<string> = new Set([
   'create',
-  'add',
   'insert',
-  'new',
   'update',
   'edit',
   'modify',
   'change',
-  'set',
   'write',
   'patch',
   'put',
   'save',
-  'store',
   'upsert',
   'append',
   'upload',
@@ -127,17 +142,10 @@ const WRITE_VERBS: ReadonlySet<string> = new Set([
   'assign',
   'attach',
   'detach',
-  'mark',
-  'tag',
-  'label',
   'archive',
   'unarchive',
   'restore',
   'schedule',
-  'book',
-  'draft',
-  'comment',
-  'note',
   'import',
   'sync',
   'enable',
@@ -147,24 +155,45 @@ const WRITE_VERBS: ReadonlySet<string> = new Set([
   'merge',
   'close',
   'reopen',
-  'link',
   'register',
   'reset',
-  'clear',
   'complete',
+  'resume',
+  'grant',
+  'convert',
+  'increment',
+  'decrement',
+  'checkout',
+  'checkin',
+]);
+
+/** Also nouns (`get_note`, `list_tags_by_label`): write only as the leading verb. */
+const LEADING_WRITE_VERBS: ReadonlySet<string> = new Set([
+  'add',
+  'new',
+  'set',
+  'store',
+  'mark',
+  'tag',
+  'label',
+  'book',
+  'draft',
+  'comment',
+  'note',
+  'link',
+  'clear',
   'start',
   'stop',
   'pause',
-  'resume',
   'lock',
   'unlock',
-  'grant',
-  'convert',
   'fill',
-  'increment',
-  'decrement',
+  'load',
+  'scan',
+  'report',
 ]);
 
+/** Look-up verbs. Side-effect verbs (`scan`, `report`, `format`, `load`) are deliberately absent. */
 const READ_VERBS: ReadonlySet<string> = new Set([
   'get',
   'list',
@@ -180,7 +209,6 @@ const READ_VERBS: ReadonlySet<string> = new Set([
   'count',
   'browse',
   'retrieve',
-  'load',
   'download',
   'export',
   'health',
@@ -188,39 +216,55 @@ const READ_VERBS: ReadonlySet<string> = new Set([
   'status',
   'summarize',
   'analyze',
-  'report',
-  'scan',
   'compare',
   'calculate',
   'aggregate',
-  'group',
-  'stats',
-  'schema',
-  'info',
   'whoami',
-  'profile',
-  'build',
   'render',
-  'format',
   'parse',
   'translate',
   'suggest',
   'recommend',
-]);
-
-/** Leading verbs of dry runs: `validate_write`, `preview_update` never change data. */
-const DRY_RUN_VERBS: ReadonlySet<string> = new Set([
-  'preview',
-  'validate',
   'check',
-  'diagnose',
-  'simulate',
-  'dry',
-  'explain',
-  'estimate',
   'verify',
   'inspect',
+  'diagnose',
+  'explain',
+  'estimate',
+  'simulate',
+  'preview',
 ]);
+
+/** Trailing nouns of pure look-ups: `business_pack_report`, `build_domain`, `schema_catalog`. */
+const READ_TRAILING_NOUNS: ReadonlySet<string> = new Set([
+  'report',
+  'catalog',
+  'schema',
+  'profile',
+  'info',
+  'status',
+  'health',
+  'stats',
+  'payload',
+  'domain',
+  'preview',
+  'summary',
+  'diff',
+  'overview',
+  'metadata',
+  'fields',
+]);
+
+/** Leading verbs that turn `<verb>_<change verb>` into a dry run (`validate_write`). */
+const DRY_RUN_LEADS: ReadonlySet<string> = new Set([
+  'preview',
+  'simulate',
+  'validate',
+  'check',
+  'verify',
+]);
+
+const CONJUNCTIONS: ReadonlySet<string> = new Set(['and', 'then']);
 
 /** The model-facing tool part of an MCP key (`search_records_mcp_odoo` → `search_records`). */
 export function getToolBaseName(name: string): string {
@@ -237,50 +281,97 @@ export function tokenizeToolName(name: string): string[] {
     .filter((token) => token.length > 0);
 }
 
-/** Name heuristic only. Unknown names count as `write`: unclassified changes are never silent. */
-export function classifyToolName(name: string): ToolRisk {
-  const native = NATIVE_TOOL_RISK[name];
-  if (native != null) {
-    return native;
-  }
-  const tokens = tokenizeToolName(name);
-  if (tokens.length > 0 && DRY_RUN_VERBS.has(tokens[0])) {
-    return 'read';
-  }
-  let sawWrite = false;
-  let sawRead = false;
-  for (const token of tokens) {
-    if (CRITICAL_VERBS.has(token)) {
-      return 'critical';
-    }
-    sawWrite = sawWrite || WRITE_VERBS.has(token);
-    sawRead = sawRead || READ_VERBS.has(token);
-  }
-  if (sawWrite) {
-    return 'write';
-  }
-  return sawRead ? 'read' : 'write';
+function isChangeVerb(token: string): boolean {
+  return (
+    WRITE_VERBS.has(token) ||
+    CRITICAL_VERBS.has(token) ||
+    LEADING_WRITE_VERBS.has(token) ||
+    LEADING_CRITICAL_VERBS.has(token)
+  );
 }
 
 /**
- * Risk of one tool. MCP annotations win when present (`readOnlyHint` → read,
- * `destructiveHint` → critical); an explicitly non-destructive write still keeps
- * a critical name class (sending is not destructive but needs confirmation).
- * Native tools ignore hints.
+ * Narrow dry-run shapes only: `dry_run_*`, `preview_*` without a chained action,
+ * and `<validate|check|verify|preview|simulate>_<change verb>` (`validate_write`).
+ * `validate_invoice` or `check_and_delete_x` are not dry runs.
+ */
+function isDryRun(tokens: readonly string[]): boolean {
+  if (tokens[0] === 'dry' && tokens[1] === 'run') {
+    return true;
+  }
+  if (tokens[0] === 'preview' && !tokens.some((token) => CONJUNCTIONS.has(token))) {
+    return true;
+  }
+  return tokens.length === 2 && DRY_RUN_LEADS.has(tokens[0]) && isChangeVerb(tokens[1]);
+}
+
+interface NameClass {
+  risk: ToolRisk;
+  /** False when nothing in the name matched and `write` is only the safe default. */
+  explicit: boolean;
+}
+
+function classifyByName(name: string): NameClass {
+  const native = NATIVE_TOOL_RISK[name];
+  if (native != null) {
+    return { risk: native, explicit: true };
+  }
+  const tokens = tokenizeToolName(name);
+  if (isDryRun(tokens)) {
+    return { risk: 'read', explicit: true };
+  }
+  let sawWrite = false;
+  let sawRead = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (CRITICAL_VERBS.has(token) || (i === 0 && LEADING_CRITICAL_VERBS.has(token))) {
+      return { risk: 'critical', explicit: true };
+    }
+    const checkInOut = token === 'check' && (tokens[i + 1] === 'out' || tokens[i + 1] === 'in');
+    sawWrite =
+      sawWrite ||
+      checkInOut ||
+      WRITE_VERBS.has(token) ||
+      (i === 0 && LEADING_WRITE_VERBS.has(token));
+    sawRead = sawRead || READ_VERBS.has(token);
+  }
+  if (sawWrite) {
+    return { risk: 'write', explicit: true };
+  }
+  if (sawRead || READ_TRAILING_NOUNS.has(tokens[tokens.length - 1] ?? '')) {
+    return { risk: 'read', explicit: true };
+  }
+  return { risk: 'write', explicit: false };
+}
+
+/**
+ * Name heuristic only. Critical and write verbs are checked before any read verb;
+ * unknown names count as `write`, so unclassified changes are never silent.
+ */
+export function classifyToolName(name: string): ToolRisk {
+  return classifyByName(name).risk;
+}
+
+/**
+ * Risk of one tool with its MCP annotations. Annotations may only raise the
+ * class (`destructiveHint` → critical, `readOnlyHint: false` → at least write)
+ * or rescue a name nothing matched (`readOnlyHint: true` → read). A name that
+ * says it writes or deletes is never downgraded by a server's claim. Native
+ * tools ignore hints.
  */
 export function classifyToolRisk(name: string, hints?: ToolRiskHints | null): ToolRisk {
+  const byName = classifyByName(name);
   if (NATIVE_TOOL_RISK[name] != null || hints == null) {
-    return classifyToolName(name);
-  }
-  if (hints.readOnlyHint === true) {
-    return 'read';
+    return byName.risk;
   }
   if (hints.destructiveHint === true) {
     return 'critical';
   }
-  const byName = classifyToolName(name);
-  if (hints.readOnlyHint === false || hints.destructiveHint === false) {
-    return byName === 'critical' ? 'critical' : 'write';
+  if (hints.readOnlyHint === true) {
+    return byName.explicit ? byName.risk : 'read';
   }
-  return byName;
+  if (hints.readOnlyHint === false || hints.destructiveHint === false) {
+    return byName.risk === 'critical' ? 'critical' : 'write';
+  }
+  return byName.risk;
 }

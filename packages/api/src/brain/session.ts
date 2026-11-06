@@ -311,12 +311,7 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
         error: 'Der Gesprächskontext wurde inzwischen geändert.',
       };
     }
-    const organizations = ownBrainOrganizations(
-      [
-        options.source.text,
-        ...(messages ?? []).flatMap((message) => (message.role === 'user' ? [message.text] : [])),
-      ].map(brainAuthoredText),
-    );
+    const organizations = ownBrainOrganizations(options.source.text);
     const eligible = withoutOwnBrainScope(
       automatic
         ? candidates.filter((candidate) => !brainAutomaticWithholding(candidate))

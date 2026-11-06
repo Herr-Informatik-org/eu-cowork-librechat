@@ -49,10 +49,11 @@ export function resolveWorkModeRun(params: {
   }
   const mode = parseWorkMode(requested, config.defaultMode);
   const classify = createToolRiskClassifier(userId);
+  const endpoint = withWorkModeBaseline(policy);
   return {
     mode,
-    endpoint: withWorkModeBaseline(policy),
-    layer: buildWorkModeLayer(mode, collectRunToolNames(agents), classify),
+    endpoint,
+    layer: buildWorkModeLayer(mode, collectRunToolNames(agents), classify, endpoint.mode),
     hook: createWorkModeHook(mode, classify, { allowEdit }),
   };
 }

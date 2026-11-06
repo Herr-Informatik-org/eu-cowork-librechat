@@ -1,5 +1,15 @@
-import { classifyToolRisk, workModeSchema, WORK_MODE_PLAN_MARKER } from 'librechat-data-provider';
-import type { ToolRisk, WorkMode, TToolApprovalPolicy } from 'librechat-data-provider';
+import {
+  workModeSchema,
+  classifyToolRisk,
+  WORK_MODE_PLAN_MARKER,
+  isProgrammaticBridgeTool,
+} from 'librechat-data-provider';
+import type {
+  ToolRisk,
+  WorkMode,
+  ToolApprovalMode,
+  TToolApprovalPolicy,
+} from 'librechat-data-provider';
 import type { HookCallback } from '@librechat/agents';
 import { getToolHints } from './hints';
 
@@ -28,9 +38,23 @@ export const WORK_MODE_CRITICAL_REASON =
 export const WORK_MODE_CODE_REASON =
   'Dieser Schritt führt Code in der abgeschotteten Umgebung aus. Bitte prüfen Sie den Code.';
 
+/** Card description for a batch bridge in mode `auto`: its inner calls are not confirmed one by one. */
+export const WORK_MODE_BRIDGE_REASON =
+  'Dieser Schritt ruft per Code mehrere Werkzeuge gesammelt auf. Einzelne Änderungen darin werden nicht mehr bestätigt. Bitte prüfen Sie den Code genau.';
+
+/** Plan mode blocks batch bridges; the model is told to call tools one by one. */
+export const WORK_MODE_PLAN_BRIDGE_REASON: string = `${WORK_MODE_PLAN_MARKER}: Sammelaufrufe per Code sind gesperrt. Rufen Sie lesende Werkzeuge einzeln auf und beschreiben Sie Änderungen als Planschritte.`;
+
+/** Ask mode blocks batch bridges: each change needs its own card. */
+export const WORK_MODE_ASK_BRIDGE_REASON =
+  'Arbeitsmodus Fragen: Sammelaufrufe per Code sind gesperrt, weil jede Änderung einzeln bestätigt wird. Rufen Sie die Werkzeuge einzeln auf.';
+
 const CODE_TOOLS: ReadonlySet<string> = new Set(['execute_code', 'bash_tool']);
 
 function askReason(toolName: string, risk: ToolRisk): string {
+  if (isProgrammaticBridgeTool(toolName)) {
+    return WORK_MODE_BRIDGE_REASON;
+  }
   if (CODE_TOOLS.has(toolName)) {
     return WORK_MODE_CODE_REASON;
   }
@@ -107,15 +131,21 @@ export function collectRunToolNames(agents: ReadonlyArray<ToolSurface>): Set<str
 
 /**
  * The per-request `agent` layer of the approval policy. It only ever ALLOWS the
- * tools the mode lets run on their own (exact names, so an admin's `ask`/`deny`
- * globs, which the SDK evaluates first, keep winning). Asking and blocking come
- * from {@link createWorkModeHook}, which also covers tools discovered later.
+ * tools the mode lets run on their own, and only over a `bypass` baseline: the
+ * SDK evaluates deny, ask, allow, then the mode fallback, so an exact `allow`
+ * would beat an admin's `dontAsk` or `default`. Over those baselines the layer
+ * stays empty and the mode is enforced by {@link createWorkModeHook} alone,
+ * which can only tighten. An admin's `deny` or `ask` always wins.
  */
 export function buildWorkModeLayer(
   mode: WorkMode,
   toolNames: Iterable<string>,
   classify: (toolName: string) => ToolRisk,
+  baselineMode: ToolApprovalMode | undefined,
 ): TToolApprovalPolicy {
+  if (baselineMode !== 'bypass') {
+    return {};
+  }
   const allow: string[] = [];
   for (const name of toolNames) {
     if (name.includes('*')) {
@@ -145,6 +175,12 @@ export function createWorkModeHook(
 ): HookCallback<'PreToolUse'> {
   const allowedDecisions = getWorkModeDecisions(options.allowEdit === true);
   return async (input) => {
+    if (isProgrammaticBridgeTool(input.toolName) && mode !== 'auto') {
+      return {
+        decision: 'deny',
+        reason: mode === 'plan' ? WORK_MODE_PLAN_BRIDGE_REASON : WORK_MODE_ASK_BRIDGE_REASON,
+      };
+    }
     const risk = classify(input.toolName);
     const decision = decideWorkMode(mode, risk);
     if (decision === 'allow') {

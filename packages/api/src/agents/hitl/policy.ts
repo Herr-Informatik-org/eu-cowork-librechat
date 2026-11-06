@@ -56,7 +56,9 @@ function unionList(base: string[] | undefined, extra: string[] | undefined): str
  *     without it nothing applies;
  *   - `agent` may override `mode`/`reason` and adds to `allow`/`deny`/`ask`.
  *     Lists are unioned, never replaced, so an admin `deny` or `ask` keeps
- *     winning (the SDK evaluates deny, then ask, then allow);
+ *     winning (the SDK evaluates deny, ask, allow, then the mode fallback).
+ *     An `allow` entry does beat a `default` or `dontAsk` fallback, so a layer
+ *     that must not loosen the admin baseline adds `allow` only over `bypass`;
  *   - `skills` may only tighten (add `ask`/`deny`), never loosen.
  *
  * Returns the endpoint object itself when no other layer contributes.

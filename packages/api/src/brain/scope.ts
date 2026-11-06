@@ -1,38 +1,70 @@
+import { brainAuthoredText } from './query';
+
 /**
  * A Brain scope separates work for customers and projects. The user's own employer is
  * not such a context: own role, writing style and own rates apply to every task and
  * belong in the unscoped profile. Models nevertheless tend to scope them with the own
  * company name, which hides a style rule from the always-on profile.
+ *
+ * The rule is deliberately narrow, because a wrong match turns a customer memory into a
+ * global one: only explicit self-statements in the message the person wrote themselves
+ * count, and a scope is dropped only when it equals such a name exactly.
  */
 
 /** Capitalised words; a full stop counts only inside a name (St.Gallen), never as sentence end. */
 const word = "[\\p{Lu}\\p{N}](?:[\\p{L}\\p{N}&'’-]|\\.(?=[\\p{L}\\p{N}]))*";
 const organization = `(${word}(?:[ \\t]+(?:&|${word}))*)`;
-const article = '(?:der |die |dem |den |das |einer |einem |the )?';
+const article = '(?:der |die |dem |den |das |the )?';
+/** Capitalised role nouns; roles that describe working for or with someone else do not count. */
+const role =
+  '(?:[ \\t]+als)?(?:[ \\t]+(?!(?:Kunde|Kundin|Mitglied|Gast|Patient|Patientin|Berater|Beraterin|Consultant|Lieferant|Lieferantin|Partner|Partnerin)(?![\\p{L}]))[\\p{Lu}][\\p{L}-]*){1,4}';
+
+interface OwnOrganizationStatement {
+  pattern: RegExp;
+  /** The name must carry a legal form such as AG or GmbH to count. */
+  requiresLegalForm: boolean;
+}
+
+const statement = (pattern: string, requiresLegalForm = false): OwnOrganizationStatement => ({
+  pattern: new RegExp(`(?<![\\p{L}\\p{N}])${pattern}`, 'gu'),
+  requiresLegalForm,
+});
 
 /**
- * Statements that name the user's own employer, never a customer they work for or visit.
- * German roles are capitalised nouns, so «Ich bin Projektleiter bei X» qualifies while a
- * visit such as «Ich bin morgen bei X» does not.
+ * The self-statements that name the own employer:
+ * - «Ich arbeite bei X», also «als <Rolle>» or «seit <Zeit>» before «bei»
+ * - «Ich bin bei X angestellt | tätig | beschäftigt»
+ * - «Ich bin <Rolle> bei X» only with a legal form in X (Projektleiter bei der Muster AG)
+ * - «Mein Arbeitgeber ist | heisst X», «Unsere Firma | Unser Unternehmen | Unser Betrieb heisst X»
+ * - «Wir sind X» only with a legal form in X
+ * - «I work at X», «I am employed at | by X», «Our company is called X»
  */
-const role =
-  '(?:[ \\t]+als)?(?:[ \\t]+(?!(?:Kunde|Kundin|Mitglied|Gast|Patient|Patientin)(?![\\p{L}]))[\\p{Lu}][\\p{L}-]*){1,4}';
-const ownOrganizationPatterns = [
-  `[Ii]ch bin${role}[ \\t]+(?:bei|von)[ \\t]+${article}${organization}`,
-  `[Ii]ch arbeite(?:${role}|[ \\t]+seit[ \\t]+[\\p{L}\\p{N}]+)?[ \\t]+bei[ \\t]+${article}${organization}`,
-  `[Ii]ch bin bei ${article}${organization}[ \\t]+(?:angestellt|tätig|beschäftigt)`,
-  `[Uu]nser(?:e|em|er)? (?:Firma|Unternehmen|Betrieb|Arbeitgeber|Büro|Praxis|Kanzlei|Organisation|Verwaltung|Gemeinde)(?: heisst| ist|:|,)? ${article}${organization}`,
-  `[Mm]ein(?:e|em|er)? (?:Firma|Arbeitgeber|Unternehmen|Betrieb|Praxis|Kanzlei)(?: heisst| ist|:|,)? ${article}${organization}`,
-  `[Ww]ir sind ${article}${organization}`,
-  `I (?:work|am employed)[ \\t]+(?:at|by)[ \\t]+${article}${organization}`,
-  `[Oo]ur (?:company|firm|business|practice|office)(?: is| called|:|,)? ${article}${organization}`,
-].map((pattern) => new RegExp(`(?<![\\p{L}\\p{N}])${pattern}`, 'gu'));
+const ownOrganizationStatements = [
+  statement(
+    `[Ii]ch arbeite(?:${role}|[ \\t]+seit[ \\t]+[\\p{L}\\p{N}]+)?[ \\t]+bei[ \\t]+${article}${organization}`,
+  ),
+  statement(`[Ii]ch bin bei ${article}${organization}[ \\t]+(?:angestellt|tätig|beschäftigt)`),
+  statement(`[Ii]ch bin${role}[ \\t]+bei[ \\t]+${article}${organization}`, true),
+  statement(`[Mm]ein Arbeitgeber (?:ist|heisst) ${article}${organization}`),
+  statement(
+    `(?:[Uu]nsere Firma|[Uu]nser Unternehmen|[Uu]nser Betrieb) heisst ${article}${organization}`,
+  ),
+  statement(`[Ww]ir sind ${article}${organization}`, true),
+  statement(`I (?:work at|am employed (?:at|by)) ${article}${organization}`),
+  statement(`[Oo]ur company is called ${article}${organization}`),
+];
 
-/** Leading words that describe someone the user works for or deals with, not the employer. */
-const notOwnOrganization =
-  /^(?:kunde|kundin|kunden|projekt|herr|frau|familie|mandant|mandantin|client|customer|mitglied|gast)\b/u;
+const legalFormName =
+  /(?<![\p{L}\p{N}])(?:AG|GmbH|SA|S[àa]rl|KG|KlG|Genossenschaft|Verein|Stiftung|Ltd|Inc|LLC|PLC|SE)(?![\p{L}\p{N}])/u;
 const legalForm =
-  /\b(?:ag|gmbh|sa|sarl|kg|kgaa|ohg|gbr|ltd|llc|inc|plc|se|eg|genossenschaft|verein|stiftung)\b/gu;
+  /\b(?:ag|gmbh|sa|sarl|kg|klg|kgaa|ohg|gbr|ltd|llc|inc|plc|se|eg|genossenschaft|verein|stiftung)\b/gu;
+/** Start of a forwarded or replied mail pasted below the user's own words. */
+const pastedMail =
+  /^(?:(?:von|from|an|to|gesendet|sent|betreff|subject|datum|date|cc)[ \t]*:|-{2,}[ \t]*(?:original|ursprüngliche|weitergeleitete|forwarded)|(?:am|on)[ \t][^\n]{3,160}(?:schrieb|wrote)[^\n]*:[ \t]*$)/imu;
+/** A salutation after the first line starts a pasted letter or mail. */
+const salutation =
+  /^[ \t]*(?:sehr geehrte|guten (?:tag|morgen|abend)|grüezi|hallo|liebe|lieber|dear|hi)(?![\p{L}])/gimu;
+const quoted = /«[^»]*»|„[^“”]*[“”]|“[^”]*”|"[^"\n]*"|‹[^›]*›/gu;
 
 function core(value: string): string {
   return value
@@ -45,30 +77,39 @@ function core(value: string): string {
     .trim();
 }
 
-/** Own organisation names stated in the user's own texts, in comparable form. */
-export function ownBrainOrganizations(texts: string[]): string[] {
+/** The user's own words in a message: no marked sources, pasted mails, quoted lines or quotes. */
+function ownWords(text: string): string {
+  const authored = brainAuthoredText(text);
+  const starts = [
+    pastedMail.exec(authored)?.index,
+    [...authored.matchAll(salutation)].find((match) => match.index > 0)?.index,
+  ].filter((index): index is number => index !== undefined);
+  return (starts.length ? authored.slice(0, Math.min(...starts)) : authored)
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('>'))
+    .join('\n')
+    .replace(quoted, ' ');
+}
+
+/** Own organisation names stated in the message the person wrote, in comparable form. */
+export function ownBrainOrganizations(text: string): string[] {
+  const own = ownWords(text);
   const names = new Set<string>();
-  for (const text of texts) {
-    for (const pattern of ownOrganizationPatterns) {
-      for (const match of text.matchAll(pattern)) {
-        const name = core(match[1] ?? '');
-        if (name.length >= 3 && !notOwnOrganization.test(name)) names.add(name);
-      }
+  for (const { pattern, requiresLegalForm } of ownOrganizationStatements) {
+    for (const match of own.matchAll(pattern)) {
+      const raw = match[1] ?? '';
+      if (requiresLegalForm && !legalFormName.test(raw)) continue;
+      const name = core(raw);
+      if (name.length >= 3) names.add(name);
     }
   }
   return [...names];
 }
 
-/** True when the scope only names the user's own organisation. */
+/** True only when the scope names exactly one of these organisations. */
 export function isOwnBrainOrganizationScope(scope: string, organizations: string[]): boolean {
   const value = core(scope);
-  if (value.length < 3) return false;
-  return organizations.some(
-    (name) =>
-      value === name ||
-      ` ${value} `.includes(` ${name} `) ||
-      (value.length >= 4 && ` ${name} `.includes(` ${value} `)),
-  );
+  return value.length >= 3 && organizations.includes(value);
 }
 
 /** Removes a scope that names the user's own organisation; all other fields stay as given. */

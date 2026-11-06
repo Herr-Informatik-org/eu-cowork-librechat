@@ -571,6 +571,50 @@ describe('personal Brain scope and grounding', () => {
     ]);
   });
 
+  it('keeps a scope when only an earlier message named the employer', async () => {
+    const earlier = 'Ich arbeite bei der Muster AG.';
+    const text = 'Für die Muster AG gilt Lieferung am Montag. Bitte merke dir das.';
+    const source = { id: 'message-now', text, createdAt: '2026-11-06T09:00:00.000Z' };
+    const messages: BrainConversationMessage[] = [
+      {
+        id: 'message-before',
+        text: earlier,
+        role: 'user',
+        createdAt: '2026-11-06T08:00:00.000Z',
+        contentHash: conversationHash(earlier),
+      },
+      { ...source, parentId: 'message-before', role: 'user', contentHash: conversationHash(text) },
+    ];
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ nodes: [], skipped: 0, created: 1 }), { status: 200 }),
+      );
+    await createBrainSession({
+      userId: 'owner',
+      conversationId: 'conversation',
+      messageId: 'response',
+      source,
+      contextBudgetTokens: 4000,
+      canWrite: true,
+      canUpdate: false,
+      loadConversation: async () => messages,
+      authorizeConversation: async () => true,
+    }).remember([
+      {
+        quote: 'Für die Muster AG gilt Lieferung am Montag.',
+        text: 'Für die Muster AG gilt Lieferung am Montag.',
+        kind: 'fact',
+        scope: 'Muster AG',
+      },
+    ]);
+    const body = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as {
+      facts: { scope?: string }[];
+    };
+    expect(body.facts[0].scope).toBe('Muster AG');
+  });
+
   describe('chat recall ceiling', () => {
     const budgets: { contextBudgetTokens: number; initialBudgetTokens: number }[] = [];
     beforeEach(() => {
