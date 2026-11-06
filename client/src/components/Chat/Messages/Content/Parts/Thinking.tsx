@@ -37,6 +37,8 @@ export const ThinkingButton = memo(
     content,
     contentId,
     showCopyButton = true,
+    live = false,
+    detail,
   }: {
     isExpanded: boolean;
     onClick: (e: MouseEvent<HTMLButtonElement>) => void;
@@ -44,6 +46,10 @@ export const ThinkingButton = memo(
     content?: string;
     contentId: string;
     showCopyButton?: boolean;
+    /** Shimmer the label while the model is still thinking. */
+    live?: boolean;
+    /** Secondary text after the label, such as elapsed time. Hidden from screen readers. */
+    detail?: string;
   }) => {
     const localize = useLocalize();
     const fontSize = useAtomValue(fontSizeAtom);
@@ -87,7 +93,12 @@ export const ThinkingButton = memo(
               aria-hidden="true"
             />
           </span>
-          {label}
+          <span className={live ? 'kisuno-shimmer' : undefined}>{label}</span>
+          {detail && (
+            <span className="kisuno-elapsed ml-1.5 text-text-secondary" aria-hidden="true">
+              {detail}
+            </span>
+          )}
         </button>
         {content && showCopyButton && (
           <button

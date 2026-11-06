@@ -17,3 +17,7 @@
 @keyframes activity-breathe { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 @media (hover: hover) and (pointer: fine) { .chat-activity-action:hover { background: var(--surface-hover); } }
 @media (prefers-reduced-motion: reduce) { .chat-activity-orbit span { animation: none; opacity: 0.7; } }
+.chat-activity-bar { transition: opacity var(--kisuno-slow, 260ms) var(--kisuno-ease-out, ease-out); }
+.chat-activity-bar[data-fading='true'] { opacity: 0; }
+.chat-activity-label { animation: kisuno-note-in var(--kisuno-fast, 110ms) var(--kisuno-ease-out, ease-out); }
+.chat-activity-elapsed { font-variant-numeric: tabular-nums; }

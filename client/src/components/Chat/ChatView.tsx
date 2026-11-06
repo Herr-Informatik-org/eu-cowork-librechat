@@ -28,6 +28,7 @@ import ActivityBar from './Activity/ActivityBar';
 import SessionWidget from '~/components/SidePanel/Session/Widget';
 import { cn } from '~/utils';
 import store from '~/store';
+import './motion.css';
 
 function LoadingSpinner() {
   return (

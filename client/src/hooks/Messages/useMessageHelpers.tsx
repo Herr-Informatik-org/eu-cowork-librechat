@@ -5,6 +5,7 @@ import type { TMessageProps } from '~/common';
 import { useMessagesViewContext, useAssistantsMapContext, useAgentsMapContext } from '~/Providers';
 import useCopyToClipboard from './useCopyToClipboard';
 import { useGetAddedConvo } from '~/hooks/Chat';
+import { isUpwardWheel } from './intent';
 import { logger } from '~/utils';
 
 export default function useMessageHelpers(props: TMessageProps) {
@@ -37,16 +38,11 @@ export default function useMessageHelpers(props: TMessageProps) {
   const handleScroll = useCallback(
     (event: unknown) => {
       throttle(() => {
-        logger.log(
-          'message_scrolling',
-          `useMessageHelpers: setting abort scroll to ${isSubmitting}, handleScroll event`,
-          event,
-        );
-        if (isSubmitting) {
-          setAbortScroll(true);
-        } else {
-          setAbortScroll(false);
+        if (!isSubmitting || !isUpwardWheel(event)) {
+          return;
         }
+        logger.log('message_scrolling', 'useMessageHelpers: upward wheel aborts following');
+        setAbortScroll(true);
       }, 500)();
     },
     [isSubmitting, setAbortScroll],

@@ -22,6 +22,11 @@ export const TOOL_FRIENDLY_NAME_KEYS: Record<string, TranslationKeys> = {
   code_interpreter: 'com_ui_tool_name_code_analysis',
   retrieval: 'com_ui_tool_name_file_search',
   ask_user_question: 'com_ui_tool_name_ask_user_question',
+  brain_search: 'com_ui_brain_activity_search',
+  brain_context: 'com_ui_brain_activity_context',
+  brain_remember: 'com_ui_brain_activity_remember',
+  brain_update: 'com_ui_brain_activity_update',
+  brain_forget: 'com_ui_brain_activity_forget',
 };
 
 export interface ParsedToolName {

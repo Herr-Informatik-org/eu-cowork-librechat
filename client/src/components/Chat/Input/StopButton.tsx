@@ -1,7 +1,9 @@
-import { memo } from 'react';
+import { memo, useRef } from 'react';
 import { TooltipAnchor } from '@librechat/client';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
+
+const STOP_CLICK_GUARD_MS = 500;
 
 export default memo(function StopButton({
   stop,
@@ -11,6 +13,8 @@ export default memo(function StopButton({
   setShowStopButton: (value: boolean) => void;
 }) {
   const localize = useLocalize();
+  /** A second click on Send lands here once the run starts; it must not stop the run. */
+  const shownAtRef = useRef(Date.now());
 
   return (
     <TooltipAnchor
@@ -24,6 +28,10 @@ export default memo(function StopButton({
           )}
           aria-label={localize('com_nav_stop_generating')}
           onClick={(e) => {
+            if (Date.now() - shownAtRef.current < STOP_CLICK_GUARD_MS) {
+              e.preventDefault();
+              return;
+            }
             setShowStopButton(false);
             stop(e);
           }}

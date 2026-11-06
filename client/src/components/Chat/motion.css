@@ -1,0 +1,95 @@
+/* Kisuno motion: calm and functional. Only opacity and transform move, three durations,
+   two curves; reduced motion turns all of it off while live counters keep running. */
+:root {
+  --kisuno-ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --kisuno-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --kisuno-fast: 110ms;
+  --kisuno-base: 170ms;
+  --kisuno-slow: 260ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --kisuno-fast: 0ms;
+    --kisuno-base: 0ms;
+    --kisuno-slow: 0ms;
+  }
+}
+
+@keyframes kisuno-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+@keyframes kisuno-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes kisuno-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+@keyframes kisuno-icon-in {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+/* A slow gloss over the one live status line. Use on an inner inline element: with
+   text-overflow on the same element the ellipsis would turn transparent. */
+.kisuno-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--text-secondary) 0 40%,
+    var(--text-primary) 50%,
+    var(--text-secondary) 60% 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: kisuno-shimmer 2.2s linear infinite;
+}
+
+.message-render {
+  animation: kisuno-message-in var(--kisuno-base) var(--kisuno-ease-out);
+}
+.kisuno-icon-in {
+  animation: kisuno-icon-in var(--kisuno-fast) var(--kisuno-ease-out);
+}
+.kisuno-elapsed {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kisuno-shimmer,
+  .shimmer {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+  .message-render,
+  .kisuno-icon-in,
+  .chat-activity-label,
+  .animate-pulse,
+  .scroll-animation-enter-active,
+  .scroll-animation-exit-active {
+    animation: none;
+    transition: none;
+  }
+}
+@media (forced-colors: active) {
+  .kisuno-shimmer,
+  .shimmer {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}

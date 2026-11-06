@@ -1,12 +1,42 @@
-import { memo, useMemo, useState, useCallback, useRef, useId } from 'react';
+import { memo, useMemo, useState, useEffect, useCallback, useRef, useId } from 'react';
 import { useAtomValue } from 'jotai';
 import { ContentTypes } from 'librechat-data-provider';
 import type { MouseEvent, FocusEvent } from 'react';
 import { ThinkingContent, ThinkingButton, FloatingThinkingBar } from './Thinking';
 import { useLocalize, useExpandCollapse } from '~/hooks';
 import { showThinkingAtom } from '~/store/showThinking';
+import useSecondTick from '~/hooks/useSecondTick';
+import { formatElapsed } from '~/utils/elapsed';
 import { useMessageContext } from '~/Providers';
 import { cn } from '~/utils';
+
+const SHOW_ELAPSED_AFTER_MS = 2_000;
+const LONG_THINKING_MS = 15_000;
+
+/**
+ * Thinking time as observed in this browser: counts while the part is live and keeps the
+ * final value afterwards. A reloaded message has no observed start, so no duration is
+ * claimed for it.
+ */
+function useThinkingTime(live: boolean) {
+  const startedAtRef = useRef<number | null>(live ? Date.now() : null);
+  const [measuredMs, setMeasuredMs] = useState<number | null>(null);
+  useSecondTick(live);
+
+  useEffect(() => {
+    if (live && startedAtRef.current == null) {
+      startedAtRef.current = Date.now();
+      return;
+    }
+    if (!live && startedAtRef.current != null) {
+      setMeasuredMs(Date.now() - startedAtRef.current);
+      startedAtRef.current = null;
+    }
+  }, [live]);
+
+  const elapsedMs = live && startedAtRef.current != null ? Date.now() - startedAtRef.current : 0;
+  return { elapsedMs, measuredMs };
+}
 
 type ReasoningProps = {
   reasoning: string;
@@ -79,12 +109,19 @@ const Reasoning = memo(({ reasoning, isLast }: ReasoningProps) => {
   }, []);
 
   const effectiveIsSubmitting = isLatestMessage ? isSubmitting : false;
+  const live = effectiveIsSubmitting === true && isLast;
+  const { elapsedMs, measuredMs } = useThinkingTime(live);
 
-  const label = useMemo(
-    () =>
-      effectiveIsSubmitting && isLast ? localize('com_ui_thinking') : localize('com_ui_thoughts'),
-    [effectiveIsSubmitting, localize, isLast],
-  );
+  const label = useMemo(() => {
+    if (live) {
+      return localize(elapsedMs >= LONG_THINKING_MS ? 'com_ui_thinking_long' : 'com_ui_thinking');
+    }
+    if (measuredMs != null && measuredMs >= SHOW_ELAPSED_AFTER_MS) {
+      return localize('com_ui_thought_for', { time: formatElapsed(measuredMs) });
+    }
+    return localize('com_ui_thoughts');
+  }, [live, elapsedMs, measuredMs, localize]);
+  const detail = live && elapsedMs >= SHOW_ELAPSED_AFTER_MS ? formatElapsed(elapsedMs) : undefined;
 
   if (!reasoningText) {
     return null;
@@ -105,6 +142,8 @@ const Reasoning = memo(({ reasoning, isLast }: ReasoningProps) => {
             isExpanded={isExpanded}
             onClick={handleClick}
             label={label}
+            live={live}
+            detail={detail}
             content={reasoningText}
             contentId={contentId}
           />

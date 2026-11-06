@@ -445,6 +445,9 @@ const ChatForm = memo(function ChatForm({
   /** One button slot while a run is generating: with composer text the send
    *  button takes over (Enter steers/queues; hover reveals all actions);
    *  clearing the text restores Stop. */
+  const showRunSlot =
+    isSubmitting && (showStopButton || steering.duringRunActive) && !answerMode.active;
+
   const duringRunSlot = (() => {
     if (steering.duringRunActive && (textValue?.trim() ?? '') !== '') {
       return (
@@ -692,23 +695,23 @@ const ChatForm = memo(function ChatForm({
                     </div>
                   )}
                 <div className={`${isRTL ? 'ml-2' : 'mr-2'}`}>
-                  {isSubmitting &&
-                  (showStopButton || steering.duringRunActive) &&
-                  !answerMode.active
-                    ? duringRunSlot
-                    : endpoint && (
-                        <SendButton
-                          ref={submitButtonRef}
-                          control={methods.control}
-                          hasImageAttachments={hasImageAttachments}
-                          disabled={
-                            filesLoading ||
-                            disableInputs ||
-                            isNotAppendable ||
-                            (isSubmitting && !answerMode.active)
-                          }
-                        />
-                      )}
+                  <span key={showRunSlot ? 'run' : 'send'} className="kisuno-icon-in inline-flex">
+                    {showRunSlot
+                      ? duringRunSlot
+                      : endpoint && (
+                          <SendButton
+                            ref={submitButtonRef}
+                            control={methods.control}
+                            hasImageAttachments={hasImageAttachments}
+                            disabled={
+                              filesLoading ||
+                              disableInputs ||
+                              isNotAppendable ||
+                              (isSubmitting && !answerMode.active)
+                            }
+                          />
+                        )}
+                  </span>
                 </div>
               </div>
               {TextToSpeech && automaticPlayback && <StreamAudio index={index} />}

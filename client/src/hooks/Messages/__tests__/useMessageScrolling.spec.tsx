@@ -103,6 +103,14 @@ function setRect(element: HTMLElement, rect: Partial<DOMRect>): void {
   );
 }
 
+function setScrollGeometry(
+  element: HTMLElement,
+  { scrollHeight, clientHeight }: { scrollHeight: number; clientHeight: number },
+): void {
+  Object.defineProperty(element, 'scrollHeight', { value: scrollHeight, configurable: true });
+  Object.defineProperty(element, 'clientHeight', { value: clientHeight, configurable: true });
+}
+
 const conversation = {
   conversationId: 'conversation-1',
   endpoint: 'openAI',
@@ -224,14 +232,14 @@ describe('useMessageScrolling resize reconciliation', () => {
     expect(mockScrollToBottom).not.toHaveBeenCalled();
   });
 
-  it('does not follow resizes after the user scrolls away from the bottom', () => {
+  it('does not follow resizes after the user scrolls up away from the bottom', () => {
     renderScrolling();
 
     const scrollable = screen.getByTestId('scrollable');
-    Object.defineProperty(scrollable, 'scrollHeight', { value: 1000, configurable: true });
-    Object.defineProperty(scrollable, 'clientHeight', { value: 200, configurable: true });
+    setScrollGeometry(scrollable, { scrollHeight: 1000, clientHeight: 200 });
+    scrollable.scrollTop = 800;
+    fireEvent.scroll(scrollable);
     scrollable.scrollTop = 100;
-
     fireEvent.scroll(scrollable);
 
     act(() => {
@@ -239,6 +247,86 @@ describe('useMessageScrolling resize reconciliation', () => {
     });
 
     expect(mockScrollToBottom).not.toHaveBeenCalled();
+  });
+
+  it('keeps following when content outgrows the view without an upward movement', () => {
+    renderScrolling();
+
+    const scrollable = screen.getByTestId('scrollable');
+    setScrollGeometry(scrollable, { scrollHeight: 1000, clientHeight: 200 });
+    scrollable.scrollTop = 800;
+    fireEvent.scroll(scrollable);
+    setScrollGeometry(scrollable, { scrollHeight: 1600, clientHeight: 200 });
+    scrollable.scrollTop = 820;
+    fireEvent.scroll(scrollable);
+
+    act(() => {
+      MockResizeObserver.last()?.trigger();
+    });
+
+    expect(mockScrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops following on an upward wheel and resumes once the reader is back at the end', () => {
+    const nowSpy = jest.spyOn(performance, 'now').mockReturnValue(1000);
+    renderScrolling();
+
+    const scrollable = screen.getByTestId('scrollable');
+    setScrollGeometry(scrollable, { scrollHeight: 1000, clientHeight: 200 });
+    scrollable.scrollTop = 800;
+    fireEvent.scroll(scrollable);
+    fireEvent.wheel(scrollable, { deltaY: -40 });
+
+    act(() => {
+      MockResizeObserver.last()?.trigger();
+    });
+    expect(mockScrollToBottom).not.toHaveBeenCalled();
+
+    nowSpy.mockReturnValue(2000);
+    scrollable.scrollTop = 780;
+    fireEvent.scroll(scrollable);
+
+    act(() => {
+      MockResizeObserver.last()?.trigger();
+    });
+    expect(mockScrollToBottom).toHaveBeenCalledTimes(1);
+    nowSpy.mockRestore();
+  });
+
+  it('does not stop following on a downward wheel', () => {
+    renderScrolling();
+
+    const scrollable = screen.getByTestId('scrollable');
+    setScrollGeometry(scrollable, { scrollHeight: 1000, clientHeight: 200 });
+    scrollable.scrollTop = 800;
+    fireEvent.scroll(scrollable);
+    fireEvent.wheel(scrollable, { deltaY: 60 });
+
+    act(() => {
+      MockResizeObserver.last()?.trigger();
+    });
+
+    expect(mockScrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases following on an upward key but ignores keys typed into an editor', () => {
+    renderScrolling();
+
+    const scrollable = screen.getByTestId('scrollable');
+    const editor = document.createElement('textarea');
+    scrollable.appendChild(editor);
+    fireEvent.keyDown(editor, { key: 'ArrowUp' });
+
+    act(() => {
+      MockResizeObserver.last()?.trigger();
+    });
+    expect(mockScrollToBottom).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(scrollable, { key: 'PageUp' });
+    act(() => {
+      MockResizeObserver.last()?.trigger();
+    });
+    expect(mockScrollToBottom).toHaveBeenCalledTimes(1);
   });
 
   it('does not follow the next resize after user interaction inside message content', () => {

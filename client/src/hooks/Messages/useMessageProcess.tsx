@@ -2,6 +2,7 @@ import throttle from 'lodash/throttle';
 import { useEffect, useRef, useMemo } from 'react';
 import type { TMessage } from 'librechat-data-provider';
 import { useMessagesViewContext } from '~/Providers';
+import { isUpwardWheel } from './intent';
 import { logger } from '~/utils';
 
 export default function useMessageProcess({ message: _message }: { message?: TMessage | null }) {
@@ -14,12 +15,11 @@ export default function useMessageProcess({ message: _message }: { message?: TMe
   const handleScroll = useMemo(
     () =>
       throttle((event: unknown) => {
-        logger.log(
-          'message_scrolling',
-          `useMessageProcess: setting abort scroll to ${isSubmittingRef.current}, handleScroll event`,
-          event,
-        );
-        setAbortScroll(isSubmittingRef.current);
+        if (!isSubmittingRef.current || !isUpwardWheel(event)) {
+          return;
+        }
+        logger.log('message_scrolling', 'useMessageProcess: upward wheel aborts following');
+        setAbortScroll(true);
       }, 500),
     [setAbortScroll],
   );
