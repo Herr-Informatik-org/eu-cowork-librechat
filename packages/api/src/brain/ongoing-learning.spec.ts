@@ -150,6 +150,37 @@ describe('contextual ongoing learning', () => {
     expect(remember.mock.calls.map(([batch]) => batch.length)).toEqual([40, 5, 5]);
   });
 
+  it('never stores sensitive candidates automatically and reports how many were withheld', async () => {
+    const current = session(`sensitive-${sequence}`);
+    const sensitive: BrainCandidate[] = [
+      { ...candidate, text: 'Atlas-Kundin Frau Huber ist in Therapie wegen Angststörung.' },
+      { ...candidate, text: 'Für Atlas gilt die IBAN CH93 0076 2011 6238 5295 7.' },
+      { ...candidate, text: 'Herr Keller leitet das Projekt Atlas.', kind: 'person' },
+    ];
+    review.mockImplementation(async (options) => {
+      await options.onCheckpoint({
+        position: options.messages.length,
+        phase: 'done',
+        candidates: [candidate, ...sensitive],
+      });
+      return [candidate, ...sensitive];
+    });
+    const remember = jest
+      .spyOn(current, 'remember')
+      .mockResolvedValue({ nodes: [], skipped: 0, created: 1 });
+    const outcome = await learnBrainTurn({
+      session: current,
+      llmConfig: model,
+      onUsage: async () => {},
+    });
+    expect(remember).toHaveBeenCalledTimes(1);
+    expect(remember).toHaveBeenCalledWith([candidate], true);
+    expect(outcome).toEqual({ status: 'completed', saved: 1, withheld: 3 });
+    expect(
+      await learnBrainTurn({ session: current, llmConfig: model, onUsage: async () => {} }),
+    ).toMatchObject({ status: 'skipped' });
+  });
+
   it('does not persist after a source edit or a newer turn', async () => {
     const current = session(`stale-${sequence}`);
     const remember = jest.spyOn(current, 'remember');

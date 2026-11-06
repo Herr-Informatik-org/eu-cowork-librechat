@@ -56,7 +56,8 @@ export type BrainRecall = {
   conversationId?: string;
   messageId?: string;
   nodeIds: string[];
-  query: string;
+  /** Per-owner digest of the recall query; the query text itself is not retained. */
+  queryHash?: string;
   estimatedTokens: number;
   hasMore: boolean;
   stopReason: string;
@@ -66,9 +67,25 @@ export type BrainRecall = {
   };
 };
 
+/** Compact view of a memory that an answer drew on. */
+export type BrainUsedMemory = Pick<
+  BrainNode,
+  'id' | 'title' | 'kind' | 'scope' | 'status' | 'confidence' | 'version'
+> & {
+  sources: Array<Pick<BrainSource, 'type' | 'label' | 'createdAt' | 'conversationId'>>;
+};
+
+/** Memories each recorded answer of one conversation drew on. */
+export type BrainRecallUsage = {
+  messages: Array<{ messageId: string; nodeIds: string[] }>;
+  nodes: BrainUsedMemory[];
+};
+
 export type BrainLearningStatus = {
   status: 'idle' | 'running' | 'completed' | 'failed' | 'interrupted' | 'disabled' | 'skipped';
   saved: number;
+  /** Sensitive candidates that automatic learning deliberately left unsaved. */
+  withheld?: number;
   startedAt?: string;
   updatedAt?: string;
   conversationId?: string;

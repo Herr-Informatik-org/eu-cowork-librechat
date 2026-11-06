@@ -45,3 +45,12 @@ it('does not show a cached success as current when the status cannot be verified
   expect(screen.getByText('com_ui_brain_learning_unavailable:3')).toBeInTheDocument();
   expect(screen.queryByText('com_ui_brain_learning_saved:3')).not.toBeInTheDocument();
 });
+it('reports sensitive details that automatic learning deliberately left unsaved', () => {
+  mockStatus = { status: 'completed', saved: 1, withheld: 2 };
+  const view = render(<Learning />);
+  expect(screen.getByText('com_ui_brain_learning_withheld:2')).toBeInTheDocument();
+  view.unmount();
+  mockStatus = { status: 'completed', saved: 1 };
+  render(<Learning />);
+  expect(screen.queryByText(/com_ui_brain_learning_withheld/)).not.toBeInTheDocument();
+});

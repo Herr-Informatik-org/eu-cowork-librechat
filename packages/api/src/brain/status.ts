@@ -14,7 +14,10 @@ export interface BrainLearningRun {
   sourceCreatedAt: string;
   messageId: string;
 }
-type Result = Pick<BrainLearningStatus, 'status' | 'saved' | 'errorCode' | 'incidentId'>;
+type Result = Pick<
+  BrainLearningStatus,
+  'status' | 'saved' | 'withheld' | 'errorCode' | 'incidentId'
+>;
 export interface BrainLearningStore {
   start(run: BrainLearningRun): Promise<void>;
   heartbeat(run: BrainLearningRun): Promise<void>;
@@ -122,6 +125,7 @@ export function createMongoBrainLearningStore(
         updatedAt: new Date(doc.updatedAt).toISOString(),
         conversationId: doc.conversationId,
         messageId: doc.messageId,
+        ...(doc.withheld ? { withheld: doc.withheld } : {}),
         ...(doc.errorCode ? { errorCode: doc.errorCode } : {}),
         ...(doc.incidentId ? { incidentId: doc.incidentId } : {}),
       };

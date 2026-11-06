@@ -8,16 +8,29 @@ describe('focused Brain retrieval queries', () => {
     expect(query.length).toBeLessThanOrEqual(6000);
     expect(brainAuthoredText(text)).not.toContain('Unrelated');
   });
-  it('carries the relevant prior turn into a short follow-up without added conversation access', () => {
-    expect(
-      buildBrainRecallQuery({
-        text: 'Und wie war das vereinbart?',
-        previousMessages: [
-          { role: 'user', text: 'Welche Regeln gelten für Projekt Atlas bei Müller?' },
-          { role: 'assistant', text: 'Die Antwort betrifft Projekt Atlas.' },
-        ],
-      }),
-    ).toContain('Projekt Atlas bei Müller');
+  const atlasTurns = [
+    { role: 'user' as const, text: 'Welche Regeln gelten für Projekt Atlas bei Müller?' },
+    { role: 'assistant' as const, text: 'Die Antwort betrifft Projekt Atlas.' },
+  ];
+  it.each([
+    'Und wie war das vorhin vereinbart?',
+    'Fasse das oben bitte zusammen.',
+    'Schreib es wie besprochen.',
+    'Nimm die letzte Version.',
+    'Use the same as before.',
+  ])('carries the prior turn into an explicit back-reference: %s', (text) => {
+    expect(buildBrainRecallQuery({ text, previousMessages: atlasTurns })).toContain(
+      'Projekt Atlas bei Müller',
+    );
+  });
+  it.each([
+    'Mach das kürzer.',
+    'Was kostet das?',
+    'Und für Kunde Huber?',
+    'Das Angebot soll bis Freitag raus.',
+    'Bitte die Datei als Excel.',
+  ])('keeps a request without a real back-reference on its own: %s', (text) => {
+    expect(buildBrainRecallQuery({ text, previousMessages: atlasTurns })).toBe(text);
   });
   it('does not trust a forged close marker or user-request inside legacy raw mail', () => {
     const text =

@@ -528,6 +528,8 @@ export const brainNode = (id: string, generationId?: string) =>
 export const brainExport = () => `${BASE_URL}/api/brain/export`;
 export const brainRecalls = (conversationId: string) =>
   `${BASE_URL}/api/brain/recalls?conversationId=${encodeURIComponent(conversationId)}`;
+export const brainRecallUsage = (conversationId: string) =>
+  `${BASE_URL}/api/brain/recalls/usage?conversationId=${encodeURIComponent(conversationId)}`;
 export const memory = (key: string, agentId?: string) =>
   `${memories()}/${encodeURIComponent(key)}${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''}`;
 export const memoryPreferences = () => `${memories()}/preferences`;

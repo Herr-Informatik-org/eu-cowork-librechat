@@ -71,7 +71,42 @@ function bounded(text: string, limit: number): string {
   return `${clean.slice(-tail)} ${clean.slice(0, limit - tail - 1)}`;
 }
 
-/** Retrieval uses the actual task first; earlier turns only disambiguate short follow-ups. */
+/**
+ * Explicit references back to earlier turns. Plain articles and pronouns such as «das»
+ * occur in almost every German request and must not pull earlier topics into recall.
+ */
+const backReference = new RegExp(
+  [
+    'das oben',
+    'wie oben',
+    'oben (?:genannt|erwähnt|beschrieben|stehend)\\p{L}*',
+    'obige\\p{L}*',
+    'wie (?:vorhin|vorher|zuvor|eben|besprochen|erwähnt|gesagt|gehabt)',
+    'vorhin',
+    '(?:das|der|die|den|dem|des) (?:letzte|vorherige|vorige|gleiche|selbe)\\p{L}*',
+    '(?:das|dein|ihr)e? letzte\\p{L}*',
+    '(?:dasselbe|derselbe|dieselbe|denselben)',
+    'mach weiter',
+    'weiter so',
+    'fahre? fort',
+    'noch ?mal',
+    'noch einmal',
+    'the above',
+    'as above',
+    'above[- ]mentioned',
+    'as (?:before|discussed|mentioned|earlier)',
+    'the (?:previous|last|same) one',
+    'same as before',
+    'ci-dessus',
+    'comme (?:avant|précédemment)',
+    'come (?:prima|sopra)',
+  ]
+    .map((phrase) => `(?<![\\p{L}\\p{N}])${phrase}(?![\\p{L}\\p{N}])`)
+    .join('|'),
+  'iu',
+);
+
+/** Retrieval uses the actual task first; earlier turns only resolve explicit back-references. */
 export function buildBrainRecallQuery({
   text,
   previousMessages = [],
@@ -80,9 +115,7 @@ export function buildBrainRecallQuery({
   previousMessages?: RecallMessage[];
 }): string {
   const request = userRequest(text);
-  const followup =
-    request.length < 180 ||
-    /\b(das|dazu|damit|davon|dies(?:e|es|en)?|weiter|it|that|those|same)\b/iu.test(request);
+  const followup = backReference.test(request);
   const previous = followup
     ? previousMessages
         .slice(-4)

@@ -441,6 +441,31 @@ describe('canonical conversation bootstrap runtime', () => {
     );
   });
 
+  it('never imports sensitive reviewed facts from history automatically', async () => {
+    const { processor } = fixture();
+    jest.mocked(requestBrain).mockImplementation(async (_owner, _method, _path, body) => ({
+      created: (body as { facts: unknown[] }).facts.length,
+      nodes: [],
+    }));
+    const sensitive = [
+      { ...fact, text: `${fact.text} Die Kundin ist in Therapie.` },
+      { ...fact, kind: 'person' as const },
+    ];
+    expect(
+      await processor.ingest({
+        req,
+        source: contextual,
+        text: contextual.text,
+        facts: [fact, ...sensitive],
+        canContinue: async () => true,
+        rebuildId: 'draft',
+      }),
+    ).toBe(1);
+    expect(
+      jest.mocked(requestBrain).mock.calls.map((call) => (call[3] as { facts: unknown[] }).facts),
+    ).toEqual([[expect.objectContaining({ text: fact.text })]]);
+  });
+
   it('preserves every source dependency and exact evidence while batching a large result', async () => {
     const { processor } = fixture();
     jest.mocked(requestBrain).mockImplementation(async (_owner, _method, _path, body) => ({

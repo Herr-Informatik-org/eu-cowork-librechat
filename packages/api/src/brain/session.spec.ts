@@ -1,6 +1,13 @@
 import { logger } from '@librechat/data-schemas';
-import type { BrainCandidate } from './session';
-import { createBrainSession, groundedBrainFacts, isBrainChatEligible } from './session';
+import type { BrainCandidate, BrainSessionOptions } from './session';
+import type { BrainConversationMessage } from './conversation';
+import {
+  createBrainSession,
+  groundedBrainFacts,
+  isBrainChatEligible,
+  brainRecallLimitTokens,
+} from './session';
+import { conversationHash } from './conversation';
 import { brainRecallTimeoutMs } from './client';
 import { attachBrainTools } from './runtime';
 
@@ -102,7 +109,7 @@ describe('personal Brain scope and grounding', () => {
     expect(session.knownIds.size).toBe(0);
   });
   it('retains a large fitting recall without escaping or duplicating its source text', async () => {
-    const context = 'Projekt \"Atlas\"\n'.repeat(1000);
+    const context = 'Projekt "Atlas"\n'.repeat(1000);
     jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -282,6 +289,344 @@ describe('personal Brain scope and grounding', () => {
         expect.stringContaining('"outcome":"error"'),
         expect.stringContaining('"phase":"search","outcome":"skipped"'),
       ]);
+    });
+  });
+
+  describe('explicit remember with conversation context', () => {
+    const current = {
+      id: 'message-current',
+      text: 'Ich schreibe Kundenbriefe immer in der Sie-Form. Mein Stundensatz beträgt 140 Franken. Bitte merke dir das dauerhaft.',
+      createdAt: '2026-11-06T09:00:00.000Z',
+    };
+    const conversation: BrainConversationMessage[] = [
+      {
+        id: 'message-earlier',
+        role: 'user',
+        text: 'Wie formuliere ich eine Mahnung?',
+        createdAt: '2026-11-06T08:58:00.000Z',
+        contentHash: conversationHash('Wie formuliere ich eine Mahnung?'),
+      },
+      {
+        id: 'answer-earlier',
+        parentId: 'message-earlier',
+        role: 'assistant',
+        text: 'Verwenden Sie für Mahnungen immer einen freundlichen, aber bestimmten Ton.',
+        createdAt: '2026-11-06T08:59:00.000Z',
+        contentHash: conversationHash(
+          'Verwenden Sie für Mahnungen immer einen freundlichen, aber bestimmten Ton.',
+        ),
+      },
+      {
+        id: current.id,
+        parentId: 'answer-earlier',
+        role: 'user',
+        text: current.text,
+        createdAt: current.createdAt,
+        contentHash: conversationHash(current.text),
+      },
+    ];
+    interface IngestBody {
+      facts: { text: string; evidence?: { messageId: string; quote: string }[] }[];
+      sourceMessages: { id: string; text?: string }[];
+      explicit?: boolean;
+    }
+    const ingestRequests = (spy: jest.SpyInstance): IngestBody[] =>
+      spy.mock.calls
+        .filter(([url]) => String(url).endsWith('/v1/ingest'))
+        .map(([, request]) => JSON.parse(String((request as RequestInit).body)) as IngestBody);
+    const rememberSession = (overrides: Partial<BrainSessionOptions> = {}) =>
+      createBrainSession({
+        userId: 'owner',
+        conversationId: 'conversation',
+        messageId: 'response',
+        source: current,
+        contextBudgetTokens: 4000,
+        canWrite: true,
+        canUpdate: false,
+        loadConversation: async () => conversation,
+        authorizeConversation: async () => true,
+        ...overrides,
+      });
+    const stored = () =>
+      jest.spyOn(global, 'fetch').mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ nodes: [{ id: 'node-new' }], skipped: 0, created: 1 }), {
+            status: 200,
+          }),
+      );
+    const styleRule = {
+      quote: 'Ich schreibe Kundenbriefe immer in der Sie-Form.',
+      text: 'Kundenbriefe werden immer in der Sie-Form geschrieben.',
+      kind: 'preference' as const,
+      tags: [],
+      relatedIds: [],
+    };
+
+    it('anchors an invented evidence id to the current message when the quote is verbatim', async () => {
+      const fetchSpy = stored();
+      const result = await rememberSession().remember([
+        {
+          ...styleRule,
+          evidence: [{ messageId: 'current-user-message', quote: styleRule.quote }],
+        },
+        {
+          quote: 'Mein Stundensatz beträgt 140 Franken.',
+          text: 'Der Stundensatz beträgt 140 Franken.',
+          kind: 'fact',
+          evidence: [{ messageId: 'user-1', quote: 'Mein Stundensatz beträgt 140 Franken.' }],
+        },
+      ]);
+      expect(result.error).toBeUndefined();
+      const [body] = ingestRequests(fetchSpy);
+      expect(body.explicit).toBe(true);
+      expect(body.facts).toHaveLength(2);
+      expect(body.facts.flatMap((fact) => fact.evidence?.map((entry) => entry.messageId))).toEqual([
+        current.id,
+        current.id,
+      ]);
+      expect(body.sourceMessages.find((message) => message.id === current.id)?.text).toBe(
+        current.text,
+      );
+      expect(
+        body.sourceMessages.find((message) => message.id === 'answer-earlier')?.text,
+      ).toBeUndefined();
+    });
+
+    it('uses the quote as current evidence when text arrives without evidence', async () => {
+      const fetchSpy = stored();
+      const result = await rememberSession().remember([styleRule]);
+      expect(result.error).toBeUndefined();
+      expect(ingestRequests(fetchSpy)[0].facts[0].evidence).toEqual([
+        { messageId: current.id, quote: styleRule.quote },
+      ]);
+    });
+
+    it('rejects an invented evidence id whose quote is not in the current message', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch');
+      const result = await rememberSession().remember([
+        {
+          ...styleRule,
+          quote: 'Ich schreibe Kundenbriefe immer per Du.',
+          evidence: [
+            { messageId: 'current-user-message', quote: 'Ich schreibe Kundenbriefe immer per Du.' },
+          ],
+        },
+      ]);
+      expect(result).toMatchObject({ nodes: [], skipped: 1 });
+      expect(result.error).toContain('Keine gültigen Aussagen');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('rejects a quote taken from assistant text, also under an invented id', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch');
+      const assistantQuote =
+        'Verwenden Sie für Mahnungen immer einen freundlichen, aber bestimmten Ton.';
+      for (const messageId of ['user-1', 'answer-earlier']) {
+        const result = await rememberSession().remember([
+          {
+            quote: assistantQuote,
+            text: 'Mahnungen werden freundlich, aber bestimmt formuliert.',
+            kind: 'preference',
+            evidence: [{ messageId, quote: assistantQuote }],
+          },
+        ]);
+        expect(result.error).toContain('Keine gültigen Aussagen');
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('stores direct quotes and contextual statements from one call together', async () => {
+      const fetchSpy = stored();
+      await rememberSession().remember([
+        { quote: 'Mein Stundensatz beträgt 140 Franken.', kind: 'fact' },
+        styleRule,
+      ]);
+      const [body] = ingestRequests(fetchSpy);
+      expect(body.facts.map((fact) => fact.text)).toEqual([
+        styleRule.text,
+        'Mein Stundensatz beträgt 140 Franken.',
+      ]);
+    });
+
+    it('never stores credentials, even on explicit request', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch');
+      const session = createBrainSession({
+        userId: 'owner',
+        conversationId: 'conversation',
+        messageId: 'response',
+        source: { ...current, text: 'Merke dir: Das WLAN-Kennwort lautet Sommer2026!' },
+        contextBudgetTokens: 4000,
+        canWrite: true,
+        canUpdate: false,
+      });
+      const result = await session.remember([
+        { quote: 'Das WLAN-Kennwort lautet Sommer2026!', kind: 'fact' },
+      ]);
+      expect(result.error).toContain('Keine gültigen Aussagen');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('withholds sensitive candidates from automatic learning but keeps explicit ones', async () => {
+      const source = {
+        ...current,
+        text: 'Bericht für Patientin M., Diagnose Angststörung. IBAN CH93 0076 2011 6238 5295 7.',
+      };
+      const health = {
+        quote: 'Bericht für Patientin M., Diagnose Angststörung.',
+        kind: 'fact' as const,
+      };
+      const iban = { quote: 'IBAN CH93 0076 2011 6238 5295 7.', kind: 'fact' as const };
+      const options = {
+        userId: 'owner',
+        conversationId: 'conversation',
+        messageId: 'response',
+        source,
+        contextBudgetTokens: 4000,
+        canWrite: true,
+        canUpdate: false,
+      };
+      const fetchSpy = stored();
+      expect(await createBrainSession(options).remember([health, iban], true)).toEqual({
+        nodes: [],
+        skipped: 2,
+        created: 0,
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      await createBrainSession(options).remember([health, iban]);
+      expect(ingestRequests(fetchSpy)[0].facts).toHaveLength(2);
+    });
+  });
+
+  it('stores own role, style and rate without the own company as scope, keeps customer scopes', async () => {
+    const text =
+      'Ich bin Projektleiter bei der Muster Haustechnik AG in Zug. Kundenbriefe schreibe ich immer in der Sie-Form, ohne Aufzählungszeichen. Unser Stundensatz für Service-Einsätze beträgt 145 CHF exkl. MWST. Für die Bäckerei Huber gilt Lieferung am Montag. Bitte merke dir das dauerhaft.';
+    const source = { id: 'message-own', text, createdAt: '2026-11-06T09:00:00.000Z' };
+    const messages: BrainConversationMessage[] = [
+      { ...source, role: 'user', contentHash: conversationHash(text) },
+    ];
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ nodes: [], skipped: 0, created: 4 }), { status: 200 }),
+      );
+    const session = createBrainSession({
+      userId: 'owner',
+      conversationId: 'conversation',
+      messageId: 'response',
+      source,
+      contextBudgetTokens: 4000,
+      canWrite: true,
+      canUpdate: false,
+      loadConversation: async () => messages,
+      authorizeConversation: async () => true,
+    });
+    const scoped = (
+      quote: string,
+      statement: string,
+      kind: BrainCandidate['kind'],
+      scope: string,
+    ) => ({
+      quote,
+      text: statement,
+      kind,
+      scope,
+      evidence: [{ messageId: 'current-user-message', quote }],
+    });
+    const result = await session.remember([
+      scoped(
+        'Ich bin Projektleiter bei der Muster Haustechnik AG in Zug.',
+        'Rolle: Projektleiter bei der Muster Haustechnik AG.',
+        'person',
+        'Muster Haustechnik AG',
+      ),
+      scoped(
+        'Kundenbriefe schreibe ich immer in der Sie-Form, ohne Aufzählungszeichen.',
+        'Kundenbriefe immer in der Sie-Form, ohne Aufzählungszeichen.',
+        'preference',
+        'Muster Haustechnik AG',
+      ),
+      scoped(
+        'Unser Stundensatz für Service-Einsätze beträgt 145 CHF exkl. MWST.',
+        'Stundensatz Service-Einsätze: 145 CHF exkl. MWST.',
+        'fact',
+        'Muster Haustechnik',
+      ),
+      scoped(
+        'Für die Bäckerei Huber gilt Lieferung am Montag.',
+        'Für die Bäckerei Huber gilt Lieferung am Montag.',
+        'fact',
+        'Bäckerei Huber',
+      ),
+    ]);
+    expect(result.error).toBeUndefined();
+    const body = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as {
+      facts: { scope?: string }[];
+    };
+    expect(body.facts.map((fact) => fact.scope)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      'Bäckerei Huber',
+    ]);
+  });
+
+  describe('chat recall ceiling', () => {
+    const budgets: { contextBudgetTokens: number; initialBudgetTokens: number }[] = [];
+    beforeEach(() => {
+      budgets.length = 0;
+      jest.spyOn(global, 'fetch').mockImplementation(async (_url, request) => {
+        budgets.push(JSON.parse(String(request?.body)));
+        return new Response(
+          JSON.stringify({
+            context: 'Erinnerung',
+            nodes: [],
+            edges: [],
+            recall: {},
+            hasMore: false,
+            suggestedIds: [],
+            stopReason: 'fertig',
+          }),
+          { status: 200 },
+        );
+      });
+    });
+    const ceilingSession = () =>
+      createBrainSession({
+        userId: 'owner',
+        conversationId: 'conversation',
+        messageId: 'response',
+        source,
+        contextBudgetTokens: 0,
+        canWrite: false,
+        canUpdate: false,
+        countTokens: async (text) => Math.ceil(text.length / 4),
+      });
+
+    it.each([
+      [200000, 3000],
+      [128000, 3000],
+      [32000, 1600],
+      [8192, 409],
+    ])('limits a window of %i tokens to %i recall tokens', (window, expected) => {
+      expect(brainRecallLimitTokens(window)).toBe(expected);
+    });
+
+    it('caps the initial recall and every brain_search call, independent of free space', async () => {
+      const session = ceilingSession();
+      session.setContextBudget(150000, 200000);
+      await session.initialize();
+      await session.tools[0].invoke({ query: 'Atlas', seedIds: [] });
+      expect(budgets.map((budget) => budget.contextBudgetTokens)).toEqual([3000, 3000]);
+      expect(budgets[0].initialBudgetTokens).toBe(1600);
+    });
+
+    it('keeps the remaining context as the lower bound when it is smaller than the ceiling', async () => {
+      const session = ceilingSession();
+      session.setContextBudget(1500, 200000);
+      await session.initialize();
+      expect(budgets[0].contextBudgetTokens).toBeLessThan(1500);
+      expect(budgets[0].contextBudgetTokens).toBeGreaterThan(1000);
     });
   });
 

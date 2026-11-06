@@ -25,6 +25,9 @@ export default function Learning() {
           count: data?.saved ?? 0,
         })}
       </p>
+      {!isError && !!data?.withheld && (
+        <p>{localize('com_ui_brain_learning_withheld', { count: data.withheld })}</p>
+      )}
       {data?.updatedAt && (
         <time dateTime={data.updatedAt}>{new Date(data.updatedAt).toLocaleString()}</time>
       )}

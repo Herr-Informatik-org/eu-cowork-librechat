@@ -66,6 +66,20 @@ export function useBrainRecallsQuery(conversationId?: string) {
   );
 }
 
+/** One shared query per conversation feeds every answer's memory chip. */
+export function useBrainRecallUsageQuery(conversationId?: string, enabled = true) {
+  const { data: user } = useGetUserQuery();
+  return useQuery(
+    [QueryKeys.brain, user?.id, 'usage', conversationId],
+    ({ signal }) => dataService.getBrainRecallUsage(conversationId!, signal),
+    {
+      ...freshness,
+      staleTime: 60_000,
+      enabled: enabled && !!user?.id && !!conversationId && conversationId !== 'new',
+    },
+  );
+}
+
 export function useBrainMutations() {
   const queryClient = useQueryClient();
   const { data: user } = useGetUserQuery();

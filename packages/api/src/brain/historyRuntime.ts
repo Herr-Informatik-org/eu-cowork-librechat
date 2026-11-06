@@ -37,6 +37,9 @@ import type { BrainNode } from 'librechat-data-provider';
 import { conversationHash } from './conversation';
 import { createBrainSourceManifest, registerBrainSourceManifest } from './provenance';
 import { brainReviewVersion, reviewBrainConversation, validateContextualFacts } from './review';
+import { brainAutomaticWithholding } from './safety';
+import { ownBrainOrganizations, withoutOwnBrainScope } from './scope';
+import { brainAuthoredText } from './query';
 
 interface BrainHistoryRuntimeDependencies {
   connectionHints?: (req: ServerRequest) => Promise<string[]>;
@@ -580,7 +583,16 @@ export function createBrainHistoryProcessor(
             ...(fact.supersedesId ? [fact.supersedesId] : []),
           ]),
         );
-        const valid = validateContextualFacts(facts, source.messages, knownIds);
+        const valid = withoutOwnBrainScope(
+          validateContextualFacts(facts, source.messages, knownIds).filter(
+            (fact) => !brainAutomaticWithholding(fact),
+          ),
+          ownBrainOrganizations(
+            source.messages.flatMap((message) =>
+              message.role === 'user' ? [brainAuthoredText(message.text)] : [],
+            ),
+          ),
+        );
         const manifest = createBrainSourceManifest(
           source.conversationId,
           rebuildId,

@@ -29,6 +29,7 @@ import type {
   BrainNodeInput,
   BrainNodeUpdate,
   BrainRecall,
+  BrainRecallUsage,
   BrainEdge,
   BrainExport,
   BrainHistoryStatus,
@@ -198,6 +199,11 @@ export const getBrainRecalls = (
   signal?: AbortSignal,
 ): Promise<{ recalls: BrainRecall[] }> =>
   request.get(endpoints.brainRecalls(conversationId), { signal });
+
+export const getBrainRecallUsage = (
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<BrainRecallUsage> => request.get(endpoints.brainRecallUsage(conversationId), { signal });
 
 export const exportBrain = (): Promise<BrainExport> => request.get(endpoints.brainExport());
 export const getBrainStatus = (signal?: AbortSignal): Promise<{ enabled: boolean }> =>
