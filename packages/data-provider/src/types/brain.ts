@@ -51,34 +51,65 @@ export type BrainGraphParams = {
   generationId?: string;
 };
 
+export type BrainUsageItem = Pick<BrainNode, 'id' | 'title' | 'kind' | 'scope'> &
+  Partial<
+    Pick<
+      BrainNode,
+      'text' | 'status' | 'basis' | 'claimState' | 'validFrom' | 'validUntil' | 'updatedAt'
+    >
+  > & {
+    textTruncated?: boolean;
+    sources: Array<{
+      type: BrainSource['type'];
+      conversationId?: string;
+      sourceMessageId?: string;
+    }>;
+  };
+
+export type BrainUsage = {
+  status: 'available' | 'empty' | 'disabled' | 'unavailable';
+  count: number;
+  items?: BrainUsageItem[];
+};
+
+export type BrainQuality = {
+  revision: number;
+  findings: Array<{
+    id: string;
+    nodeId: string;
+    version: number;
+    reason:
+      | 'null_interval'
+      | 'unbounded_expiry'
+      | 'general_preference_scope'
+      | 'duplicate_candidate'
+      | 'overloaded_memory'
+      | 'unverified_completion';
+    explanation: string;
+    before: BrainNode;
+    proposedChanges?: { scope?: string | null; validUntil?: null };
+    reviewOnly: boolean;
+  }>;
+  total: number;
+  truncated: boolean;
+};
+
 export type BrainRecall = {
   id: string;
   conversationId?: string;
   messageId?: string;
   nodeIds: string[];
-  /** Per-owner digest of the recall query; the query text itself is not retained. */
-  queryHash?: string;
+  items?: BrainUsageItem[];
+  provided?: boolean;
+  query: string;
   estimatedTokens: number;
   hasMore: boolean;
   stopReason: string;
   createdAt: string;
   diagnostics?: {
+    profile?: { eligible: number; selected: number; omitted: number };
     semantic: { status: 'available' | 'degraded' | 'disabled'; repaired: number; pending: boolean };
   };
-};
-
-/** Compact view of a memory that an answer drew on. */
-export type BrainUsedMemory = Pick<
-  BrainNode,
-  'id' | 'title' | 'kind' | 'scope' | 'status' | 'confidence' | 'version'
-> & {
-  sources: Array<Pick<BrainSource, 'type' | 'label' | 'createdAt' | 'conversationId'>>;
-};
-
-/** Memories each recorded answer of one conversation drew on. */
-export type BrainRecallUsage = {
-  messages: Array<{ messageId: string; nodeIds: string[] }>;
-  nodes: BrainUsedMemory[];
 };
 
 export type BrainLearningStatus = {

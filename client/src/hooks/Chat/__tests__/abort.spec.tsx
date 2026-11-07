@@ -5,12 +5,15 @@ import { RecoilRoot, useSetRecoilState, useRecoilValue } from 'recoil';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { TSubmission, TConversation } from 'librechat-data-provider';
 import type { DrainAfterAbort, RunEnd } from '~/store/families';
+import { cancelLocalFolderGeneration } from '~/localFolders/bridge';
 import useChatHelpers from '../useChatHelpers';
 import { useAbortCleanup } from '../abort';
 import store from '~/store';
 
 const mockAbortMutateAsync = jest.fn();
 const mockConvertSteersToQueued = jest.fn();
+
+jest.mock('~/localFolders/bridge', () => ({ cancelLocalFolderGeneration: jest.fn() }));
 
 jest.mock('~/data-provider', () => ({
   useAbortStreamMutation: () => ({ mutateAsync: mockAbortMutateAsync }),
@@ -220,11 +223,36 @@ describe('useChatHelpers stopGenerating (abort steer targeting)', () => {
     observed.drainAfterAbort = false;
     mockAbortMutateAsync.mockReset();
     mockConvertSteersToQueued.mockReset();
+    jest.mocked(cancelLocalFolderGeneration).mockClear();
     jest.spyOn(console, 'log').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it('cancels local access synchronously while the server abort request is still pending', async () => {
+    let finishAbort: (value: unknown) => void = () => undefined;
+    mockAbortMutateAsync.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishAbort = resolve;
+        }),
+    );
+    const { result } = setupStop('local-folder-chat', 41);
+    let stopped: Promise<void> | undefined;
+    act(() => {
+      stopped = result.current.stopGenerating();
+    });
+    expect(cancelLocalFolderGeneration).toHaveBeenCalledWith('local-folder-chat', 41);
+    expect(mockAbortMutateAsync).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(cancelLocalFolderGeneration).mock.invocationCallOrder[0]).toBeLessThan(
+      mockAbortMutateAsync.mock.invocationCallOrder[0],
+    );
+    await act(async () => {
+      finishAbort({ success: true, aborted: 'local-folder-chat', generationProtocolVersion: 2 });
+      await stopped;
+    });
   });
 
   it('keeps chips and the drain signal on the new composer while claiming under the resolved id', async () => {

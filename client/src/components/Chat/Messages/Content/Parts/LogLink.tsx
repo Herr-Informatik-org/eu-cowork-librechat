@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
+import { useRecoilValue } from 'recoil';
 import { useToastContext } from '@librechat/client';
-import { FileSources, sharedFileDownload } from 'librechat-data-provider';
-import { useCodeOutputDownload, useFileDownload } from '~/data-provider';
-import { isHttpDownloadTarget, triggerDownload } from '~/utils';
+import { FileSources, apiBaseUrl } from 'librechat-data-provider';
+import { useCodeOutputDownload, useFileDownload, useSharedFileDownload } from '~/data-provider';
+import { authenticatedCodeDownloadPath, triggerDownload } from '~/utils';
 import { useShareContext } from '~/Providers';
+import { useLocalize } from '~/hooks';
+import store from '~/store';
 
 interface LogLinkProps {
   href: string;
@@ -20,6 +23,7 @@ interface AttachmentLinkOptions {
   file_id?: string;
   user?: string;
   source?: string;
+  scopeKey?: string;
 }
 
 /**
@@ -46,13 +50,36 @@ export const useAttachmentLink = ({
   file_id,
   user,
   source,
+  scopeKey,
 }: AttachmentLinkOptions) => {
   const { showToast } = useToastContext();
   const { shareId } = useShareContext();
+  const localize = useLocalize();
+  const currentUser = useRecoilValue(store.user);
 
-  const useLocalDownload = isLocallyStoredSource(source) && !!file_id && !!user;
-  const { refetch: downloadFromApi } = useFileDownload(user, file_id, { source });
-  const { refetch: downloadFromUrl } = useCodeOutputDownload(href);
+  const downloadUser = user || currentUser?.id;
+  const useStoredDownload =
+    source !== FileSources.execute_code && !!file_id && !!downloadUser && !!currentUser?.id;
+  const codePath = authenticatedCodeDownloadPath(href, apiBaseUrl());
+  const useSharedDownload = !!shareId && !!file_id && href.startsWith('/api/share/');
+  const { refetch: downloadFromApi } = useFileDownload(downloadUser, file_id, {
+    source,
+    direct: false,
+  });
+  const { refetch: downloadFromShare } = useSharedFileDownload(shareId, file_id);
+  const { refetch: downloadFromUrl } = useCodeOutputDownload(codePath);
+  const scope = `${currentUser?.id ?? ''}:${shareId ?? ''}:${downloadUser ?? ''}:${file_id ?? ''}:${source ?? ''}:${href}:${scopeKey ?? ''}`;
+  const currentScope = useRef(scope);
+  useLayoutEffect(() => {
+    currentScope.current = scope;
+    return () => {
+      currentScope.current = '';
+    };
+  }, [scope]);
+  const reportError = () => {
+    showToast({ status: 'error', message: localize('com_ui_download_error') });
+    return false;
+  };
 
   /**
    * Triggers the download and reports whether a file was actually
@@ -66,47 +93,38 @@ export const useAttachmentLink = ({
   ): Promise<boolean> => {
     event.preventDefault();
     try {
-      // In a shared view, a snapshotted file's href is rewritten to the share
-      // route; download it through the share-scoped path (authorized by share
-      // permission, not owner ACL). Non-snapshotted files fall through so the
-      // original href / code-output path still works when snapshots are disabled.
-      if (shareId && file_id && href.startsWith('/api/share/')) {
-        triggerDownload(sharedFileDownload(shareId, file_id), filename);
-        return true;
-      }
-
-      if (!useLocalDownload && isHttpDownloadTarget(href)) {
-        triggerDownload(href, filename);
-        return true;
-      }
-
-      const stream = useLocalDownload ? await downloadFromApi() : await downloadFromUrl();
-      if (stream.data == null || stream.data === '') {
-        console.error('Error downloading file: No data found');
-        showToast({
-          status: 'error',
-          message: 'Error downloading file',
-        });
+      if (!useSharedDownload && !useStoredDownload && !(codePath && currentUser?.id))
+        return reportError();
+      const downloadPrivate = useStoredDownload ? downloadFromApi : downloadFromUrl;
+      const download = useSharedDownload ? downloadFromShare : downloadPrivate;
+      const stream = await download();
+      if (currentScope.current !== scope) {
+        if (stream.data?.startsWith('blob:')) URL.revokeObjectURL(stream.data);
         return false;
       }
+      if (stream.isError || !stream.data?.startsWith('blob:')) return reportError();
       triggerDownload(stream.data, filename);
       return true;
-    } catch (error) {
-      console.error('Error downloading file:', error);
-      return false;
+    } catch {
+      return currentScope.current === scope ? reportError() : false;
     }
   };
 
-  return { handleDownload };
+  return { handleDownload, downloadHref: codePath || '#' };
 };
 
 const LogLink: React.FC<LogLinkProps> = ({ href, filename, file_id, user, source, children }) => {
-  const { handleDownload } = useAttachmentLink({ href, filename, file_id, user, source });
+  const { handleDownload, downloadHref } = useAttachmentLink({
+    href,
+    filename,
+    file_id,
+    user,
+    source,
+  });
   return (
     <a
-      href={href}
+      href={downloadHref}
       onClick={handleDownload}
-      target="_blank"
       rel="noopener noreferrer"
       className="!text-blue-400 visited:!text-purple-400 hover:underline"
     >

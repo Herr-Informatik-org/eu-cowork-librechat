@@ -19,6 +19,7 @@ const {
   isEmailDomainAllowed,
   shouldUseSecureCookie,
   resolveAppConfigForUser,
+  isSupportServiceIdentity,
 } = require('@librechat/api');
 const {
   findUser,
@@ -441,7 +442,7 @@ const requestPasswordReset = async (req) => {
     return error;
   }
 
-  const user = await findUser({ email }, 'email _id role tenantId');
+  const user = await findUser({ email }, 'email _id role tenantId provider');
   let appConfig = baseConfig;
   if (user?.tenantId) {
     try {
@@ -463,7 +464,7 @@ const requestPasswordReset = async (req) => {
 
   logger.warn(`[requestPasswordReset] [Password reset request initiated] [Email: ${email}]`);
 
-  if (!user) {
+  if (!user || isSupportServiceIdentity(user)) {
     logger.warn(`[requestPasswordReset] [No user found] [Email: ${email}] [IP: ${req.ip}]`);
     return {
       message: 'If an account with that email exists, a password reset link has been sent to it.',
@@ -533,6 +534,11 @@ const resetPassword = async (userId, token, password) => {
 
   if (!isValid) {
     return new Error('Invalid or expired password reset token');
+  }
+
+  const identity = await findUser({ _id: userId }, '_id email role provider');
+  if (!identity || isSupportServiceIdentity(identity)) {
+    return new Error('Ungültiger oder abgelaufener Link zum Zurücksetzen des Passworts.');
   }
 
   const hash = bcrypt.hashSync(password, 10);

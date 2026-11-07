@@ -1,10 +1,15 @@
 import sanitizeHtml from 'sanitize-html';
+import type { MailAttachmentScanner } from './attachments';
+import { mailPreviewLink } from 'librechat-data-provider';
 import type { MailHtmlPreview } from './types';
+import type { MailReputationVerdict } from './reputation';
 import { MailGraphError } from './errors';
+import { reencodeMailImage, MAX_MAIL_IMAGE_INPUT, MAX_MAIL_IMAGE_TOTAL_INPUT } from './images';
 
 const maxHtml = 1_000_000;
 const maxNodes = 20_000;
 const maxImages = 8;
+let activeImagePreviews = 0;
 const color = /^(?:#[a-f0-9]{3,8}|[a-z]{1,24}|rgba?\([0-9.,% ]{1,48}\))$/i;
 const length = '(?:0|[0-9]{1,2}(?:\\.[0-9]{1,2})?(?:px|pt)|[0-4](?:\\.[0-9]{1,2})?em)';
 const spacing = new RegExp(`^${length}(?: ${length}){0,3}$`);
@@ -44,6 +49,7 @@ for (const prefix of ['margin', 'padding']) {
   for (const side of ['top', 'right', 'bottom', 'left']) styles[`${prefix}-${side}`] = [spacing];
 }
 const tags = [
+  'a',
   'p',
   'div',
   'span',
@@ -90,21 +96,41 @@ const escape = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+function cidKey(value: string): string | undefined {
+  const key = value.replace(/^<(.+)>$/, '$1');
+  // eslint-disable-next-line no-control-regex -- CID references cannot contain whitespace or control bytes.
+  if (key && key.length <= 255 && !/[\u0000-\u0020\u007f]/.test(key)) return key;
+}
+
 function cid(value: string): string | undefined {
   if (!/^cid:/i.test(value)) return;
   try {
-    const key = decodeURIComponent(value.slice(4)).replace(/^<(.+)>$/, '$1');
-    // eslint-disable-next-line no-control-regex -- CID references cannot contain whitespace or control bytes.
-    if (key && key.length <= 255 && !/[\u0000-\u0020\u007f]/.test(key)) return key;
+    return cidKey(decodeURIComponent(value.slice(4)));
   } catch {
     /* Invalid references stay blocked. */
   }
 }
 
+export interface MailPreviewLinkPolicy {
+  trustedOrigins: string[];
+  status: 'not_listed' | 'unavailable' | 'disabled';
+  checkedAt?: string;
+  sourceUpdatedAt?: string;
+  check: (destination: string) => MailReputationVerdict;
+}
+
 /** Parse hostile HTML with a maintained sanitizer before any image lookup. */
-export function sanitizeMailPreview(html: string, images: ReadonlyMap<string, string> = new Map()) {
+export function sanitizeMailPreview(
+  html: string,
+  images: ReadonlyMap<string, string> = new Map(),
+  linksEnabled = false,
+  linkPolicy?: MailPreviewLinkPolicy,
+) {
   const references = new Set<string>();
   let blockedImages = 0;
+  let blockedLinks = 0;
+  let knownThreats = 0;
+  let unavailableLinks = 0;
   let nodes = 0;
   let imageBytes = 0;
   let imageCount = 0;
@@ -113,6 +139,7 @@ export function sanitizeMailPreview(html: string, images: ReadonlyMap<string, st
     allowedAttributes: {
       '*': ['style', 'dir'],
       img: ['src', 'alt', 'width', 'height'],
+      a: ['href', 'target', 'rel', 'referrerpolicy', 'title'],
       td: ['colspan', 'rowspan', 'width', 'height', 'align', 'valign'],
       th: ['colspan', 'rowspan', 'width', 'height', 'align', 'valign'],
       table: ['width', 'height', 'cellpadding', 'cellspacing', 'border', 'align'],
@@ -120,7 +147,7 @@ export function sanitizeMailPreview(html: string, images: ReadonlyMap<string, st
     },
     allowedStyles: { '*': styles },
     allowedSchemes: [],
-    allowedSchemesByTag: { img: ['data'] },
+    allowedSchemesByTag: { img: ['data'], a: ['https'] },
     allowProtocolRelative: false,
     nestingLimit: 32,
     nonTextTags: [
@@ -161,7 +188,40 @@ export function sanitizeMailPreview(html: string, images: ReadonlyMap<string, st
           )
             delete attribs[key];
         }
-        if (name === 'a') return { tagName: 'span', attribs: { style: attribs.style || '' } };
+        if (name === 'a') {
+          const link =
+            linksEnabled === true &&
+            mailPreviewLink(attribs.href || '', linkPolicy?.trustedOrigins);
+          let verdict: MailReputationVerdict = 'unavailable';
+          if (link && linkPolicy?.status === 'not_listed') {
+            try {
+              verdict = linkPolicy.check(link.destination);
+            } catch {
+              /* Fail closed. */
+            }
+          }
+          if (!link || (linkPolicy && verdict !== 'not_listed')) {
+            if (attribs.href) blockedLinks++;
+            if (verdict === 'known_threat') knownThreats++;
+            if (link && linkPolicy && (verdict === 'unavailable' || verdict === 'disabled'))
+              unavailableLinks++;
+            return { tagName: 'span', attribs: { style: attribs.style || '' } };
+          }
+          const destinationHost = new URL(link.destination).hostname;
+          return {
+            tagName: 'a',
+            attribs: {
+              style: attribs.style || '',
+              href: link.href,
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              referrerpolicy: 'no-referrer',
+              title: link.viaSafeLinks
+                ? `${destinationHost} über Microsoft Safe Links in neuem Tab öffnen`
+                : `${destinationHost} in neuem Tab öffnen`,
+            },
+          };
+        }
         if (name === 'font') {
           const legacy = [];
           if (attribs.face && styles['font-family'][0].test(attribs.face))
@@ -206,7 +266,7 @@ export function sanitizeMailPreview(html: string, images: ReadonlyMap<string, st
       },
     },
   });
-  return { html: clean, blockedImages, references };
+  return { html: clean, blockedImages, references, blockedLinks, knownThreats, unavailableLinks };
 }
 
 type GraphCall = (
@@ -220,14 +280,33 @@ type GraphCall = (
 
 export function createPreviewOperation({
   call,
+  raw,
   id,
   beforeRequest,
+  linksEnabled = false,
+  linkPolicy,
+  scanAttachment,
 }: {
+  linksEnabled?: boolean;
+  linkPolicy?: () => Promise<MailPreviewLinkPolicy>;
+  scanAttachment?: MailAttachmentScanner;
   call: GraphCall;
+  raw: (path: string, timeout: number) => Promise<Response>;
   id: (value: string) => string;
   beforeRequest: () => Promise<void>;
 }) {
-  return async (value: string): Promise<MailHtmlPreview> => {
+  const operation = async (value: string, loadImages: boolean): Promise<MailHtmlPreview> => {
+    let policy: MailPreviewLinkPolicy | undefined;
+    if (linkPolicy) {
+      try {
+        policy = await linkPolicy();
+      } catch {
+        policy = { trustedOrigins: [], status: 'unavailable', check: () => 'unavailable' };
+      }
+    }
+    const resolvedLinksEnabled = policy
+      ? policy.status === 'not_listed' && policy.trustedOrigins.length > 0
+      : linksEnabled;
     const deadline = Date.now() + 25_000;
     const remaining = () => {
       const budget = deadline - Date.now();
@@ -253,14 +332,135 @@ export function createPreviewOperation({
     truncated ||= html.length > maxHtml;
     let first: ReturnType<typeof sanitizeMailPreview>;
     try {
-      first = sanitizeMailPreview(html);
+      first = sanitizeMailPreview(html, new Map(), resolvedLinksEnabled, policy);
     } catch {
       truncated = true;
       html =
         '<p>Diese Mail ist zu komplex für die sichere Vorschau. Bitte öffne sie in Outlook.</p>';
-      first = sanitizeMailPreview(html);
+      first = sanitizeMailPreview(html, new Map(), resolvedLinksEnabled, policy);
     }
+    if (loadImages && first.references.size) {
+      const images = new Map<string, string>();
+      const metadata = await call(
+        `${path}/attachments?$select=id,contentType,size,isInline,microsoft.graph.fileAttachment/contentId&$top=100`,
+        'GET',
+        undefined,
+        undefined,
+        'text',
+        remaining(),
+      );
+      await beforeRequest();
+      if (!Array.isArray(metadata.value) || metadata.value.length > 100)
+        throw new MailGraphError(502);
+      const candidates = new Map<string, Record<string, unknown>[]>();
+      for (const row of metadata.value) {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) throw new MailGraphError(502);
+        const key = typeof row.contentId === 'string' && cidKey(row.contentId);
+        if (key && first.references.has(key))
+          candidates.set(key, [...(candidates.get(key) ?? []), row]);
+      }
+      let inputBytes = 0;
+      let outputBytes = 0;
+      if (!metadata['@odata.nextLink']) {
+        for (const reference of first.references) {
+          const entries = candidates.get(reference);
+          if (!entries || entries.length !== 1) continue;
+          const file = entries[0];
+          if (
+            file['@odata.type'] !== '#microsoft.graph.fileAttachment' ||
+            file.isInline !== true ||
+            typeof file.id !== 'string' ||
+            !file.id ||
+            file.id.length > 2048 ||
+            !['image/png', 'image/jpeg'].includes(String(file.contentType)) ||
+            !Number.isSafeInteger(file.size) ||
+            Number(file.size) <= 0 ||
+            Number(file.size) > MAX_MAIL_IMAGE_INPUT ||
+            Number(file.size) + inputBytes > MAX_MAIL_IMAGE_TOTAL_INPUT
+          )
+            continue;
+          const response = await raw(`${path}/attachments/${id(file.id)}/$value`, remaining());
+          if (!response.body) throw new MailGraphError(502);
+          const limit = Math.min(MAX_MAIL_IMAGE_INPUT, MAX_MAIL_IMAGE_TOTAL_INPUT - inputBytes);
+          const declaredSize = response.headers.get('content-length');
+          const reader = response.body.getReader();
+          const chunks: Buffer[] = [];
+          let size = 0;
+          let oversized =
+            declaredSize !== null && (!/^\d+$/.test(declaredSize) || Number(declaredSize) > limit);
+          try {
+            await beforeRequest();
+            while (!oversized) {
+              remaining();
+              const part = await reader.read();
+              if (part.done) break;
+              size += part.value.byteLength;
+              if (size > limit) {
+                oversized = true;
+                break;
+              }
+              chunks.push(Buffer.from(part.value));
+            }
+          } finally {
+            await reader.cancel().catch(() => undefined);
+            reader.releaseLock();
+          }
+          inputBytes += Math.min(size, limit);
+          await beforeRequest();
+          remaining();
+          if (oversized) continue;
+          const bytes = Buffer.concat(chunks);
+          if (scanAttachment) {
+            await scanAttachment(bytes);
+            await beforeRequest();
+            remaining();
+          }
+          const image = await reencodeMailImage(bytes, String(file.contentType));
+          await beforeRequest();
+          remaining();
+          if (!image || outputBytes + image.length > 3_000_000) continue;
+          images.set(reference, image);
+          outputBytes += image.length;
+        }
+      }
+      first = sanitizeMailPreview(html, images, resolvedLinksEnabled, policy);
+      if (first.blockedImages)
+        warnings.push(
+          'Einige Bilder bleiben gesperrt. Nur eindeutig zugeordnete eingebettete PNG- und JPEG-Bilder innerhalb der Sicherheitsgrenzen werden geladen.',
+        );
+    }
+    let linkStatus: NonNullable<MailHtmlPreview['linkCheck']>['status'] =
+      policy?.status ?? 'disabled';
+    if (first.unavailableLinks > 0) linkStatus = 'unavailable';
+    if (first.knownThreats > 0) linkStatus = 'known_threat';
     await beforeRequest();
-    return { html: first.html, blockedImages: first.blockedImages, truncated, warnings };
+    return {
+      html: first.html,
+      blockedImages: first.blockedImages,
+      truncated,
+      warnings,
+      linksEnabled: resolvedLinksEnabled === true && first.unavailableLinks === 0,
+      ...(policy && {
+        trustedOrigins: policy.trustedOrigins,
+        linkCheck: {
+          status: linkStatus,
+          ...(policy.checkedAt && { checkedAt: policy.checkedAt }),
+          ...(policy.sourceUpdatedAt && { sourceUpdatedAt: policy.sourceUpdatedAt }),
+          blocked: first.blockedLinks,
+        },
+      }),
+      embeddedImagesAvailable: first.references.size > 0,
+      imagesLoaded: loadImages,
+    };
+  };
+  return async (value: string, loadImages = false): Promise<MailHtmlPreview> => {
+    if (loadImages !== true) return operation(value, false);
+    if (activeImagePreviews >= 2) throw new MailGraphError(429);
+    activeImagePreviews++;
+    try {
+      return await operation(value, true);
+    } finally {
+      activeImagePreviews--;
+    }
   };
 }

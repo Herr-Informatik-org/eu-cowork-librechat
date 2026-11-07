@@ -11,6 +11,7 @@ const {
   sanitizeModelSpecs,
   excludeHiddenModelSpecs,
   isFileSnapshotEnabled,
+  isLocalFoldersEnabled,
 } = require('@librechat/api');
 const { EModelEndpoint, defaultSocialLogins } = require('librechat-data-provider');
 const { logger, getTenantId, SystemCapabilities } = require('@librechat/data-schemas');
@@ -307,6 +308,7 @@ router.get('/', async function (req, res) {
       ...(cloudFront ? { cloudFront } : {}),
       ...(rum ? { rum } : {}),
       fileUploadSseEnabled: isEnabled(process.env.FILE_UPLOAD_SSE_ENABLED),
+      localFoldersEnabled: isLocalFoldersEnabled(),
     };
 
     const webSearch = buildWebSearchConfig(appConfig);

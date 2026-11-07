@@ -1,5 +1,10 @@
+import type { BrainUsage, MailRuleLearning, MailDraftEditOutcome } from 'librechat-data-provider';
+import type { MailAttachmentScanResult } from './scanner';
+
 export type MailPriority = 'important' | 'normal' | 'low';
 export type MailAction = 'reply' | 'review' | 'information';
+/** Last recorded Outlook action, not proof of delivery or a complete send history. */
+export type MailResponseAction = 'replied' | 'forwarded';
 export type MailFetch = (
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
@@ -11,7 +16,46 @@ export const MAIL_CATEGORIES: Record<MailPriority, string> = {
   low: 'KI: Niedrig',
 };
 
+export interface MailSignature {
+  enabled: boolean;
+  html: string;
+  fontFamily: 'Aptos' | 'Calibri' | 'Arial';
+  fontSize: 10 | 11 | 12 | 14;
+  logo?: { contentBytes: string };
+}
+export interface MailDraftContext {
+  sender: { name: string; address: string };
+  recipients: { name: string; address: string }[];
+  ccRecipients?: { name: string; address: string }[];
+  replyMode?: 'all';
+  signatureEnabled: boolean;
+}
+export interface MailRecipient {
+  name: string;
+  address: string;
+}
+export interface MailReplyAllContext {
+  selfAddresses: string[];
+  to: MailRecipient[];
+  cc: MailRecipient[];
+}
+export interface MailChatRequest {
+  revision: string;
+  message: string;
+  history: { role: 'user' | 'assistant'; content: string }[];
+  draft?: string;
+  includeCorrespondence?: boolean;
+}
+export interface MailChatResponse {
+  answer: string;
+  modelLabel?: string;
+  sources?: MailResult[];
+  memory?: BrainUsage;
+  learning?: MailRuleLearning;
+}
+
 export interface MailSettings {
+  signature?: MailSignature;
   enabled: boolean;
   mode: 'manual' | 'scheduled';
   weekdays: number[];
@@ -29,6 +73,14 @@ export interface MailMessage {
   changeKey: string;
   subject: string;
   sender: string;
+  senderName?: string;
+  replyTo?: { name: string; address: string }[];
+  toRecipients?: MailRecipient[];
+  ccRecipients?: MailRecipient[];
+  isRead?: boolean;
+  hasAttachments?: boolean;
+  responseAction?: MailResponseAction;
+  responseActionAt?: string;
   receivedAt: string;
   sentAt?: string;
   body: string;
@@ -51,9 +103,11 @@ export interface MailAnalysis {
   memory?: MailMemoryStatus;
 }
 
-export interface MailMemoryStatus {
-  status: 'available' | 'empty' | 'disabled' | 'unavailable';
-  count: number;
+export type MailMemoryStatus = BrainUsage;
+export interface MailGeneratedText {
+  text: string;
+  memory?: BrainUsage;
+  learning?: MailRuleLearning;
 }
 
 export interface MailRuleInput {
@@ -63,6 +117,12 @@ export interface MailRuleInput {
 }
 
 export interface MailResult extends Omit<MailAnalysis, 'draft'> {
+  mailboxLocation?: 'inbox' | 'sent';
+  analysisStatus?: 'pending' | 'complete';
+  isRead?: boolean;
+  hasAttachments?: boolean;
+  responseAction?: MailResponseAction;
+  responseActionAt?: string;
   id: string;
   subject: string;
   sender: string;
@@ -78,11 +138,15 @@ export interface MailResult extends Omit<MailAnalysis, 'draft'> {
 }
 
 export interface StoredMailResult extends MailResult {
+  connectionGeneration?: string;
+  correspondent?: string;
   messageId: string;
   conversationId: string;
   sourceHash: string;
   categoryApplied: boolean;
   draftId?: string;
+  draftMemory?: BrainUsage;
+  draftTextHash?: string;
   operationPending?: boolean;
   moveDestination?: string;
   editPending?: boolean;
@@ -92,6 +156,14 @@ export interface MailResultContent {
   resultId: string;
   mailbox: string;
   message: {
+    responseAction?: MailResponseAction;
+    responseActionAt?: string;
+    replyRecipients?: { name: string; address: string }[];
+    replyCcRecipients?: MailRecipient[];
+    replyMode?: 'all';
+    toRecipients?: { name: string; address: string }[];
+    ccRecipients?: { name: string; address: string }[];
+    senderName?: string;
     subject: string;
     sender: string;
     receivedAt: string;
@@ -100,6 +172,7 @@ export interface MailResultContent {
     preview?: MailHtmlPreview;
   };
   draft?: {
+    memory?: BrainUsage;
     subject: string;
     body: string;
     bodyTruncated: boolean;
@@ -122,20 +195,39 @@ export interface MailAttachment {
 export interface MailAttachments {
   attachments: MailAttachment[];
   hasMore: boolean;
+  downloadAvailable?: boolean;
+}
+export interface MailAttachmentDownload {
+  bytes: Buffer;
+  name: string;
+  contentType: string;
+  scan: MailAttachmentScanResult;
 }
 
 export interface MailDraftRequest {
   revision: string;
   instructions: string;
   requestId: string;
+  newReply?: boolean;
 }
 
 export interface MailDraftResponse {
   status: 'created' | 'existing' | 'uncertain';
   draftUrl?: string;
+  memory?: BrainUsage;
 }
 
 export interface MailHtmlPreview {
+  embeddedImagesAvailable?: boolean;
+  imagesLoaded?: boolean;
+  linksEnabled?: boolean;
+  trustedOrigins?: string[];
+  linkCheck?: {
+    status: 'not_listed' | 'known_threat' | 'unavailable' | 'disabled';
+    checkedAt?: string;
+    sourceUpdatedAt?: string;
+    blocked: number;
+  };
   html: string;
   blockedImages: number;
   truncated: boolean;
@@ -231,6 +323,7 @@ export interface MailStore {
   results(ownerId: string): Promise<StoredMailResult[]>;
   result(ownerId: string, id: string): Promise<StoredMailResult | null>;
   putResult(ownerId: string, token: string, result: StoredMailResult): Promise<void>;
+  seedResults(ownerId: string, results: StoredMailResult[]): Promise<StoredMailResult[]>;
   draftState(
     ownerId: string,
     conversationKey: string,
@@ -267,10 +360,25 @@ export interface MailResultQuery {
 export interface MailResultPage {
   results: MailResult[];
   nextCursor?: string;
+  complete?: boolean;
 }
 
 export interface MailGraph {
-  identity(): Promise<{ id: string; mail: string; userPrincipalName: string }>;
+  inboxPage?(
+    url?: string,
+  ): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }>;
+  correspondencePage?(
+    partner: string,
+    folder: 'inbox' | 'sentitems',
+    search?: string,
+    url?: string,
+  ): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }>;
+  identity(): Promise<{
+    id: string;
+    mail: string;
+    userPrincipalName: string;
+    displayName?: string;
+  }>;
   page(
     since: string,
     url?: string,
@@ -281,13 +389,16 @@ export interface MailGraph {
     url?: string,
   ): Promise<{ messages: MailMessage[]; nextUrl?: string; hasMore: boolean }>;
   message(id: string): Promise<MailMessage>;
-  preview(id: string): Promise<MailHtmlPreview>;
+  preview(id: string, loadImages?: boolean): Promise<MailHtmlPreview>;
   attachments(id: string): Promise<MailAttachments>;
+  downloadAttachment?(id: string, attachmentId: string): Promise<MailAttachmentDownload>;
   thread(id: string): Promise<{ messages: MailMessage[]; complete: boolean }>;
   categorize(id: string, categories: string[], etag?: string): Promise<void>;
   createReply(
     id: string,
     text: string,
+    signature?: MailSignature,
+    replyAll?: MailReplyAllContext,
   ): Promise<{ id: string; url?: string; warnings?: string[]; stop?: boolean }>;
   folders(parentId?: string): Promise<MailFolder[]>;
   folder(id: string): Promise<MailFolder>;
@@ -318,7 +429,14 @@ export interface MailRuntimeAdapter {
     messages: MailMessage[],
     instructions: string,
     beforeRequest: () => Promise<void>,
-  ): Promise<string>;
+    context?: MailDraftContext,
+  ): Promise<string | MailGeneratedText>;
+  chat?(
+    ownerId: string,
+    messages: MailMessage[],
+    input: MailChatRequest,
+    beforeRequest: () => Promise<void>,
+  ): Promise<string | MailGeneratedText>;
   audit(ownerId: string, event: string, resultId?: string): Promise<void>;
   rememberRule?(
     ownerId: string,
@@ -362,6 +480,12 @@ export interface MailAssistantEngine {
   disconnect(owner: string): Promise<void>;
   priority(owner: string, id: string, priority: MailPriority): Promise<void>;
   content(owner: string, id: string): Promise<MailResultContent>;
+  images(
+    owner: string,
+    id: string,
+    kind: 'original' | 'draft',
+    revision: string,
+  ): Promise<MailHtmlPreview>;
   results(owner: string, query: MailResultQuery): Promise<MailResultPage>;
   folders(owner: string, parentId?: string): Promise<MailFolder[]>;
   move(owner: string, id: string, folderId: string, revision: string): Promise<MailResult>;
@@ -369,7 +493,18 @@ export interface MailAssistantEngine {
   moveJobs(owner: string): Promise<MailMoveJob[]>;
   requestDraft(owner: string, id: string, input: MailDraftRequest): Promise<MailDraftResponse>;
   attachments(owner: string, id: string): Promise<MailAttachments>;
-  editDraft(owner: string, id: string, body: string, revision: string): Promise<void>;
+  downloadAttachment?(
+    owner: string,
+    id: string,
+    attachmentId: string,
+    revision: string,
+  ): Promise<MailAttachmentDownload>;
+  editDraft(
+    owner: string,
+    id: string,
+    body: string,
+    revision: string,
+  ): Promise<MailDraftEditOutcome>;
   rememberRule(owner: string, id: string, input: MailRuleInput): Promise<void>;
   tick(): Promise<void>;
   start(): void;

@@ -143,10 +143,15 @@ export function useMailActions() {
     options,
   );
   const rule = useMutation(
-    [MutationKeys.mailWorkspace, 'rule'],
+    [MutationKeys.mailWorkspace, user?.id, 'rule'],
     ({ id, ...input }: MailWorkspaceRule & { id: string }) =>
       dataService.rememberMailWorkspaceRule(id, input),
-    options,
+    {
+      retry: false,
+      networkMode: 'always',
+      onSuccess: () =>
+        Promise.all([refresh(), client.invalidateQueries([QueryKeys.brain, user?.id])]),
+    },
   );
   return {
     connect,

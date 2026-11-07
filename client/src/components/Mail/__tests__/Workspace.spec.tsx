@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { deserialize, serialize } from 'node:v8';
 import type {
   MailWorkspaceContent,
   MailWorkspaceResult,
@@ -8,7 +9,6 @@ import type {
 } from 'librechat-data-provider';
 import mockTranslations from '~/locales/en/translation.json';
 import Workspace from '../Workspace';
-import { consumeMailChat } from '../handoff';
 
 let mockUser = { id: 'owner' };
 let mockRows: MailWorkspaceResult[];
@@ -16,7 +16,11 @@ let mockStatus: MailWorkspaceStatus;
 let mockContent: MailWorkspaceContent;
 let mockJobs: MailWorkspaceMoveJob[];
 let mockJobsError = false;
-let mockPending = { draft: 0, followup: 0 };
+let mockPending = { draft: 0, followup: 0, chat: 0 };
+let mockInboxCursor: string | undefined;
+const mockInboxRefresh = jest.fn();
+const mockChat = jest.fn();
+const mockPriority = jest.fn();
 const mockFolders = [
   { id: 'done', displayName: '00_erledigt', childFolderCount: 0, canMoveTo: true },
 ];
@@ -41,7 +45,7 @@ const mockActions = () => ({
   run: mockMutation(mockRun),
   pause: mockMutation(mockPause),
   disconnect: mockMutation(),
-  priority: mockMutation(),
+  priority: mockMutation(mockPriority),
   move: mockMutation(),
   enqueueMove: mockMutation(mockMove),
   draft: mockMutation(mockSave),
@@ -64,15 +68,44 @@ jest.mock('~/hooks', () => ({
       ),
 }));
 jest.mock('../Followup', () => ({
-  MailFollowupSettings: () => null,
-  MailFollowupAction: () => null,
+  mailActionError: (_error: Error, fallback: string) => fallback,
+  MailFollowupSettings: () => <span data-testid="odoo-settings" />,
+  MailFollowupAction: () => <span data-testid="odoo-action" />,
 }));
-jest.mock('../DraftRequest', () => ({ MailDraftRequest: () => null }));
+jest.mock('../DraftRequest', () => ({
+  safeOutlookDraftUrl: jest.requireActual('../DraftRequest').safeOutlookDraftUrl,
+  MailDraftRequest: ({ openRequest }: { openRequest?: number }) => (
+    <span data-testid="draft-request" data-open={openRequest} />
+  ),
+}));
+jest.mock('../Signature', () => ({ MailSignatureSettings: () => null }));
 jest.mock('../Attachments', () => ({ MailAttachments: () => null }));
+jest.mock('../Research', () => ({
+  MailResearchProgress: () => null,
+  MailResearch: ({ openRequest }: { openRequest?: number }) => (
+    <span data-testid="research" data-open={openRequest} />
+  ),
+}));
 jest.mock('~/data-provider/Mail', () => ({
   useMailPendingActions: () => mockPending,
+  useMailImages: () => ({
+    preview: undefined,
+    isLoading: false,
+    isError: false,
+    load: jest.fn(),
+    hide: jest.fn(),
+  }),
   useMailStatus: () => ({ data: mockStatus }),
   useMailMoveJobs: () => ({ data: { jobs: mockJobs }, isError: mockJobsError }),
+  useMailChat: () => ({ mutateAsync: mockChat }),
+  useMailCorrespondence: () => ({ data: { pages: [] } }),
+  useMailInbox: () => ({
+    data: { pages: [{ results: mockRows, nextCursor: mockInboxCursor }] },
+    hasNextPage: !!mockInboxCursor,
+    fetchNextPage: mockNext,
+    refetch: jest.fn(),
+    refresh: mockInboxRefresh,
+  }),
   useMailResults: (params: object) => {
     mockResults(params);
     return {
@@ -87,13 +120,24 @@ jest.mock('~/data-provider/Mail', () => ({
   useMailActions: () => mockActions(),
 }));
 
+const originalStructuredClone = globalThis.structuredClone;
+beforeAll(() => {
+  globalThis.structuredClone ??= <T,>(value: T): T => deserialize(serialize(value)) as T;
+});
+afterAll(() => {
+  globalThis.structuredClone = originalStructuredClone;
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
   localStorage.clear();
   mockUser = { id: 'owner' };
   mockJobs = [];
   mockJobsError = false;
-  mockPending = { draft: 0, followup: 0 };
+  mockPending = { draft: 0, followup: 0, chat: 0 };
+  mockInboxCursor = undefined;
+  mockNext.mockResolvedValue(undefined);
+  mockChat.mockResolvedValue({ answer: 'Antwort zur Mail' });
   mockMove.mockReset();
   Object.defineProperty(global.crypto, 'randomUUID', {
     value: () => '00000000-0000-4000-8000-000000000001',
@@ -165,24 +209,23 @@ const mount = () =>
 const chooseMail = () =>
   fireEvent.click(screen.getByRole('button', { name: /kunde@example.test/ }));
 
-it('loads more results without triggering analysis on view or selection', () => {
+it('automatically loads the next inbox page without triggering analysis', () => {
+  mockInboxCursor = 'next-page';
   mount();
   chooseMail();
-  fireEvent.click(screen.getByRole('button', { name: 'Weitere Mails laden' }));
   expect(mockNext).toHaveBeenCalledTimes(1);
   expect(mockRun).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Jetzt prüfen' }));
   expect(mockRun).toHaveBeenCalledTimes(1);
 });
-it('requires a folder selection and explicit confirmation before moving', () => {
+it('moves once on the first click after the user chooses a folder', () => {
   mount();
   chooseMail();
   expect(screen.getByRole('button', { name: 'In Erledigt verschieben' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Erledigt-Ordner wählen' }));
   fireEvent.click(screen.getByRole('button', { name: '00_erledigt' }));
   fireEvent.click(screen.getByRole('button', { name: 'In Erledigt verschieben' }));
-  expect(mockMove).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(mockMove).toHaveBeenCalledWith(
     {
       requestId: '00000000-0000-4000-8000-000000000001',
@@ -191,6 +234,19 @@ it('requires a folder selection and explicit confirmation before moving', () => 
     },
     expect.any(Object),
   );
+});
+it('suppresses duplicate move clicks while the request is pending and leaves reading usable', () => {
+  mount();
+  chooseMail();
+  chooseFolder();
+  const button = screen.getByRole('button', { name: 'In Erledigt verschieben' });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  fireEvent.keyDown(screen.getByRole('main'), { key: 'e' });
+  expect(mockMove).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
+  expect(screen.getByRole('button', { name: 'Antwort bearbeiten' })).toBeEnabled();
 });
 it('saves only the edited reply with the original revision on user click', () => {
   mount();
@@ -215,17 +271,16 @@ it('keeps legacy drafts read-only', () => {
   fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
   expect(screen.getByRole('button', { name: 'Antwort bearbeiten' })).toBeDisabled();
 });
-it('starts a fresh chat with an opaque handoff and no automatic submission', () => {
+it('opens the embedded mail chat without navigation or automatic submission', () => {
   mount();
   chooseMail();
-  fireEvent.click(screen.getByRole('button', { name: 'Im neuen Chat überarbeiten' }));
-  expect(mockNewConversation).toHaveBeenCalledTimes(1);
-  const url = mockNavigate.mock.calls[0][0];
-  expect(url).toMatch(/^\/c\/new\?mailReview=/);
-  expect(url).not.toContain('submit');
-  expect(url).not.toContain('Termin');
-  const token = new URL(url, 'http://localhost').searchParams.get('mailReview')!;
-  expect(consumeMailChat('owner', token)).toContain('Bitte um Terminbestätigung.');
+  fireEvent.click(screen.getByRole('tab', { name: 'Chat zu dieser Mail' }));
+  expect(
+    screen.getByRole('textbox', { name: 'Deine Frage oder gewünschte Anpassung' }),
+  ).toBeVisible();
+  expect(mockNewConversation).not.toHaveBeenCalled();
+  expect(mockNavigate).not.toHaveBeenCalled();
+  expect(mockChat).not.toHaveBeenCalled();
   expect(mockRun).not.toHaveBeenCalled();
 });
 it('clears selected private content on account switch', () => {
@@ -243,11 +298,21 @@ it('clears selected private content on account switch', () => {
   expect(screen.queryByText('Bitte um Terminbestätigung.')).not.toBeInTheDocument();
 });
 it('does not render content with a foreign mailbox binding', () => {
-  mockContent = { ...mockContent, mailbox: 'other@example.test' };
+  mockContent = {
+    ...mockContent,
+    mailbox: 'other@example.test',
+    message: {
+      ...mockContent.message,
+      senderName: 'Private sender',
+      toRecipients: [{ name: 'Private To', address: 'to-private@example.test' }],
+      ccRecipients: [{ name: 'Private Cc', address: 'cc-private@example.test' }],
+    },
+  };
   mount();
   chooseMail();
   expect(screen.queryByText('Bitte um Terminbestätigung.')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Im neuen Chat überarbeiten' })).toBeDisabled();
+  expect(screen.getByRole('tab', { name: 'Chat zu dieser Mail' })).toBeDisabled();
+  expect(screen.queryByText(/Private sender|Private To|Private Cc/)).not.toBeInTheDocument();
 });
 it('searches on the server instead of filtering only the loaded page', async () => {
   mount();
@@ -282,7 +347,7 @@ const exampleJob = (status: MailWorkspaceMoveJob['status'] = 'running'): MailWor
     },
   ],
 });
-it('selects only loaded open messages and confirms exact snapshots and folder', () => {
+it('moves only explicitly selected loaded open messages with exact snapshots and folder', () => {
   mockRows = [
     mockRows[0],
     { ...mockRows[0], id: 'second', revision: 'second-revision', subject: 'Zweite Mail' },
@@ -294,11 +359,7 @@ it('selects only loaded open messages and confirms exact snapshots and folder', 
   );
   chooseFolder();
   fireEvent.click(screen.getByRole('button', { name: 'Auswahl verschieben' }));
-  expect(screen.getByRole('alertdialog')).toHaveTextContent(
-    '2 ausgewählte Originalmails in «00_erledigt»',
-  );
-  expect(mockMove).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(mockMove).toHaveBeenCalledWith(
     {
       requestId: expect.any(String),
@@ -331,7 +392,7 @@ it('limits select-all to 100 loaded messages and does not select unseen pages', 
   ).toBeDisabled();
   expect(mockNext).not.toHaveBeenCalled();
 });
-it('releases the confirmation after acceptance without claiming the mails have moved', () => {
+it('shows accepted jobs without claiming the mails have moved', () => {
   mockMove.mockImplementation((_request, options: { onSuccess: () => void }) => {
     mockJobs = [exampleJob('queued')];
     options.onSuccess();
@@ -342,7 +403,6 @@ it('releases the confirmation after acceptance without claiming the mails have m
   );
   chooseFolder();
   fireEvent.click(screen.getByRole('button', { name: 'Auswahl verschieben' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(
     within(screen.getByRole('status', { name: 'Verschiebeaufträge' })).getByText(
@@ -369,8 +429,11 @@ it('restores background progress on mount without blocking draft edits or naviga
   fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
   fireEvent.click(screen.getByRole('button', { name: 'Antwort bearbeiten' }));
   expect(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ })).toBeEnabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Im neuen Chat überarbeiten' }));
-  expect(mockNavigate).toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('tab', { name: 'Chat zu dieser Mail' }));
+  expect(
+    screen.getByRole('textbox', { name: 'Deine Frage oder gewünschte Anpassung' }),
+  ).toBeVisible();
+  expect(mockNavigate).not.toHaveBeenCalled();
   expect(mockMove).not.toHaveBeenCalled();
 });
 it('preserves an unsaved reply through queue progress, changed revision and removal from open results', () => {
@@ -490,7 +553,7 @@ it('shows per-message uncertainty and never automatically retries the operation'
   expect(screen.getByText(/Für diese Mail wird kein zweiter Versuch/)).toBeVisible();
   expect(mockMove).not.toHaveBeenCalled();
 });
-it('keeps confirmation snapshots unchanged when a newer revision arrives', () => {
+it('keeps submitted snapshots unchanged when a newer revision arrives', () => {
   const view = mount();
   chooseMail();
   chooseFolder();
@@ -501,7 +564,6 @@ it('keeps confirmation snapshots unchanged when a newer revision arrives', () =>
       <Workspace />
     </MemoryRouter>,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Jetzt verschieben' }));
   expect(mockMove.mock.calls[0][0].items).toEqual([{ id: 'result', revision: 'result-revision' }]);
 });
 it('clears selection when the result filter changes', () => {
@@ -548,7 +610,13 @@ it('keeps corrections mail-local unless the user writes and selects a reusable p
   const rule = screen.getByRole('textbox', { name: 'Meine persönliche Regel' });
   expect(rule).toHaveValue('');
   fireEvent.change(rule, { target: { value: 'Für diesen Kontakt keine langen Einleitungen.' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Persönliche Regel merken' }));
+  fireEvent.keyDown(rule, { key: 'Enter' });
+  fireEvent.keyDown(rule, { key: 'Enter', ctrlKey: true, isComposing: true });
+  fireEvent.keyDown(rule, { key: 'Enter', ctrlKey: true, repeat: true });
+  expect(mockRule).not.toHaveBeenCalled();
+  fireEvent.keyDown(rule, { key: 'Enter', ctrlKey: true });
+  fireEvent.keyDown(rule, { key: 'Enter', ctrlKey: true });
+  expect(mockRule).toHaveBeenCalledTimes(1);
   expect(mockRule.mock.calls[0][0]).toEqual({
     id: 'result',
     revision: 'result-revision',
@@ -556,6 +624,50 @@ it('keeps corrections mail-local unless the user writes and selects a reusable p
     text: 'Für diesen Kontakt keine langen Einleitungen.',
   });
   expect(mockSave).not.toHaveBeenCalled();
+});
+
+it('keeps explicit personal rules separate from original mail and research context', () => {
+  mount();
+  chooseMail();
+  const summary = screen.getByText('Aus meiner Korrektur lernen');
+  fireEvent.click(summary);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Geltungsbereich' }), {
+    target: { value: 'global' },
+  });
+  const input = screen.getByRole('textbox', { name: 'Meine persönliche Regel' });
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+  expect(mockRule).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: 'Ich bevorzuge kurze Antworten ohne Einleitung.' } });
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+  expect(mockRule).toHaveBeenCalledWith(
+    {
+      id: 'result',
+      revision: 'result-revision',
+      scope: 'global',
+      text: 'Ich bevorzuge kurze Antworten ohne Einleitung.',
+    },
+    expect.any(Object),
+  );
+  fireEvent.keyDown(input, { key: 'Escape' });
+  expect(summary).toHaveFocus();
+  expect(summary.closest('details')).not.toHaveAttribute('open');
+  expect(mockSave).not.toHaveBeenCalled();
+  expect(mockChat).not.toHaveBeenCalled();
+});
+
+it('shows recorded memory only on demand without learning from displayed mail content', async () => {
+  mockRows[0].memory = { status: 'available', count: 2 };
+  mount();
+  chooseMail();
+  expect(
+    screen.queryByText(/Der KI als persönlicher Kontext bereitgestellt/),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Brain-Info' }));
+  expect(
+    await screen.findByText('Der KI als persönlicher Kontext bereitgestellt (2):'),
+  ).toBeVisible();
+  expect(mockRule).not.toHaveBeenCalled();
+  expect(mockChat).not.toHaveBeenCalled();
 });
 
 it('keeps move and analysis progress together with collapsed statistics', () => {
@@ -600,7 +712,7 @@ it('navigates loaded mails and toggles selection without starting an action', ()
   expect(mockMove).not.toHaveBeenCalled();
   expect(mockRun).not.toHaveBeenCalled();
 });
-it('uses the move shortcut only to confirm the explicit multi-selection', () => {
+it('moves the explicit multi-selection directly with E and suppresses duplicate submission', () => {
   mockRows.push({
     ...mockRows[0],
     id: 'second',
@@ -614,21 +726,24 @@ it('uses the move shortcut only to confirm the explicit multi-selection', () => 
   fireEvent.keyDown(workspace, { key: 'x' });
   fireEvent.keyDown(workspace, { key: 'j' });
   fireEvent.keyDown(workspace, { key: 'e' });
-  const dialog = screen.getByRole('alertdialog');
-  expect(dialog).toHaveTextContent('1 ausgewählte Originalmails');
-  expect(dialog).toHaveTextContent('Wartungsfenster bestätigen');
-  expect(dialog).not.toHaveTextContent('Zweite Mail');
-  fireEvent.keyDown(dialog, { key: 'e' });
-  expect(mockMove).not.toHaveBeenCalled();
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Jetzt verschieben' }));
+  fireEvent.keyDown(workspace, { key: 'e' });
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(mockMove).toHaveBeenCalledTimes(1);
+  expect(mockMove.mock.calls[0][0]).toEqual({
+    requestId: expect.any(String),
+    folderId: 'done',
+    items: [{ id: 'result', revision: 'result-revision' }],
+  });
 });
-it('never uses shortcuts to move an edited or unconfigured mail', () => {
+it('requires a folder choice for unconfigured E and never moves an edited mail', () => {
   mount();
   chooseMail();
   const workspace = screen.getByRole('main');
   fireEvent.keyDown(workspace, { key: 'e' });
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: '1 Mails verschieben' })).toBeVisible();
+  expect(mockMove).not.toHaveBeenCalled();
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
   chooseFolder();
   fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
   fireEvent.click(screen.getByRole('button', { name: 'Antwort bearbeiten' }));
@@ -636,20 +751,33 @@ it('never uses shortcuts to move an edited or unconfigured mail', () => {
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(mockMove).not.toHaveBeenCalled();
 });
-it('returns focus to the mail after cancelling a keyboard move confirmation', () => {
+it('chooses another folder with Shift+E and queues immediately without another confirmation', () => {
   mount();
   chooseFolder();
   chooseMail();
   const row = screen.getByRole('button', { name: /kunde@example.test/ });
   row.focus();
-  fireEvent.keyDown(row, { key: 'e' });
-  const dialog = screen.getByRole('alertdialog');
-  fireEvent.keyDown(dialog, { key: 'Escape' });
-  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-  expect(row).toHaveFocus();
-  fireEvent.keyDown(row, { key: 'x' });
-  expect(screen.getByText('1 ausgewählt')).toBeVisible();
+  fireEvent.keyDown(row, { key: 'E', shiftKey: true });
+  expect(screen.getByRole('dialog', { name: '1 Mails verschieben' })).toHaveTextContent(
+    'Klicke den Zielordner an',
+  );
   expect(mockMove).not.toHaveBeenCalled();
+  const close = within(screen.getByRole('dialog')).getByRole('button', { name: 'Schliessen' });
+  fireEvent.keyDown(close, { key: 'End' });
+  expect(
+    within(screen.getByRole('dialog')).getByRole('button', { name: '00_erledigt' }),
+  ).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+  expect(close).toHaveFocus();
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '00_erledigt' }));
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(row).toHaveFocus();
+  expect(mockMove).toHaveBeenCalledTimes(1);
+  expect(mockMove.mock.calls[0][0]).toMatchObject({
+    folderId: 'done',
+    items: [{ id: 'result', revision: 'result-revision' }],
+  });
 });
 it('does not hijack text input, modifiers, repeats, composing or other dialogs', () => {
   mockRows.push({
@@ -727,9 +855,496 @@ it('keeps character shortcuts out of draft editors and mail iframe focus', () =>
 });
 
 it('keeps pending draft and task work visible while reading another mail', () => {
-  mockPending = { draft: 1, followup: 1 };
+  mockPending = { draft: 1, followup: 1, chat: 0 };
+  mockStatus.odooAvailable = true;
   mount();
   chooseMail();
   expect(screen.getByText(/Entwurf wird erstellt/)).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Im neuen Chat überarbeiten' })).toBeEnabled();
+  expect(screen.getByRole('tab', { name: 'Chat zu dieser Mail' })).toBeEnabled();
+});
+
+it.each([undefined, false])(
+  'hides all Odoo controls without explicit availability (%s)',
+  (value) => {
+    mockStatus.odooAvailable = value;
+    mockPending = { draft: 1, followup: 1, chat: 0 };
+    mount();
+    chooseMail();
+    expect(screen.queryByTestId('odoo-action')).not.toBeInTheDocument();
+    expect(screen.getByTestId('draft-request')).toBeInTheDocument();
+    expect(screen.getByText(/Entwurf wird erstellt/)).toBeVisible();
+    expect(screen.queryByText(/Odoo-Auftrag läuft/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Einstellungen' }));
+    expect(screen.queryByTestId('odoo-settings')).not.toBeInTheDocument();
+  },
+);
+
+it('shows Odoo controls only when the server explicitly enables them', () => {
+  mockStatus.odooAvailable = true;
+  mount();
+  chooseMail();
+  expect(screen.getByTestId('odoo-action')).toBeInTheDocument();
+  expect(screen.getByTestId('draft-request')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Einstellungen' }));
+  expect(screen.getByTestId('odoo-settings')).toBeInTheDocument();
+});
+
+it('advances inbox pages automatically once per cursor and restarts only on Refresh', async () => {
+  mockInboxCursor = 'page-two';
+  const view = mount();
+  expect(mockNext).toHaveBeenCalledTimes(1);
+  chooseMail();
+  expect(mockNext).toHaveBeenCalledTimes(1);
+  mockInboxCursor = 'page-three';
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  expect(mockNext).toHaveBeenCalledTimes(2);
+  mockInboxCursor = undefined;
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Aktualisieren' }));
+  expect(mockInboxRefresh).toHaveBeenCalledTimes(1);
+  expect(mockRun).not.toHaveBeenCalled();
+});
+
+it('shows pending inbox messages without pretending an analysis or priority exists', () => {
+  mockRows = [
+    {
+      ...mockRows[0],
+      analysisStatus: 'pending',
+      summary: 'Vorschau aus der Inbox',
+      questions: [],
+      draftStatus: 'none',
+    },
+  ];
+  mount();
+  chooseMail();
+  expect(screen.getAllByText('Noch nicht analysiert').length).toBeGreaterThan(0);
+  expect(screen.queryByText('Auf einen Blick')).not.toBeInTheDocument();
+  fireEvent.change(screen.getAllByRole('combobox', { name: 'Priorität' })[0], {
+    target: { value: 'important' },
+  });
+  expect(screen.queryByRole('button', { name: /kunde@example.test/ })).not.toBeInTheDocument();
+});
+
+it('uses R only to open an editor or manual draft request and never generates automatically', () => {
+  const view = mount();
+  chooseMail();
+  fireEvent.keyDown(screen.getByRole('main'), { key: 'r' });
+  expect(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ })).toHaveFocus();
+  expect(mockSave).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Abbrechen' }));
+  mockContent = { ...mockContent, draft: undefined };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  fireEvent.keyDown(screen.getByRole('main'), { key: 'r' });
+  expect(screen.getByTestId('draft-request')).toHaveAttribute('data-open', '1');
+  expect(mockSave).not.toHaveBeenCalled();
+});
+
+it('uses O only for a validated existing Outlook draft URL', () => {
+  const popup = jest.spyOn(window, 'open').mockImplementation(() => null);
+  mockContent.draft!.url = 'https://outlook.office.com/mail/deeplink/compose/test';
+  const view = mount();
+  chooseMail();
+  fireEvent.keyDown(screen.getByRole('main'), { key: 'o' });
+  expect(popup).toHaveBeenCalledWith(mockContent.draft!.url, '_blank', 'noopener,noreferrer');
+  mockContent = {
+    ...mockContent,
+    draft: { ...mockContent.draft!, url: 'https://attacker.example/mail/x' },
+  };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  fireEvent.keyDown(screen.getByRole('main'), { key: 'o' });
+  expect(popup).toHaveBeenCalledTimes(1);
+  popup.mockRestore();
+});
+
+it('changes priority with number shortcuts but protects open edits and sent messages', () => {
+  const view = mount();
+  chooseMail();
+  const workspace = screen.getByRole('main');
+  fireEvent.keyDown(workspace, { key: '2' });
+  expect(mockPriority).toHaveBeenCalledWith(
+    { id: 'result', priority: 'normal' },
+    expect.any(Object),
+  );
+  fireEvent.keyDown(workspace, { key: 'r' });
+  fireEvent.keyDown(workspace, { key: '3' });
+  expect(mockPriority).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Abbrechen' }));
+  mockRows = [{ ...mockRows[0], mailboxLocation: 'sent' }];
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  fireEvent.keyDown(workspace, { key: '1' });
+  fireEvent.keyDown(workspace, { key: 'e' });
+  expect(mockPriority).toHaveBeenCalledTimes(1);
+  expect(mockMove).not.toHaveBeenCalled();
+  expect(screen.queryByTestId('draft-request')).not.toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'Chat zu dieser Mail' })).toBeEnabled();
+});
+
+it('uses Shift+X for the loaded selection and C for the embedded chat', () => {
+  mockRows.push({
+    ...mockRows[0],
+    id: 'second',
+    subject: 'Zweite Mail',
+    sender: 'other@example.test',
+  });
+  mount();
+  chooseMail();
+  fireEvent.keyDown(screen.getByRole('main'), { key: 'X', shiftKey: true });
+  expect(screen.getByText('2 ausgewählt')).toBeVisible();
+  fireEvent.keyDown(screen.getByRole('main'), { key: 'X', shiftKey: true });
+  expect(screen.getByText('0 ausgewählt')).toBeVisible();
+  fireEvent.keyDown(screen.getByRole('main'), { key: 'c' });
+  expect(
+    screen.getByRole('textbox', { name: 'Deine Frage oder gewünschte Anpassung' }),
+  ).toHaveFocus();
+  expect(mockChat).not.toHaveBeenCalled();
+});
+
+it('preserves per-mail chat during navigation and ignores a late response after disconnect', async () => {
+  let resolveChat!: (value: { answer: string }) => void;
+  mockChat.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        resolveChat = resolve;
+      }),
+  );
+  mockRows.push({
+    ...mockRows[0],
+    id: 'second',
+    sender: 'other@example.test',
+    subject: 'Zweite Mail',
+  });
+  const view = mount();
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Chat zu dieser Mail' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Deine Frage oder gewünschte Anpassung' }), {
+    target: { value: 'Private Frage zur ersten Mail' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Fragen' }));
+  fireEvent.click(screen.getByRole('button', { name: /other@example.test/ }));
+  expect(screen.queryByText('Private Frage zur ersten Mail')).not.toBeInTheDocument();
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Chat zu dieser Mail' }));
+  expect(screen.getAllByText('Private Frage zur ersten Mail')[0]).toBeVisible();
+  mockStatus = { ...mockStatus, connection: { connected: false } };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  await act(async () => resolveChat({ answer: 'Private verspätete Antwort' }));
+  mockStatus = { ...mockStatus, connection: { connected: true, mailbox: 'owner@example.test' } };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Chat zu dieser Mail' }));
+  expect(screen.queryByText('Private verspätete Antwort')).not.toBeInTheDocument();
+  expect(screen.queryByText('Private Frage zur ersten Mail')).not.toBeInTheDocument();
+});
+
+it.each([
+  ['replied', 'beantwortet'],
+  ['forwarded', 'weitergeleitet'],
+] as const)(
+  'shows the recorded %s action compactly in the list and open message',
+  (action, label) => {
+    mockRows = [
+      { ...mockRows[0], responseAction: action, responseActionAt: '2026-10-28T08:30:00Z' },
+    ];
+    mockContent.message = {
+      ...mockContent.message,
+      responseAction: action,
+      responseActionAt: '2026-10-28T08:30:00Z',
+    };
+    mount();
+    chooseMail();
+    const icons = screen.getAllByRole('img', {
+      name: `Letzte in Outlook gespeicherte Aktion: ${label} · 28.10.26, 09:30`,
+    });
+    expect(icons).toHaveLength(2);
+    for (const icon of icons) {
+      expect(icon).toHaveAttribute('title', icon.getAttribute('aria-label'));
+      expect(icon.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    }
+    expect(icons[0].closest('.mail-row-top')).not.toBeNull();
+    expect(icons[1].closest('.mail-detail-kicker')).not.toBeNull();
+  },
+);
+
+it.each(['AW: Termin', 'WG: Termin'])(
+  'never derives a response status from subject %s or a saved draft',
+  (subject) => {
+    mockRows = [{ ...mockRows[0], subject, draftStatus: 'created' }];
+    mount();
+    chooseMail();
+    expect(
+      screen.queryByRole('img', { name: /Letzte in Outlook gespeicherte Aktion/ }),
+    ).not.toBeInTheDocument();
+  },
+);
+
+it('refreshes response metadata in list and detail without replacing an unsaved reply or retaining unknown status', () => {
+  mockRows = [{ ...mockRows[0], responseAction: 'replied' }];
+  mockContent.message = { ...mockContent.message, responseAction: 'replied' };
+  const view = mount();
+  chooseMail();
+  fireEvent.click(screen.getByRole('tab', { name: 'Entwurf' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Antwort bearbeiten' }));
+  fireEvent.change(screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ }), {
+    target: { value: 'Meine ungespeicherte Antwort' },
+  });
+  mockRows = [{ ...mockRows[0], responseAction: 'forwarded' }];
+  mockContent = {
+    ...mockContent,
+    message: { ...mockContent.message, responseAction: 'forwarded' },
+  };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  expect(
+    screen.getAllByRole('img', { name: 'Letzte in Outlook gespeicherte Aktion: weitergeleitet' }),
+  ).toHaveLength(2);
+  expect(screen.queryByRole('img', { name: /beantwortet/ })).not.toBeInTheDocument();
+  expect(screen.getByDisplayValue('Meine ungespeicherte Antwort')).toBeVisible();
+  mockRows = [{ ...mockRows[0], responseAction: undefined }];
+  mockContent = { ...mockContent, message: { ...mockContent.message, responseAction: undefined } };
+  view.rerender(
+    <MemoryRouter>
+      <Workspace />
+    </MemoryRouter>,
+  );
+  expect(
+    screen.queryByRole('img', { name: /Letzte in Outlook gespeicherte Aktion/ }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByDisplayValue('Meine ungespeicherte Antwort')).toBeVisible();
+});
+
+it('prefers current detail metadata over an older list marker and does not claim unknown means unanswered', () => {
+  mockRows = [{ ...mockRows[0], responseAction: 'replied' }];
+  mount();
+  chooseMail();
+  expect(
+    screen.getAllByRole('img', { name: /Letzte in Outlook gespeicherte Aktion/ }),
+  ).toHaveLength(1);
+  expect(
+    within(screen.getByRole('article', { name: mockTranslations.com_ui_mail_detail })).queryByRole(
+      'img',
+    ),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText(/unbeantwortet/i)).not.toBeInTheDocument();
+});
+
+it('moves focus between the compact list, detail tabs, chat and search without losing text', () => {
+  mockRows.push({
+    ...mockRows[0],
+    id: 'second',
+    sender: 'second@example.test',
+    subject: 'Zweite Mail',
+  });
+  mount();
+  const workspace = screen.getByRole('main');
+  const first = screen.getByRole('button', { name: /kunde@example.test/ });
+  const second = screen.getByRole('button', { name: /second@example.test/ });
+  expect(first).toHaveAttribute('tabindex', '0');
+  expect(second).toHaveAttribute('tabindex', '-1');
+  fireEvent.keyDown(workspace, { key: 'End' });
+  expect(second).toHaveFocus();
+  expect(second).toHaveAttribute('tabindex', '0');
+  expect(first).toHaveAttribute('tabindex', '-1');
+  fireEvent.keyDown(second, { key: 'Home' });
+  expect(first).toHaveFocus();
+  fireEvent.keyDown(first, { key: 'd' });
+  expect(screen.getByRole('tab', { name: 'Entwurf' })).toHaveFocus();
+  fireEvent.keyDown(screen.getByRole('tab', { name: 'Entwurf' }), { key: 'm' });
+  const original = screen.getByRole('tab', { name: 'Originalmail' });
+  expect(original).toHaveFocus();
+  fireEvent.keyDown(original, { key: 'ArrowRight' });
+  expect(screen.getByRole('tab', { name: 'Entwurf' })).toHaveFocus();
+  fireEvent.keyDown(screen.getByRole('tab', { name: 'Entwurf' }), { key: 'c' });
+  const question = screen.getByRole('textbox', { name: 'Deine Frage oder gewünschte Anpassung' });
+  expect(question).toHaveFocus();
+  fireEvent.change(question, { target: { value: 'Meine offene Frage' } });
+  fireEvent.keyDown(question, { key: 'Escape' });
+  expect(first).toHaveFocus();
+  fireEvent.keyDown(first, { key: 'c' });
+  expect(
+    screen.getByRole('textbox', { name: 'Deine Frage oder gewünschte Anpassung' }),
+  ).toHaveValue('Meine offene Frage');
+  expect(mockChat).not.toHaveBeenCalled();
+  fireEvent.keyDown(question, { key: 'Escape' });
+  fireEvent.keyDown(first, { key: '/' });
+  const search = screen.getByRole('textbox', { name: /Absender, Betreff/ });
+  expect(search).toHaveFocus();
+  fireEvent.keyDown(search, { key: 'Escape' });
+  expect(first).toHaveFocus();
+});
+
+it('opens correspondence metadata with H and lets Escape return from its controls', () => {
+  mount();
+  chooseMail();
+  fireEvent.keyDown(screen.getByRole('main'), { key: 'h' });
+  const summary = screen.getByText('Weitere Mails dieses Kontakts');
+  expect(summary.closest('details')).toHaveAttribute('open');
+  expect(summary).toHaveFocus();
+  fireEvent.keyDown(summary, { key: 'Escape' });
+  expect(screen.getByRole('button', { name: /kunde@example.test/ })).toHaveFocus();
+});
+
+it('refreshes with G and traps keyboard focus in settings with return on Escape', () => {
+  mount();
+  chooseMail();
+  const row = screen.getByRole('button', { name: /kunde@example.test/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: 'g' });
+  expect(mockInboxRefresh).toHaveBeenCalledTimes(1);
+  fireEvent.keyDown(row, { key: ',' });
+  const dialog = screen.getByRole('dialog', { name: 'Einstellungen' });
+  const close = within(dialog).getByRole('button', { name: 'Schliessen' });
+  const save = within(dialog).getByRole('button', { name: 'Einstellungen speichern' });
+  expect(close).toHaveFocus();
+  fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+  expect(save).toHaveFocus();
+  fireEvent.keyDown(save, { key: 'Tab' });
+  expect(close).toHaveFocus();
+  fireEvent.keyDown(close, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(row).toHaveFocus();
+});
+
+it.each(['ctrlKey', 'metaKey'])(
+  'saves only the edited reply once with %s + Enter and preserves edits on Escape',
+  (modifier) => {
+    mount();
+    chooseMail();
+    fireEvent.keyDown(screen.getByRole('main'), { key: 'r' });
+    const editor = screen.getByRole('textbox', { name: /Hier bearbeitest du nur/ });
+    fireEvent.change(editor, { target: { value: 'Meine bearbeitete Antwort' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.keyDown(editor, { key: 'Enter', [modifier]: true, isComposing: true });
+    fireEvent.keyDown(editor, { key: 'Enter', [modifier]: true, keyCode: 229 });
+    fireEvent.keyDown(editor, { key: 'Enter', [modifier]: true, repeat: true });
+    expect(mockSave).not.toHaveBeenCalled();
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    expect(editor).toHaveValue('Meine bearbeitete Antwort');
+    expect(screen.getByRole('button', { name: /kunde@example.test/ })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('button', { name: /kunde@example.test/ }), { key: 'r' });
+    expect(editor).toHaveFocus();
+    fireEvent.keyDown(editor, { key: 'Enter', [modifier]: true });
+    fireEvent.keyDown(editor, { key: 'Enter', [modifier]: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Entwurf in Outlook speichern' }));
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    expect(mockSave.mock.calls[0][0]).toEqual({
+      id: 'result',
+      body: 'Meine bearbeitete Antwort',
+      revision: 'opaque-revision',
+    });
+    act(() => mockSave.mock.calls[0][1].onSuccess());
+    expect(
+      screen.queryByRole('textbox', { name: /Hier bearbeitest du nur/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Entwurf' })).toHaveFocus();
+    expect(mockRun).not.toHaveBeenCalled();
+  },
+);
+
+it('advances to the next open mail after a keyboard move is accepted', () => {
+  mockRows.push({ ...mockRows[0], id: 'second', sender: 'second@example.test' });
+  mount();
+  chooseFolder();
+  chooseMail();
+  const row = screen.getByRole('button', { name: /kunde@example.test/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: 'e' });
+  expect(mockMove).toHaveBeenCalledTimes(1);
+  act(() => mockMove.mock.calls[0][1].onSuccess());
+  const next = screen.getByRole('button', { name: /second@example.test/ });
+  expect(next).toHaveFocus();
+  expect(next).toHaveAttribute('aria-pressed', 'true');
+});
+
+it.each(['Enter', 'Escape'])(
+  'finishes an undebounced search with %s and focuses the actual matching row',
+  (key) => {
+    mockRows.push({
+      ...mockRows[0],
+      id: 'second',
+      sender: 'second@example.test',
+      subject: 'Zweite Mail',
+    });
+    mount();
+    const search = screen.getByRole('textbox', { name: /Absender, Betreff/ });
+    search.focus();
+    fireEvent.change(search, { target: { value: 'Zweite' } });
+    fireEvent.keyDown(search, { key });
+    expect(screen.queryByRole('button', { name: /kunde@example.test/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /second@example.test/ })).toHaveFocus();
+    expect(search).toHaveValue('Zweite');
+    expect(mockMove).not.toHaveBeenCalled();
+  },
+);
+
+it('shows original From, To and Cc independently from reply-all targets', () => {
+  mockContent.message = {
+    ...mockContent.message,
+    senderName: 'Original Sender',
+    toRecipients: [{ name: 'Original To', address: 'original-to@example.test' }],
+    ccRecipients: [{ name: 'Original Cc', address: 'original-cc@example.test' }],
+    replyRecipients: [{ name: 'Reply Destination', address: 'reply@example.test' }],
+  };
+  mount();
+  chooseMail();
+  const header = screen.getByLabelText('Empfänger der Originalmail');
+  expect(within(header).getByText(/Original Sender/)).toBeInTheDocument();
+  expect(within(header).getByText('Original To <original-to@example.test>')).toBeInTheDocument();
+  expect(within(header).getByText('Original Cc <original-cc@example.test>')).toBeInTheDocument();
+  expect(within(header).queryByText(/Reply Destination/)).not.toBeInTheDocument();
+});
+
+it('P opens research for the selected mail without starting a job', () => {
+  mount();
+  chooseMail();
+  const main = screen.getByRole('main');
+  main.focus();
+  fireEvent.keyDown(main, { key: 'p' });
+  expect(screen.getByTestId('research')).toHaveAttribute('data-open', '1');
+  expect(mockRun).not.toHaveBeenCalled();
+});
+
+it('a forwarded original shows its recorded time and explicitly unknown forwarding recipients', () => {
+  mockContent.message = {
+    ...mockContent.message,
+    responseAction: 'forwarded',
+    responseActionAt: '2026-10-29T10:22:00Z',
+    ccRecipients: [{ name: 'Original Cc', address: 'cc@example.test' }],
+  };
+  mount();
+  chooseMail();
+  expect(screen.getByText(/Empfänger der Weiterleitung nicht ermittelbar/)).toHaveTextContent(
+    '29.10.26',
+  );
+  expect(screen.getByText('Original Cc <cc@example.test>')).toBeInTheDocument();
 });

@@ -606,7 +606,11 @@ describe('User Methods - Database Tests', () => {
       });
       const ownerId = user._id!.toString();
       const otherId = new mongoose.Types.ObjectId().toString();
-      for (const name of ['eucowork_mail_credentials', 'eucowork_mail_assistant']) {
+      for (const name of [
+        'eucowork_mail_credentials',
+        'eucowork_mail_assistant',
+        'eucowork_mail_research',
+      ]) {
         const collection = mongoose.connection.collection<{
           _id: string;
           ownerId: string;
@@ -633,6 +637,7 @@ describe('User Methods - Database Tests', () => {
         'eucowork_mail_oauth_states',
         'eucowork_mail_operations',
         'eucowork_mail_followups',
+        'eucowork_mail_research',
       ]) {
         const collection = mongoose.connection.collection(name);
         expect(await collection.countDocuments({ ownerId })).toBe(0);

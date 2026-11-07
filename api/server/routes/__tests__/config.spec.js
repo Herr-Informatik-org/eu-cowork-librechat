@@ -114,9 +114,24 @@ afterEach(() => {
   delete process.env.LANGFUSE_TRACING_ENABLED;
   delete process.env.LANGFUSE_SAMPLE_RATE;
   delete process.env.TENANT_ISOLATION_STRICT;
+  delete process.env.EUCOWORK_LOCAL_FOLDERS;
 });
 
 describe('GET /api/config', () => {
+  it('advertises local folders only after login and only with the exact server opt-in', async () => {
+    mockGetAppConfig.mockResolvedValue(baseAppConfig);
+    expect((await request(createApp(mockUser)).get('/api/config')).body.localFoldersEnabled).toBe(
+      false,
+    );
+    process.env.EUCOWORK_LOCAL_FOLDERS = 'true';
+    expect((await request(createApp(mockUser)).get('/api/config')).body.localFoldersEnabled).toBe(
+      true,
+    );
+    expect((await request(createApp(null)).get('/api/config')).body).not.toHaveProperty(
+      'localFoldersEnabled',
+    );
+  });
+
   describe('unauthenticated (no req.user)', () => {
     it('should call getAppConfig with baseOnly when no tenant context', async () => {
       mockGetAppConfig.mockResolvedValue(baseAppConfig);

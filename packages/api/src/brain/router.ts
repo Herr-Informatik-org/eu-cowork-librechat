@@ -13,7 +13,15 @@ import { classifyBrainFailure, createBrainFailureReporter } from './diagnostics'
 import type { BrainLearningStore } from './status';
 import { isPersonalMailMemoryAllowed } from './mail';
 
-const queryKeys = new Set(['query', 'scope', 'cursor', 'limit', 'conversationId', 'generationId']);
+const queryKeys = new Set([
+  'query',
+  'scope',
+  'cursor',
+  'limit',
+  'conversationId',
+  'generationId',
+  'messageId',
+]);
 
 export function getBrainProxyPath(req: Pick<Request, 'path' | 'query'>): string {
   const query = new URLSearchParams();
@@ -254,10 +262,11 @@ export function createBrainRouter({
       proxy,
     );
   }
+  router.get('/quality', access(Permissions.READ), proxy);
+  router.post('/quality/apply', access(Permissions.UPDATE), proxy);
   router.get('/graph', access(Permissions.READ), proxy);
   router.get('/export', access(Permissions.READ), proxy);
   router.get('/recalls', access(Permissions.READ), proxy);
-  router.get('/recalls/usage', access(Permissions.READ), proxy);
   router.get('/nodes/:id', access(Permissions.READ), proxy);
   router.post('/nodes', access(Permissions.CREATE), proxy);
   router.patch('/nodes/:id', access(Permissions.UPDATE), proxy);

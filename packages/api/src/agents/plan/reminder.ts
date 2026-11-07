@@ -4,6 +4,7 @@ import { findLatestPlan, hasOpenPlanSteps } from 'librechat-data-provider';
 import type { BaseMessage } from '@librechat/agents/langchain/messages';
 import type { EventStreamOptions, RunStreamConfig } from '@librechat/agents';
 import type { PlanSourcePart, TPlan } from 'librechat-data-provider';
+import { isAgentWorkBudgetClosing } from '../budget';
 
 /** The run surface the stop reminder needs; structural so tests can drive it without a model. */
 export interface PlanReminderRun {
@@ -85,7 +86,8 @@ async function resolveHistory(
 /**
  * Stop reminder: when a finished pass leaves plan steps open, run one more pass
  * with a short note, so multi-step work is completed or its stop explained.
- * Called at most once per turn by the host; skipped on pause, halt or abort.
+ * Called at most once per turn by the host; skipped on pause, halt, abort or once the
+ * work budget asked the run to wrap up, so the reminder never reopens a closed budget.
  * Returns whether a continuation pass ran.
  */
 export async function continueOpenPlan({
@@ -97,7 +99,12 @@ export async function continueOpenPlan({
   indexOffset,
   signal,
 }: ContinueOpenPlanParams): Promise<boolean> {
-  if (signal?.aborted === true || run.getInterrupt() != null || run.getHaltReason() != null) {
+  if (
+    signal?.aborted === true ||
+    run.getInterrupt() != null ||
+    run.getHaltReason() != null ||
+    isAgentWorkBudgetClosing(run)
+  ) {
     return false;
   }
   const plan = findLatestPlan(contentParts);

@@ -1,8 +1,10 @@
 import { AIMessage, HumanMessage } from '@librechat/agents/langchain/messages';
 import { PLAN_TOOL_NAME, findLatestPlan, parsePlanArgs } from 'librechat-data-provider';
 import type { BaseMessage } from '@librechat/agents/langchain/messages';
+import { HookRegistry } from '@librechat/agents';
 import type { PlanReminderRun } from './reminder';
 import { continueOpenPlan, buildPlanReminder } from './reminder';
+import { installAgentWorkBudget } from '../budget';
 import { createPlanTool, describePlanUpdate } from './tool';
 import { buildChatGuidance } from '../guidance';
 
@@ -157,6 +159,38 @@ describe('continueOpenPlan (stop reminder)', () => {
       expect(ran).toBe(false);
       expect(run.calls).toHaveLength(0);
     }
+  });
+
+  it('skips once the work budget asked the run to wrap up', async () => {
+    const registry = new HookRegistry();
+    const run = fakeRun({ runMessages: [answer] });
+    let step = 1;
+    installAgentWorkBudget({
+      registry,
+      runId: 'run',
+      agentId: 'agent',
+      limit: 20,
+      readModelStep: () => step,
+    })?.(run);
+    const guard = registry.getMatchers('PreToolUse')[0].hooks[0];
+    const pre = () =>
+      guard(
+        {
+          hook_event_name: 'PreToolUse',
+          runId: 'run',
+          executingAgentId: 'agent',
+          toolName: 'search_records',
+          toolInput: {},
+          toolUseId: 'call',
+        },
+        new AbortController().signal,
+      );
+    await pre();
+    step = 12;
+    expect(await pre()).toHaveProperty('additionalContext');
+    const ran = await continueOpenPlan({ run, messages: history, config, contentParts: OPEN_PLAN });
+    expect(ran).toBe(false);
+    expect(run.calls).toHaveLength(0);
   });
 
   it('builds a reminder that lists only open steps', () => {

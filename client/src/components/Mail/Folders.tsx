@@ -1,32 +1,90 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, ChevronRight, FolderCheck } from 'lucide-react';
 import type { MailWorkspaceFolder } from 'librechat-data-provider';
 import { useMailFolders } from '~/data-provider/Mail';
 import { useLocalize } from '~/hooks';
+import { isMailEscape, trapMailDialogFocus } from './Shortcuts';
 
 export function FolderPicker({
   active,
+  moveCount = 0,
   chosen,
   onChoose,
   onClose,
 }: {
   active: boolean;
+  moveCount?: number;
   chosen: MailWorkspaceFolder | null;
   onChoose: (folder: MailWorkspaceFolder) => void;
   onClose: () => void;
 }) {
   const t = useLocalize();
+  const title = moveCount
+    ? t('com_ui_mail_bulk_title', { count: moveCount })
+    : t('com_ui_mail_choose_folder');
   const [parents, setParents] = useState<MailWorkspaceFolder[]>([]);
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    container.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
   const folders = useMailFolders(active, parents.at(-1)?.id);
   return (
-    <div className="mail-folder-picker" role="dialog" aria-label={t('com_ui_mail_choose_folder')}>
+    <div
+      className="mail-folder-picker"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      ref={container}
+      onKeyDown={(event) => {
+        if (isMailEscape(event)) {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+          return;
+        }
+        trapMailDialogFocus(event);
+        if (
+          event.defaultPrevented ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.altKey ||
+          event.shiftKey ||
+          event.nativeEvent.isComposing ||
+          event.nativeEvent.keyCode === 229 ||
+          !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)
+        )
+          return;
+        const buttons = Array.from(
+          event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+        );
+        const index = buttons.indexOf(event.target as HTMLButtonElement);
+        if (index < 0) return;
+        let nextIndex = Math.max(
+          0,
+          Math.min(buttons.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)),
+        );
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = buttons.length - 1;
+        if (buttons[nextIndex]) {
+          event.preventDefault();
+          event.stopPropagation();
+          buttons[nextIndex].focus();
+        }
+      }}
+    >
       <div className="mail-settings-heading">
-        <h3>{t('com_ui_mail_choose_folder')}</h3>
+        <h3>{title}</h3>
         <button className="mail-button" onClick={onClose}>
           {t('com_ui_mail_close')}
         </button>
       </div>
-      <p className="mail-muted">{t('com_ui_mail_folder_hint')}</p>
+      <p className="mail-muted">
+        {t(moveCount ? 'com_ui_mail_folder_move_hint' : 'com_ui_mail_folder_hint')}
+      </p>
       <div className="mail-folder-path">
         <button
           className="mail-button"

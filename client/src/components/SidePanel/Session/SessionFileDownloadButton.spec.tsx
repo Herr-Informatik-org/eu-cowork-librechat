@@ -11,13 +11,18 @@ const mockToast = jest.fn();
 
 jest.mock('@librechat/client', () => ({ useToastContext: () => ({ showToast: mockToast }) }));
 jest.mock('~/Providers', () => ({ useShareContext: () => ({}) }));
+jest.mock('recoil', () => ({
+  ...jest.requireActual('recoil'),
+  useRecoilValue: () => ({ id: 'current-user' }),
+}));
 jest.mock('~/hooks', () => ({ useLocalize: () => (key: string) => key }));
 jest.mock('~/data-provider', () => ({
   useFileDownload: jest.fn(() => ({ refetch: mockApiDownload })),
   useCodeOutputDownload: () => ({ refetch: mockUrlDownload }),
+  useSharedFileDownload: () => ({ refetch: jest.fn() }),
 }));
 jest.mock('~/utils', () => ({
-  isHttpDownloadTarget: (href: string) => /^https?:/.test(href),
+  ...jest.requireActual('~/utils/downloadFile'),
   triggerDownload: jest.fn(),
 }));
 
@@ -40,7 +45,10 @@ test('a local original uses the authenticated file route instead of navigating t
   await waitFor(() =>
     expect(triggerDownload).toHaveBeenCalledWith('blob:original-file', 'result.xlsx'),
   );
-  expect(useFileDownload).toHaveBeenCalledWith('owner-one', 'file-one', { source: 'local' });
+  expect(useFileDownload).toHaveBeenCalledWith('owner-one', 'file-one', {
+    source: 'local',
+    direct: false,
+  });
   expect(mockApiDownload).toHaveBeenCalledTimes(1);
   expect(mockUrlDownload).not.toHaveBeenCalled();
   expect(container.querySelector('a[href^="/uploads/"]')).toBeNull();
@@ -62,7 +70,7 @@ test('code output keeps its existing download route', async () => {
       file={{
         ...file,
         source: FileSources.execute_code,
-        filepath: '/api/files/code/output/file-one',
+        filepath: '/api/files/code/download/abcdefghijklmnopqrstu/ABCDEFGHIJKLMNOPQRSTU',
       }}
     />,
   );

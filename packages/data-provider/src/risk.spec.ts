@@ -85,6 +85,7 @@ describe('tool risk', () => {
     expect(classifyToolName('web_search')).toBe('read');
     expect(classifyToolName('ask_user_question')).toBe('read');
     expect(classifyToolName('plan_aktualisieren')).toBe('read');
+    expect(classifyToolName('local_folder')).toBe('read');
     expect(classifyToolName('brain_forget')).toBe('read');
     expect(classifyToolName('execute_code')).toBe('write');
     expect(classifyToolName('create_file')).toBe('write');

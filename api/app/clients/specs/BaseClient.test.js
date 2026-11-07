@@ -1,4 +1,4 @@
-const { Constants } = require('librechat-data-provider');
+const { Constants, ContentTypes, EModelEndpoint, ErrorTypes } = require('librechat-data-provider');
 const { FakeClient, initializeFakeClient } = require('./FakeClient');
 
 function deferred() {
@@ -752,6 +752,47 @@ describe('BaseClient', () => {
         saveOptions,
         user,
       );
+    });
+
+    test('persists partial agent results and available files together after a budget stop', async () => {
+      const content = [
+        { type: ContentTypes.TEXT, text: 'Rechnung gefunden.' },
+        {
+          type: ContentTypes.TOOL_CALL,
+          tool_call: { id: 'lookup-1', name: 'read_mcp_odoo', args: '{}', output: 'Rechnung 123' },
+        },
+        {
+          type: ContentTypes.ERROR,
+          error: JSON.stringify({
+            type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+            status: 'incomplete',
+          }),
+        },
+      ];
+      const attachment = {
+        file_id: 'result-csv',
+        filename: 'vergleich.csv',
+        toolCallId: 'lookup-1',
+      };
+      TestClient.clientName = EModelEndpoint.agents;
+      TestClient.artifactPromises = [Promise.resolve(attachment), Promise.resolve(null)];
+      TestClient.sendCompletion.mockResolvedValue({ completion: content });
+      const saveSpy = jest.spyOn(TestClient, 'saveMessageToDatabase');
+
+      const response = await TestClient.sendMessage('Prüfe die Rechnung.');
+      await response.databasePromise;
+
+      expect(response.content).toEqual(content);
+      expect(response.attachments).toEqual([attachment]);
+      expect(response.error).not.toBe(true);
+      expect(response.unfinished).not.toBe(true);
+      const savedResponse = saveSpy.mock.calls.find(
+        ([message]) => message.messageId === response.messageId,
+      )?.[0];
+      expect(savedResponse).toEqual(
+        expect.objectContaining({ content, attachments: [attachment] }),
+      );
+      expect(TestClient.sendCompletion).toHaveBeenCalledTimes(1);
     });
 
     test('does not start the completed response write when terminal ownership is denied', async () => {
@@ -1512,6 +1553,65 @@ describe('BaseClient', () => {
       });
       TestClient.processAttachments = jest.fn(async (_message, files) => files);
       TestClient.checkVisionRequest = jest.fn();
+    });
+
+    test('reloads budget-stopped history and its authorized attachment without running tools', async () => {
+      const content = [
+        { type: ContentTypes.TEXT, text: 'Vorhandener Vergleich' },
+        {
+          type: ContentTypes.TOOL_CALL,
+          tool_call: { id: 'lookup-1', name: 'read_mcp_odoo', args: '{}', output: 'Rechnung 123' },
+        },
+        {
+          type: ContentTypes.ERROR,
+          error: JSON.stringify({
+            type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+            status: 'incomplete',
+          }),
+        },
+      ];
+      const savedResponse = {
+        messageId: 'budget-response',
+        parentMessageId: 'budget-user',
+        conversationId: 'budget-conversation',
+        isCreatedByUser: false,
+        content,
+        attachments: [{ file_id: ownerFile.file_id, toolCallId: 'lookup-1' }],
+      };
+      getMessages.mockResolvedValueOnce([
+        {
+          messageId: 'budget-user',
+          parentMessageId: Constants.NO_PARENT,
+          conversationId: 'budget-conversation',
+          isCreatedByUser: true,
+          text: 'Vergleiche die Rechnungen.',
+        },
+        savedResponse,
+      ]);
+      getFiles.mockResolvedValueOnce([ownerFile]);
+      TestClient.user = 'user-1';
+
+      const history = await FakeClient.prototype.loadHistory.call(
+        TestClient,
+        'budget-conversation',
+        'budget-response',
+      );
+      const reloaded = history.find((message) => message.messageId === 'budget-response');
+
+      expect(reloaded.content).toEqual(content);
+      expect(reloaded.attachments).toEqual([
+        expect.objectContaining({
+          file_id: ownerFile.file_id,
+          filename: ownerFile.filename,
+          toolCallId: 'lookup-1',
+        }),
+      ]);
+      expect(getFiles).toHaveBeenCalledWith(
+        expect.objectContaining({ user: 'user-1', tenantId: 'tenant-a' }),
+        {},
+        {},
+      );
+      expect(TestClient.sendCompletion).not.toHaveBeenCalled();
     });
 
     test('rehydrates historical file refs from owner-scoped DB rows only', async () => {

@@ -1,5 +1,21 @@
-import type { MailFetch } from './types';
+import sanitizeHtml from 'sanitize-html';
+import { randomUUID } from 'node:crypto';
+import type { MailFetch, MailSignature, MailReplyAllContext } from './types';
 import { MailDraftError, MailGraphError } from './errors';
+import type { MailAttachmentScanner } from './attachments';
+import {
+  assertScannableAttachment,
+  checkAttachmentBytes,
+  readAttachmentBytes,
+} from './attachments';
+import { MAX_SCANNED_ATTACHMENT_BYTES } from './scanner';
+import { renderMailSignature, sanitizeMailSignature } from './signature';
+import {
+  graphRecipients,
+  replyAllRecipients,
+  recipientFingerprint,
+  draftRecipientFingerprint,
+} from './recipients';
 
 type GraphCall = (
   path: string,
@@ -19,8 +35,20 @@ interface Attachment {
   inline: boolean;
 }
 
-const replyStart = '<!-- kisuno-mail-reply:v1 -->';
-const replyEnd = '<!-- /kisuno-mail-reply:v1 -->';
+const replyStart = '<!-- kisuno-mail-reply:v2 -->';
+const replyEnd = '<!-- /kisuno-mail-reply:v2 -->';
+const oldReplyStart = '<!-- kisuno-mail-reply:v1 -->';
+const oldReplyEnd = '<!-- /kisuno-mail-reply:v1 -->';
+function replyStyle(
+  fontFamily: MailSignature['fontFamily'],
+  fontSize: MailSignature['fontSize'],
+): string {
+  return `margin:0 0 12pt 0;font-family:${fontFamily},Arial,sans-serif;font-size:${fontSize}pt;line-height:1.35;color:#000000`;
+}
+const defaultReplyStyle = replyStyle('Calibri', 11);
+const replyStyles = (['Aptos', 'Calibri', 'Arial'] as const).flatMap((font) =>
+  ([10, 11, 12, 14] as const).map((size) => replyStyle(font, size)),
+);
 const maxBody = 2_000_000;
 const directUploadLimit = 3_000_000;
 const uploadChunkSize = 3_000_000;
@@ -43,7 +71,7 @@ function normalizeReply(text: string): string {
     .join('\n\n');
 }
 
-function replyHtml(text: string): string {
+function replyHtml(text: string, style = defaultReplyStyle): string {
   if (!text.trim() || text.length > 12_000) throw new MailGraphError(400);
   const escape = (value: string) =>
     value
@@ -54,7 +82,7 @@ function replyHtml(text: string): string {
       .replace(/'/g, '&#39;');
   return normalizeReply(text)
     .split(/\n\s*\n/)
-    .map((paragraph) => `<p>${escape(paragraph).replace(/\n/g, '<br>')}</p>`)
+    .map((paragraph) => `<p style="${style}">${escape(paragraph).replace(/\n/g, '<br>')}</p>`)
     .join('');
 }
 
@@ -74,22 +102,91 @@ function draftEtag(value: Record<string, unknown>): string {
   return etag;
 }
 
-function prependReply(body: string, text: string): string {
-  const opening = /<body\b[^>]*>/i.exec(body);
-  const position = opening ? opening.index + opening[0].length : 0;
-  return body.slice(0, position) + replyStart + replyHtml(text) + replyEnd + body.slice(position);
+function messageCategories(value: unknown): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > 100 ||
+    value.some((category) => typeof category !== 'string' || category.length > 255)
+  )
+    throw new MailGraphError(502);
+  return value;
 }
 
-function editableBlock(body: string): { start: number; end: number; text: string } {
-  const start = body.indexOf(replyStart);
-  const end = body.indexOf(replyEnd, start + replyStart.length);
+function prependReply(body: string, text: string, signature: string, style: string): string {
+  const opening = /<body\b[^>]*>/i.exec(body);
+  const position = opening ? opening.index + opening[0].length : 0;
+  return (
+    body.slice(0, position) +
+    replyStart +
+    replyHtml(text, style) +
+    replyEnd +
+    signature +
+    body.slice(position)
+  );
+}
+
+function signatureHasInlineImage(body: string, contentId: string): boolean {
+  const startMarker = '<!-- kisuno-mail-signature:v1 -->';
+  const endMarker = '<!-- /kisuno-mail-signature:v1 -->';
+  const start = body.indexOf(startMarker);
+  const end = body.indexOf(endMarker, start + startMarker.length);
+  if (start < 0 || end < 0) return false;
+  let references = 0;
+  sanitizeHtml(body.slice(start + startMarker.length, end), {
+    allowedTags: [],
+    allowedAttributes: {},
+    transformTags: {
+      img: (tagName, attribs) => {
+        if (attribs.src === `cid:${contentId}`) references += 1;
+        return { tagName, attribs: {} };
+      },
+    },
+  });
+  return references === 1;
+}
+
+function editableBlock(body: string): { start: number; end: number; text: string; style: string } {
+  const starts = [body.indexOf(replyStart), body.indexOf(oldReplyStart)].filter(
+    (value) => value >= 0,
+  );
+  const start = starts.length ? Math.min(...starts) : -1;
+  const legacy = body.startsWith(oldReplyStart, start);
+  const startMarker = legacy ? oldReplyStart : replyStart;
+  const endMarker = legacy ? oldReplyEnd : replyEnd;
+  const end = body.indexOf(endMarker, start + startMarker.length);
   const prefix = body.slice(0, start);
   if (start < 0 || end < 0 || (prefix.trim() && !/<body\b[^>]*>\s*$/i.test(prefix)))
     throw new MailDraftError(
       'Dieser Entwurf hat keinen unveränderten Antwortbereich. Bitte bearbeite ihn in Outlook; der Mailverlauf bleibt erhalten.',
     );
-  const html = body.slice(start + replyStart.length, end);
-  if (/<(?!\/?p>|br\s*\/?>)/i.test(html))
+  const html = body.slice(start + startMarker.length, end);
+  const normalizedStyle = (style: string) =>
+    style.toLowerCase().replace(/\s/g, '').split(';').filter(Boolean).sort().join(';');
+  let modified = false;
+  let selectedStyle: string | undefined;
+  const plainHtml = sanitizeHtml(html, {
+    allowedTags: ['p', 'br'],
+    allowedAttributes: {},
+    transformTags: {
+      '*': (tagName, attribs) => {
+        const keys = Object.keys(attribs);
+        if (!['p', 'br'].includes(tagName)) modified = true;
+        else if (legacy || tagName === 'br') modified ||= keys.length > 0;
+        else {
+          const allowed =
+            keys.length === 1 && keys[0] === 'style'
+              ? replyStyles.find(
+                  (style) => normalizedStyle(style) === normalizedStyle(attribs.style),
+                )
+              : undefined;
+          if (!allowed || (selectedStyle && selectedStyle !== allowed)) modified = true;
+          else selectedStyle = allowed;
+        }
+        return { tagName, attribs: {} };
+      },
+    },
+  });
+  if (modified)
     throw new MailDraftError(
       'Der Antwortbereich wurde in Outlook formatiert. Bitte bearbeite ihn dort weiter.',
     );
@@ -100,13 +197,13 @@ function editableBlock(body: string): { start: number; end: number; text: string
     '&quot;': '"',
     '&#39;': "'",
   };
-  const text = html
+  const text = plainHtml
     .replace(/<\/p>\s*<p>/gi, '\n\n')
     .replace(/<\/?p>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/&(?:amp|lt|gt|quot|#39);/g, (entity) => entities[entity]);
   if (!text.trim() || text.length > 12_000) throw new MailGraphError(409);
-  return { start: start + replyStart.length, end, text };
+  return { start, end: end + endMarker.length, text, style: selectedStyle ?? defaultReplyStyle };
 }
 
 function attachment(value: Record<string, unknown>): Attachment {
@@ -132,6 +229,7 @@ function attachment(value: Record<string, unknown>): Attachment {
 
 function collectionLink(link: string, expectedPath: string): string {
   try {
+    // eslint-disable-next-line no-control-regex -- Reject control bytes before parsing untrusted Graph links.
     if (/[\\\u0000-\u0020\u007f]/.test(link)) throw Error();
     const raw = /^https:\/\/graph\.microsoft\.com(\/[^?#]*)(\?[^#]*)?$/.exec(link);
     const url = new URL(link);
@@ -156,13 +254,14 @@ function uploadUrl(value: Record<string, unknown>): string {
     const raw = requiredText(value.uploadUrl, 16_384);
     const url = new URL(raw);
     if (
+      // eslint-disable-next-line no-control-regex -- Upload targets must not contain control bytes.
       /[\\\u0000-\u0020\u007f]/.test(raw) ||
       !raw.startsWith('https://outlook.office.com/') ||
       url.origin !== 'https://outlook.office.com' ||
       url.username ||
       url.password ||
       url.hash ||
-      !/^\/api\/(?:v1\.0|v2\.0|gv1\.0)\/users\('[^'\/\\]+'\)\/messages\('[^'\/\\]+'\)\/attachmentsessions\('[^'\/\\]+'\)$/i.test(
+      !/^\/api\/(?:v1\.0|v2\.0|gv1\.0)\/users\('[^'/\\]+'\)\/messages\('[^'/\\]+'\)\/attachmentsessions\('[^'/\\]+'\)$/i.test(
         decodeURIComponent(url.pathname),
       ) ||
       !url.searchParams.get('authtoken') ||
@@ -227,6 +326,7 @@ export function createDraftOperations({
   beforeRequest,
   id,
   safeOutlookUrl,
+  scanAttachment,
 }: {
   call: GraphCall;
   raw: (path: string) => Promise<Response>;
@@ -234,6 +334,7 @@ export function createDraftOperations({
   beforeRequest: () => Promise<void>;
   id: (value: string) => string;
   safeOutlookUrl: (value: unknown) => string | undefined;
+  scanAttachment?: MailAttachmentScanner;
 }) {
   async function listAttachments(messageId: string): Promise<Attachment[]> {
     const path = `/v1.0/me/messages/${id(messageId)}/attachments`;
@@ -262,17 +363,36 @@ export function createDraftOperations({
   }
   async function readDraft(draftId: string) {
     const result = await call(
-      `/v1.0/me/messages/${id(draftId)}?$select=id,isDraft,body,conversationId,changeKey`,
+      `/v1.0/me/messages/${id(draftId)}?$select=id,isDraft,body,conversationId,changeKey,categories,toRecipients,ccRecipients,bccRecipients`,
       'GET',
       undefined,
       undefined,
       'html',
     );
-    return { result, body: draftBody(result, draftId), etag: draftEtag(result) };
+    return {
+      result,
+      body: draftBody(result, draftId),
+      etag: draftEtag(result),
+      categories: messageCategories(result.categories),
+    };
   }
-  async function assertDraft(draftId: string, expectedBody: string, conversationId: string) {
+  async function assertDraft(
+    draftId: string,
+    expectedBody: string,
+    conversationId: string,
+    expectedCategories?: readonly string[],
+    expectedRecipients?: string,
+  ) {
     const current = await readDraft(draftId);
-    if (current.body !== expectedBody || current.result.conversationId !== conversationId)
+    if (
+      current.body !== expectedBody ||
+      current.result.conversationId !== conversationId ||
+      (expectedRecipients !== undefined &&
+        draftRecipientFingerprint(current.result) !== expectedRecipients) ||
+      (expectedCategories &&
+        JSON.stringify([...current.categories].sort()) !==
+          JSON.stringify([...expectedCategories].sort()))
+    )
       throw new MailDraftError(
         'Der Entwurf wurde inzwischen verändert. Bitte ergänze die übrigen Anhänge selbst in Outlook.',
       );
@@ -284,18 +404,27 @@ export function createDraftOperations({
     file: Attachment,
     expectedBody: string,
     conversationId: string,
+    expectedRecipients: string,
+    checkedBytes?: Buffer,
   ) {
-    const response = await raw(
-      `/v1.0/me/messages/${id(sourceId)}/attachments/${id(file.id)}/$value`,
-    );
-    const iterator = chunks(response, file.size);
+    // Reuse the exact fully scanned bytes; never refetch after a successful scan.
+    async function* checkedChunks(bytes: Buffer) {
+      for (let offset = 0; offset < bytes.length; offset += uploadChunkSize)
+        yield bytes.subarray(offset, offset + uploadChunkSize);
+    }
+    const iterator = checkedBytes
+      ? checkedChunks(checkedBytes)
+      : chunks(
+          await raw(`/v1.0/me/messages/${id(sourceId)}/attachments/${id(file.id)}/$value`),
+          file.size,
+        );
     try {
       if (file.size < directUploadLimit) {
         const next = await iterator.next();
         if (next.done) throw new MailGraphError(502);
         const verified = await iterator.next();
         if (!verified.done) throw new MailGraphError(502);
-        await assertDraft(draftId, expectedBody, conversationId);
+        await assertDraft(draftId, expectedBody, conversationId, undefined, expectedRecipients);
         const result = await call(`/v1.0/me/messages/${id(draftId)}/attachments`, 'POST', {
           '@odata.type': '#microsoft.graph.fileAttachment',
           name: file.name,
@@ -307,7 +436,7 @@ export function createDraftOperations({
         if (typeof result.id !== 'string') throw new MailGraphError(502, true);
         return;
       }
-      await assertDraft(draftId, expectedBody, conversationId);
+      await assertDraft(draftId, expectedBody, conversationId, undefined, expectedRecipients);
       const session = await call(
         `/v1.0/me/messages/${id(draftId)}/attachments/createUploadSession`,
         'POST',
@@ -325,7 +454,7 @@ export function createDraftOperations({
       const destination = uploadUrl(session);
       let offset = 0;
       for await (const part of iterator) {
-        await assertDraft(draftId, expectedBody, conversationId);
+        await assertDraft(draftId, expectedBody, conversationId, undefined, expectedRecipients);
         await beforeRequest();
         let uploaded: Response;
         try {
@@ -371,28 +500,48 @@ export function createDraftOperations({
       return { text: editableBlock(current.body).text, etag: current.etag };
     },
     async editDraft(draftId: string, text: string, etag: string) {
-      const html = replyHtml(text);
+      replyHtml(text);
       if (!etagPattern.test(etag)) throw new MailGraphError(412);
       const current = await readDraft(draftId);
       if (current.etag !== etag) throw new MailGraphError(412);
       const block = editableBlock(current.body);
+      const html = replyHtml(text, block.style);
       await call(
         `/v1.0/me/messages/${id(draftId)}`,
         'PATCH',
         {
           body: {
             contentType: 'HTML',
-            content: current.body.slice(0, block.start) + html + current.body.slice(block.end),
+            content:
+              current.body.slice(0, block.start) +
+              replyStart +
+              html +
+              replyEnd +
+              current.body.slice(block.end),
           },
         },
         etag,
         'html',
       );
     },
-    async createReply(sourceId: string, text: string) {
+    async createReply(
+      sourceId: string,
+      text: string,
+      signature?: MailSignature,
+      replyAll?: MailReplyAllContext,
+    ) {
       replyHtml(text);
+      const preparedSignature = signature ? await sanitizeMailSignature(signature) : undefined;
+      const signatureCid =
+        preparedSignature?.enabled && preparedSignature.logo
+          ? `kisuno-signature-${randomUUID()}`
+          : undefined;
+      const signatureHtml = renderMailSignature(preparedSignature, signatureCid);
+      const style = preparedSignature
+        ? replyStyle(preparedSignature.fontFamily, preparedSignature.fontSize)
+        : defaultReplyStyle;
       const source = await call(
-        `/v1.0/me/messages/${id(sourceId)}?$select=id,isDraft,conversationId,categories`,
+        `/v1.0/me/messages/${id(sourceId)}?$select=id,isDraft,conversationId,changeKey,categories,from,replyTo,toRecipients,ccRecipients`,
       );
       if (
         source.id !== sourceId ||
@@ -400,16 +549,69 @@ export function createDraftOperations({
         typeof source.conversationId !== 'string'
       )
         throw new MailGraphError(409);
-      const categories = source.categories;
+      const categories = messageCategories(source.categories);
+      const sender = graphRecipients(source.from ? [source.from] : []);
+      if (sender.length !== 1) throw new MailGraphError(502);
+      const recipients = replyAllRecipients(
+        {
+          sender: sender[0]?.address ?? '',
+          senderName: sender[0]?.name ?? '',
+          replyTo: graphRecipients(source.replyTo),
+          toRecipients: graphRecipients(source.toRecipients),
+          ccRecipients: graphRecipients(source.ccRecipients),
+        },
+        replyAll?.selfAddresses ?? [],
+      );
+      const expectedRecipients = recipientFingerprint(recipients);
       if (
-        !Array.isArray(categories) ||
-        categories.length > 100 ||
-        categories.some((category) => typeof category !== 'string' || category.length > 255)
+        (!recipients.to.length && !recipients.cc.length) ||
+        (replyAll && recipientFingerprint(replyAll) !== expectedRecipients)
       )
-        throw new MailGraphError(502);
+        throw new MailDraftError(
+          'Die Antwortempfänger wurden verändert oder konnten nicht bestätigt werden. Bitte neu laden.',
+        );
       const files = await listAttachments(sourceId);
+      const checkedFiles = new Map<string, Buffer>();
+      if (scanAttachment) {
+        // Validate all originals before native reply creation, which can copy inline images itself.
+        // Bound aggregate memory as well as each scan; unsupported originals never silently disappear.
+        if (typeof source.changeKey !== 'string' || !source.changeKey)
+          throw new MailDraftError(
+            'Die Version der Originalmail konnte nicht bestätigt werden. Bitte neu laden.',
+          );
+        let total = 0;
+        for (const file of files) {
+          if (file.type !== 'microsoft.graph.fileAttachment')
+            throw new MailDraftError(
+              'Ein Cloud-Anhang oder Outlook-Element kann nicht geprüft werden. Bitte erstelle diese Antwort direkt in Outlook.',
+            );
+          assertScannableAttachment(file);
+          total += file.size;
+          if (total > MAX_SCANNED_ATTACHMENT_BYTES)
+            throw new MailDraftError(
+              'Die Originalanhänge überschreiten zusammen 20 MB. Bitte erstelle diese Antwort direkt in Outlook.',
+              413,
+            );
+          const response = await raw(
+            `/v1.0/me/messages/${id(sourceId)}/attachments/${id(file.id)}/$value`,
+          );
+          const bytes = await readAttachmentBytes(response, file.size, beforeRequest);
+          const checked = await checkAttachmentBytes(file, bytes, scanAttachment);
+          await beforeRequest();
+          checkedFiles.set(file.id, checked.bytes);
+        }
+        const current = await call(`/v1.0/me/messages/${id(sourceId)}?$select=id,changeKey`);
+        if (
+          current.id !== sourceId ||
+          current.changeKey !== source.changeKey ||
+          JSON.stringify(await listAttachments(sourceId)) !== JSON.stringify(files)
+        )
+          throw new MailDraftError(
+            'Die Originalmail wurde während der Anhangsprüfung verändert. Bitte neu laden.',
+          );
+      }
       const created = await call(
-        `/v1.0/me/messages/${id(sourceId)}/createReply`,
+        `/v1.0/me/messages/${id(sourceId)}/createReplyAll`,
         'POST',
         undefined,
         undefined,
@@ -425,7 +627,20 @@ export function createDraftOperations({
       const warnings: string[] = [];
       let stop = false;
       try {
+        if (scanAttachment) {
+          const currentSource = await call(
+            `/v1.0/me/messages/${id(sourceId)}?$select=id,changeKey`,
+          );
+          if (currentSource.id !== sourceId || currentSource.changeKey !== source.changeKey)
+            throw new MailDraftError(
+              'Die Originalmail wurde inzwischen verändert. Der Entwurf bleibt unvollständig; bitte prüfe ihn in Outlook.',
+            );
+        }
         const initial = await readDraft(created.id);
+        if (draftRecipientFingerprint(initial.result) !== expectedRecipients)
+          throw new MailDraftError(
+            'Die Empfänger von Antwort an alle konnten nicht vollständig bestätigt werden. Bitte prüfe An und Cc in Outlook; es wird kein zweiter Entwurf angelegt.',
+          );
         if (
           initial.result.conversationId !== source.conversationId ||
           initial.etag !== draftEtag(created)
@@ -433,7 +648,51 @@ export function createDraftOperations({
           throw new MailDraftError(
             'Der neue Entwurf wurde inzwischen verändert. Bitte bearbeite ihn in Outlook.',
           );
-        let expectedBody = prependReply(initial.body, text);
+        let current = initial;
+        let existing: Attachment[] | undefined;
+        if (preparedSignature?.logo && signatureCid) {
+          current = await assertDraft(
+            created.id,
+            initial.body,
+            source.conversationId,
+            initial.categories,
+            expectedRecipients,
+          );
+          if (current.etag !== initial.etag)
+            throw new MailDraftError(
+              'Der neue Entwurf wurde inzwischen verändert. Bitte bearbeite ihn in Outlook.',
+            );
+          // Persist and verify the image before publishing any HTML reference to it.
+          const logo = await call(`/v1.0/me/messages/${id(created.id)}/attachments`, 'POST', {
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: 'signatur-logo.png',
+            contentType: 'image/png',
+            isInline: true,
+            contentId: signatureCid,
+            contentBytes: preparedSignature.logo.contentBytes,
+          });
+          if (typeof logo.id !== 'string') throw new MailGraphError(502, true);
+          // Capture the post-upload version before verifying its attachment collection.
+          current = await assertDraft(
+            created.id,
+            initial.body,
+            source.conversationId,
+            initial.categories,
+            expectedRecipients,
+          );
+          existing = await listAttachments(created.id);
+          const linked = existing.filter((item) => item.contentId === signatureCid);
+          if (
+            linked.length !== 1 ||
+            linked[0].id !== logo.id ||
+            linked[0].type !== 'microsoft.graph.fileAttachment' ||
+            !linked[0].inline ||
+            linked[0].contentType.toLowerCase() !== 'image/png'
+          )
+            throw new MailGraphError(502, true);
+          // Keep this ETag: a later attachment deletion must reject the body update.
+        }
+        let expectedBody = prependReply(initial.body, text, signatureHtml, style);
         const written = await call(
           `/v1.0/me/messages/${id(created.id)}`,
           'PATCH',
@@ -441,7 +700,7 @@ export function createDraftOperations({
             body: { contentType: 'HTML', content: expectedBody },
             categories,
           },
-          initial.etag,
+          current.etag,
           'html',
         );
         if (written.id !== undefined) {
@@ -449,7 +708,9 @@ export function createDraftOperations({
           if (editableBlock(expectedBody).text !== normalizeReply(text))
             throw new MailGraphError(502);
         }
-        const existing = await listAttachments(created.id);
+        if (signatureCid && !signatureHasInlineImage(expectedBody, signatureCid))
+          throw new MailGraphError(502);
+        existing ??= await listAttachments(created.id);
         let total = 0;
         for (const file of files) {
           if (file.type !== 'microsoft.graph.fileAttachment') {
@@ -473,9 +734,23 @@ export function createDraftOperations({
             )
           )
             continue;
-          await copyFile(sourceId, created.id, file, expectedBody, source.conversationId);
+          await copyFile(
+            sourceId,
+            created.id,
+            file,
+            expectedBody,
+            source.conversationId,
+            expectedRecipients,
+            checkedFiles.get(file.id),
+          );
         }
-        await assertDraft(created.id, expectedBody, source.conversationId);
+        await assertDraft(
+          created.id,
+          expectedBody,
+          source.conversationId,
+          undefined,
+          expectedRecipients,
+        );
       } catch (error) {
         if (!(error instanceof MailGraphError)) throw error;
         if ([401, 403].includes(error.status)) throw new MailGraphError(error.status, true);

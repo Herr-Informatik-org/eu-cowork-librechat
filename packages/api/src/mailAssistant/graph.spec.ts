@@ -33,6 +33,7 @@ describe('fixed personal Graph adapter', () => {
     expect(Object.keys(graph).sort()).toEqual([
       'attachments',
       'categorize',
+      'correspondencePage',
       'createReply',
       'editDraft',
       'editableReply',
@@ -40,12 +41,114 @@ describe('fixed personal Graph adapter', () => {
       'folders',
       'historyPage',
       'identity',
+      'inboxPage',
       'message',
       'move',
       'page',
       'preview',
       'thread',
     ]);
+  });
+  test.each([undefined, null, []])(
+    'preserves absent original recipients separately from known empty: %j',
+    async (recipients) => {
+      const { graph, request } = setup();
+      request.mockResolvedValue(
+        response({ ...row, toRecipients: recipients, ccRecipients: recipients }),
+      );
+      const mail = await graph.message(row.id);
+      expect(mail.toRecipients).toEqual(recipients == null ? undefined : []);
+      expect(mail.ccRecipients).toEqual(recipients == null ? undefined : []);
+    },
+  );
+  test.each([
+    ['102', 'replied'],
+    ['103', 'replied'],
+    ['104', 'forwarded'],
+  ])('reads the last Outlook action %s in the existing message request', async (verb, expected) => {
+    const { graph, request } = setup();
+    request.mockResolvedValueOnce(
+      response({
+        ...row,
+        singleValueExtendedProperties: [
+          { id: 'Integer 0x1081', value: verb },
+          { id: 'SystemTime 0x1082', value: '2026-10-28T09:23:45.1234567Z' },
+        ],
+      }),
+    );
+    const actual = await graph.message(row.id);
+    expect(actual.responseAction).toBe(expected);
+    expect(actual.responseActionAt).toBe('2026-10-28T09:23:45.123Z');
+    expect(actual).not.toHaveProperty('singleValueExtendedProperties');
+    expect(request).toHaveBeenCalledTimes(1);
+    const [url, init] = request.mock.calls[0];
+    expect(init.method).toBe('GET');
+    expect(new URL(url).searchParams.get('$expand')).toBe(
+      "singleValueExtendedProperties($filter=id eq 'Integer 0x1081' or id eq 'SystemTime 0x1082')",
+    );
+  });
+  test.each([
+    undefined,
+    [],
+    [{ id: 'Integer 0x1081', value: '0' }],
+    [{ id: 'Integer 0x1081', value: '105' }],
+    [{ id: 'Integer 0x1081', value: '106' }],
+    [{ id: 'Integer 0x1081', value: '0x105' }],
+    [{ id: 'Integer 0x1081', value: 102 }],
+    [{ id: 'Integer 0x1081', value: '102junk' }],
+    [{ id: 'String 0x1081', value: '102' }],
+    [
+      { id: 'Integer 0x1081', value: '102' },
+      { id: 'INTEGER 0X1081', value: '104' },
+    ],
+    [{ id: 'SystemTime 0x1082', value: '2026-10-28T09:23:45Z' }],
+    [null, 'invalid', { id: 'Integer 0x1081', value: '500' }],
+  ])('keeps absent, unsupported or ambiguous last verbs unknown: %j', async (properties) => {
+    const { graph, request } = setup();
+    request.mockResolvedValueOnce(
+      response({
+        ...row,
+        subject: 'AW: WG: RE: FWD: Important mail',
+        singleValueExtendedProperties: properties,
+      }),
+    );
+    const actual = await graph.message(row.id);
+    expect(actual.responseAction).toBeUndefined();
+    expect(actual.responseActionAt).toBeUndefined();
+  });
+  test.each(['invalid', '2026-02-31T09:23:45Z', '2026-10-28', '2026-10-28T25:23:45Z'])(
+    'does not expose invalid action time %s',
+    async (time) => {
+      const { graph, request } = setup();
+      request.mockResolvedValueOnce(
+        response({
+          ...row,
+          singleValueExtendedProperties: [
+            { id: 'Integer 0x1081', value: '104' },
+            { id: 'SystemTime 0x1082', value: time },
+          ],
+        }),
+      );
+      const actual = await graph.message(row.id);
+      expect(actual.responseAction).toBe('forwarded');
+      expect(actual.responseActionAt).toBeUndefined();
+    },
+  );
+  test('never marks a draft as replied and drops ambiguous action times', async () => {
+    const { graph, request } = setup();
+    const properties = [
+      { id: 'Integer 0x1081', value: '102' },
+      { id: 'SystemTime 0x1082', value: '2026-10-28T09:23:45Z' },
+      { id: 'SystemTime 0x1082', value: '2026-10-28T10:23:45Z' },
+    ];
+    request.mockResolvedValueOnce(
+      response({ ...row, isDraft: true, singleValueExtendedProperties: properties }),
+    );
+    expect((await graph.message(row.id)).responseAction).toBeUndefined();
+    request.mockResolvedValueOnce(response({ ...row, singleValueExtendedProperties: properties }));
+    const actual = await graph.message(row.id);
+    expect(actual.responseAction).toBe('replied');
+    expect(actual.responseActionAt).toBeUndefined();
   });
   test('attachment listing returns bounded metadata and never reads bytes or follows links', async () => {
     const { graph, request } = setup();
@@ -264,5 +367,245 @@ describe('fixed personal Graph adapter', () => {
     expect(safeOutlookUrl('https://outlook.office.com/mail/id')).toBe(
       'https://outlook.office.com/mail/id',
     );
+  });
+});
+
+describe('metadata-only inbox and correspondence pages', () => {
+  const row = (folder = 'immutable-inbox') => ({
+    id: 'mail-1',
+    conversationId: 'thread',
+    changeKey: 'v1',
+    subject: 'Test subject',
+    from: { emailAddress: { address: 'peer@example.invalid', name: 'Peer Name' } },
+    replyTo: [{ emailAddress: { address: 'reply@example.invalid', name: 'Reply Name' } }],
+    toRecipients: [
+      { emailAddress: { address: 'original-to@example.invalid', name: 'Original To' } },
+    ],
+    ccRecipients: [
+      { emailAddress: { address: 'original-cc@example.invalid', name: 'Original Cc' } },
+    ],
+    receivedDateTime: '2026-10-27T10:00:00Z',
+    parentFolderId: folder,
+    categories: [],
+    isDraft: false,
+    isRead: true,
+    hasAttachments: true,
+    body: { content: 'Unexpected private body must be discarded' },
+  });
+  function fixture(pages: unknown[]) {
+    const request = jest.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/inbox?$select=id')) return Response.json({ id: 'immutable-inbox' });
+      if (url.includes('/sentitems?$select=id')) return Response.json({ id: 'immutable-sent' });
+      return Response.json(pages.shift());
+    });
+    return {
+      request,
+      graph: createMailGraph({
+        fetch: request,
+        token: async () => 'test',
+        beforeRequest: async () => undefined,
+      }),
+    };
+  }
+  test('lists inbox metadata, names and flags, and follows only its exact immutable folder', async () => {
+    const next =
+      "https://graph.microsoft.com/v1.0/me/mailFolders('immutable-inbox')/messages?$skiptoken=opaque%2Bpage";
+    const { graph, request } = fixture([
+      { value: [row()], '@odata.nextLink': next },
+      { value: [{ ...row(), id: 'mail-2' }] },
+    ]);
+    const first = await graph.inboxPage!();
+    expect(first.messages[0]).toMatchObject({
+      body: '',
+      senderName: 'Peer Name',
+      isRead: true,
+      hasAttachments: true,
+      replyTo: [{ name: 'Reply Name', address: 'reply@example.invalid' }],
+      toRecipients: [{ name: 'Original To', address: 'original-to@example.invalid' }],
+      ccRecipients: [{ name: 'Original Cc', address: 'original-cc@example.invalid' }],
+    });
+    expect(first.nextUrl).toBe(next);
+    expect((await graph.inboxPage!(next)).messages[0].id).toBe('mail-2');
+    expect(request).toHaveBeenCalledTimes(3);
+    for (const [url, init] of request.mock.calls) {
+      expect(init.method).toBe('GET');
+      const select = new URL(url).searchParams.get('$select')!;
+      expect(select.split(',')).not.toContain('body');
+      expect(select.split(',')).not.toContain('uniqueBody');
+    }
+    expect(new URL(request.mock.calls[2][0]).searchParams.get('$skiptoken')).toBe('opaque+page');
+  });
+  test('returns reply and forward markers for a whole metadata page without per-message reads', async () => {
+    const expand =
+      "singleValueExtendedProperties($filter=id eq 'Integer 0x1081' or id eq 'SystemTime 0x1082')";
+    const next = `https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?${new URLSearchParams({ $skip: '50', $expand: expand })}`;
+    const { graph, request } = fixture([
+      {
+        value: ['102', '103', '104'].map((verb) => ({
+          ...row(),
+          id: `mail-${verb}`,
+          singleValueExtendedProperties: [{ id: 'Integer 0x1081', value: verb }],
+        })),
+        '@odata.nextLink': next,
+      },
+      { value: [row()] },
+    ]);
+    expect((await graph.inboxPage!()).messages.map((item) => item.responseAction)).toEqual([
+      'replied',
+      'replied',
+      'forwarded',
+    ]);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect((await graph.inboxPage!(next)).messages[0].responseAction).toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(3);
+    for (const [url, init] of request.mock.calls.slice(1)) {
+      const query = new URL(url).searchParams;
+      expect(query.get('$expand')).toBe(expand);
+      expect(query.get('$select')?.split(',')).toContain('singleValueExtendedProperties');
+      expect(query.get('$select')?.split(',')).not.toContain('body');
+      expect(query.get('$select')?.split(',')).not.toContain('uniqueBody');
+      expect(init.method).toBe('GET');
+    }
+  });
+  test.each([
+    'https://evil.invalid/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50',
+    'https://graph.microsoft.com/v1.0/users/other/mailFolders/immutable-inbox/messages?$skip=50',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-sent/messages?$skip=50',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$select=body',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$expand=attachments',
+    "https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$expand=singleValueExtendedProperties($filter=id%20eq%20'Integer%200x1081'%20or%20id%20eq%20'String%200x1000')",
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$expand=singleValueExtendedProperties',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$filter=other',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50&$skip=100',
+    'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50#other',
+  ])('rejects unsafe metadata continuation before following it: %s', async (next) => {
+    const { graph, request } = fixture([]);
+    await expect(graph.inboxPage!(next)).rejects.toBeInstanceOf(MailGraphError);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+  test('rejects out-of-folder response and unsafe server-provided next link', async () => {
+    const first = fixture([{ value: [row('different-folder')] }]);
+    await expect(first.graph.inboxPage!()).rejects.toBeInstanceOf(MailGraphError);
+    const second = fixture([{ value: [row()], '@odata.nextLink': 'https://attacker.invalid' }]);
+    await expect(second.graph.inboxPage!()).rejects.toBeInstanceOf(MailGraphError);
+    expect(second.request).toHaveBeenCalledTimes(2);
+  });
+  test('matches exact sender or recipient locally and retains continuation on an empty search page', async () => {
+    const next =
+      'https://graph.microsoft.com/v1.0/me/mailFolders/immutable-inbox/messages?$skip=50';
+    const { graph, request } = fixture([
+      {
+        value: [
+          row(),
+          { ...row(), from: { emailAddress: { address: 'notpeer@example.invalid' } } },
+        ],
+        '@odata.nextLink': next,
+      },
+      {
+        value: [
+          {
+            ...row('immutable-sent'),
+            from: { emailAddress: { address: 'self@example.invalid' } },
+            toRecipients: [{ emailAddress: { address: 'PEER@example.invalid' } }],
+          },
+          {
+            ...row('immutable-sent'),
+            isDraft: true,
+            toRecipients: [{ emailAddress: { address: 'peer@example.invalid' } }],
+          },
+        ],
+      },
+    ]);
+    expect(await graph.correspondencePage!('peer@example.invalid', 'inbox', 'absent')).toEqual({
+      messages: [],
+      nextUrl: next,
+      hasMore: true,
+    });
+    const sent = await graph.correspondencePage!('peer@example.invalid', 'sentitems', 'subject');
+    expect(sent.messages).toHaveLength(1);
+    expect(sent.messages[0]).toMatchObject({ sentByUser: true, body: '' });
+    for (const [url] of request.mock.calls)
+      expect(url).not.toMatch(/\$filter|\$search|peer|absent/);
+  });
+});
+
+describe('explicit scanned attachment download', () => {
+  const bytes = Buffer.from('Nur Text\n');
+  const metadata = {
+    id: 'file/+=',
+    '@odata.type': '#microsoft.graph.fileAttachment',
+    name: 'Notiz.txt',
+    contentType: 'text/plain',
+    size: bytes.length,
+    isInline: false,
+  };
+  const scan = {
+    verdict: 'no_known_threats' as const,
+    engine: 'ClamAV' as const,
+    scannedAt: '2026-10-29T10:00:00Z',
+    signaturesAt: '2026-10-29T09:00:00Z',
+  };
+  function fixture() {
+    const scanner = jest.fn(async (_bytes: Buffer) => scan);
+    const guard = jest.fn(async () => {});
+    const request = jest.fn(async (input: Parameters<typeof fetch>[0]) =>
+      String(input).endsWith('/$value')
+        ? new Response(new Uint8Array(bytes))
+        : new Response(JSON.stringify(metadata)),
+    );
+    const graph = createMailGraph({
+      token: async () => 'fixture-token',
+      fetch: request,
+      beforeRequest: guard,
+      scanAttachment: scanner,
+    });
+    return { scanner, guard, request, graph };
+  }
+  test('uses encoded original identifiers, scans once and does not refetch scanned bytes', async () => {
+    const f = fixture();
+    const result = await f.graph.downloadAttachment!('message/+=', metadata.id);
+    expect(result).toEqual({ bytes, name: metadata.name, contentType: metadata.contentType, scan });
+    expect(f.scanner).toHaveBeenCalledTimes(1);
+    expect(f.scanner).toHaveBeenCalledWith(bytes);
+    expect(f.request.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://graph.microsoft.com/v1.0/me/messages/message%2F%2B%3D/attachments/file%2F%2B%3D?$select=id,name,contentType,size,isInline',
+      'https://graph.microsoft.com/v1.0/me/messages/message%2F%2B%3D/attachments/file%2F%2B%3D/$value',
+      'https://graph.microsoft.com/v1.0/me/messages/message%2F%2B%3D/attachments/file%2F%2B%3D?$select=id,name,contentType,size,isInline',
+    ]);
+  });
+  test('blocks changed metadata after scan and withheld scan failures', async () => {
+    const f = fixture();
+    f.scanner.mockImplementation(async () => {
+      f.request.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...metadata, name: 'changed.txt' })),
+      );
+      return scan;
+    });
+    await expect(f.graph.downloadAttachment!('message', metadata.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    const blocked = fixture();
+    blocked.scanner.mockRejectedValue(Error('scanner unavailable'));
+    await expect(blocked.graph.downloadAttachment!('message', metadata.id)).rejects.toThrow(
+      'scanner unavailable',
+    );
+    expect(blocked.request).toHaveBeenCalledTimes(2);
+  });
+  test.each([
+    { ...metadata, name: 'script.exe' },
+    { ...metadata, '@odata.type': '#microsoft.graph.itemAttachment' },
+    { ...metadata, id: 'another-file' },
+    { ...metadata, size: 21 * 1024 * 1024 },
+  ])('blocks unsupported metadata before reading bytes: %j', async (value) => {
+    const f = fixture();
+    f.request.mockResolvedValue(new Response(JSON.stringify(value)));
+    await expect(f.graph.downloadAttachment!('message', metadata.id)).rejects.toThrow();
+    expect(f.request).toHaveBeenCalledTimes(1);
+    expect(f.scanner).not.toHaveBeenCalled();
+  });
+  test('exposes no download capability without scanner configuration', () => {
+    expect(
+      createMailGraph({ token: async () => '', beforeRequest: async () => {} }).downloadAttachment,
+    ).toBeUndefined();
   });
 });

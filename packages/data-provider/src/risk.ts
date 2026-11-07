@@ -38,7 +38,8 @@ export function isProgrammaticBridgeTool(name: string): boolean {
 /**
  * Native and host tools with a fixed class. Personal assistant memory (Brain,
  * memory tools) counts as `read`: it is the person's own knowledge store, not
- * business data, and learning runs without confirmation by design. The batch
+ * business data, and learning runs without confirmation by design. `local_folder`
+ * reads a browser-granted folder read-only behind its own confirmation. The batch
  * bridges are critical: no single inner call can be confirmed on a card.
  */
 const NATIVE_TOOL_RISK: Readonly<Record<string, ToolRisk>> = {
@@ -62,6 +63,7 @@ const NATIVE_TOOL_RISK: Readonly<Record<string, ToolRisk>> = {
   brain_forget: 'read',
   set_memory: 'read',
   delete_memory: 'read',
+  local_folder: 'read',
   execute_code: 'write',
   bash_tool: 'write',
   create_file: 'write',

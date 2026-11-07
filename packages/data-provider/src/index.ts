@@ -34,6 +34,8 @@ export * from './types/web';
 export * from './types/graph';
 export * from './types/brain';
 export * from './types/mail';
+export * from './types/localFolders';
+export * from './mailLinks';
 /* access permissions */
 export * from './accessPermissions';
 /* query/mutation keys */
@@ -63,3 +65,4 @@ export * from './parameterSettings';
 export * from './codeEnvRef';
 /* agent work plan */
 export * from './plan';
+export * from './mailResearch';

@@ -1,0 +1,33 @@
+# Rebuild only backend packages; preserve the accepted CWV01 frontend and runtime.
+FROM node:24.22.1-alpine3.24@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS support-build
+WORKDIR /src
+COPY package.json package-lock.json ./
+COPY api/package.json ./api/package.json
+COPY client/package.json ./client/package.json
+COPY packages/api/package.json ./packages/api/package.json
+COPY packages/client/package.json ./packages/client/package.json
+COPY packages/data-provider/package.json ./packages/data-provider/package.json
+COPY packages/data-schemas/package.json ./packages/data-schemas/package.json
+RUN npm ci --no-audit --fund=false
+COPY packages/data-provider ./packages/data-provider
+COPY packages/data-schemas ./packages/data-schemas
+COPY packages/api ./packages/api
+RUN npm run build:data-provider && npm run build:data-schemas && npm run build:api
+
+FROM ghcr.io/herr-informatik-org/eu-cowork-librechat@sha256:0f32d5663ef070c5524a7823efd7f43e37170f26872a7a761a1e0d1a312a8a08 AS support-runtime
+ARG BUILD_COMMIT
+ARG BUILD_DATE
+ENV BUILD_COMMIT=${BUILD_COMMIT}
+ENV BUILD_DATE=${BUILD_DATE}
+ENV BUILD_BRANCH=codex/kisuno-support-admin
+LABEL org.opencontainers.image.source="https://github.com/Herr-Informatik-org/eu-cowork-librechat"
+LABEL org.opencontainers.image.revision=${BUILD_COMMIT}
+LABEL org.opencontainers.image.base.digest="sha256:0f32d5663ef070c5524a7823efd7f43e37170f26872a7a761a1e0d1a312a8a08"
+LABEL ch.herr-informatik.kisuno.runtime-profile="kisuno-support-v1"
+COPY --chown=node:node --from=support-build /src/packages/api/dist /app/packages/api/dist
+COPY --chown=node:node api/server/controllers/agents/support.js /app/api/server/controllers/agents/support.js
+COPY --chown=node:node api/server/routes/agents/openai.js api/server/routes/agents/middleware.js /app/api/server/routes/agents/
+COPY --chown=node:node api/server/services/AuthService.js /app/api/server/services/AuthService.js
+COPY --chown=node:node api/strategies/localStrategy.js /app/api/strategies/localStrategy.js
+COPY --chown=node:node config/provision-support.js /app/config/provision-support.js
+RUN test -n "$BUILD_COMMIT" && node -e "const api=require('@librechat/api'); for (const key of ['executeSupportAnalysis','getSupportRuntimeStatus','restrictSupportServiceRoute','isSupportServiceIdentity','provisionSupportRuntime','disableSupportRuntime']) if (typeof api[key] !== 'function') process.exit(1);"

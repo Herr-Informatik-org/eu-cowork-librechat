@@ -256,6 +256,7 @@ describe('ResumeAgentController (POST /agents/chat/resume)', () => {
         conversationCreatedAt: req.conversationCreatedAt,
         timezone: req.body.timezone,
         checkpointNamespace,
+        localFolderCalls: req._localFolderCalls,
       };
       return { client: makeClient(), userMCPAuthMap: { server1: { token: 't' } } };
     });
@@ -284,6 +285,117 @@ describe('ResumeAgentController (POST /agents/chat/resume)', () => {
     endpoint: 'agents',
     decisions: [{ tool_call_id: 'tc1', decision: 'approve' }],
     ...extra,
+  });
+
+  describe('browser-local folder responses', () => {
+    const folderId = '80445861-54cb-4d9b-9c0a-803d7f9b88ed';
+    const grants = [{ id: folderId, label: 'Project' }];
+    const browserResult = JSON.stringify({
+      status: 'ok',
+      coverage: { complete: true, filesVisited: 1, filesRead: 0, bytesRead: 0, skipped: 0 },
+      entries: [{ path: 'report.txt', kind: 'file', size: 10 }],
+    });
+    const responseBody = (extra = {}) =>
+      approveBody({
+        decisions: [{ tool_call_id: 'tc1', decision: 'respond', responseText: browserResult }],
+        ...extra,
+      });
+    const folderJob = () =>
+      makeToolApprovalJob({
+        metadata: {
+          pendingAction: {
+            resumeContext: { ephemeralAgent: { localFolders: grants } },
+            payload: {
+              type: 'tool_approval',
+              action_requests: [
+                {
+                  name: 'local_folder',
+                  tool_call_id: 'tc1',
+                  arguments: { folderId, operation: 'list', maxChars: 3000 },
+                },
+              ],
+              review_configs: [{ tool_call_id: 'tc1', allowed_decisions: ['respond', 'reject'] }],
+            },
+          },
+        },
+      });
+    const oldFlag = process.env.EUCOWORK_LOCAL_FOLDERS;
+    beforeEach(() => {
+      process.env.EUCOWORK_LOCAL_FOLDERS = 'true';
+    });
+    afterAll(() => {
+      if (oldFlag === undefined) delete process.env.EUCOWORK_LOCAL_FOLDERS;
+      else process.env.EUCOWORK_LOCAL_FOLDERS = oldFlag;
+    });
+
+    it('resumes an owned current browser response as a tool result', async () => {
+      mockGenerationJobManager.getJob.mockResolvedValue(folderJob());
+      const client = makeClient();
+      mockInitializeClient.mockResolvedValue({ client });
+      expect((await post(responseBody())).status).toBe(200);
+      await settled;
+      expect(client.resumeCompletion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resumeValue: { tc1: { type: 'respond', responseText: browserResult } },
+        }),
+      );
+    });
+
+    it.each(['x'.repeat(3001), 'not-json', JSON.stringify({ status: 'ok' })])(
+      'rejects invalid/oversized JSON before consuming the pause',
+      async (responseText) => {
+        mockGenerationJobManager.getJob.mockResolvedValue(folderJob());
+        expect(
+          (
+            await post(
+              responseBody({
+                decisions: [{ tool_call_id: 'tc1', decision: 'respond', responseText }],
+              }),
+            )
+          ).status,
+        ).toBe(400);
+        expect(mockGenerationJobManager.approvals.resolve).not.toHaveBeenCalled();
+        expect(mockInitializeClient).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects another owner before reading or resolving the folder action', async () => {
+      const job = folderJob();
+      job.metadata.userId = 'another-owner';
+      mockGenerationJobManager.getJob.mockResolvedValue(job);
+      expect((await post(responseBody())).status).toBe(403);
+      expect(mockGenerationJobManager.approvals.resolve).not.toHaveBeenCalled();
+    });
+
+    it('restores the authoritative call budget and ignores a client-supplied replacement', async () => {
+      const job = folderJob();
+      const history = [{ id: 'previous', fingerprint: 'a'.repeat(64) }];
+      job.metadata.pendingAction.resumeContext.localFolderCalls = history;
+      mockGenerationJobManager.getJob.mockResolvedValue(job);
+      expect(
+        (await post(responseBody({ localFolderCalls: [], _localFolderCalls: [] }))).status,
+      ).toBe(200);
+      await settled;
+      expect(capturedInit.localFolderCalls).toEqual(history);
+    });
+
+    it('cannot replay a prior action or resume an aborted turn', async () => {
+      const job = folderJob();
+      mockGenerationJobManager.getJob.mockResolvedValue(job);
+      expect((await post(responseBody({ actionId: 'old-action' }))).status).toBe(409);
+      job.abortController.abort();
+      expect((await post(responseBody())).status).toBe(409);
+      expect(mockGenerationJobManager.approvals.resolve).not.toHaveBeenCalled();
+    });
+
+    it('never executes an approve/edit or an undeclared folder response', async () => {
+      const job = folderJob();
+      mockGenerationJobManager.getJob.mockResolvedValue(job);
+      expect((await post(approveBody())).status).toBe(400);
+      job.metadata.pendingAction.resumeContext.ephemeralAgent.localFolders = [];
+      expect((await post(responseBody())).status).toBe(400);
+      expect(mockGenerationJobManager.approvals.resolve).not.toHaveBeenCalled();
+    });
   });
 
   describe('temporal context restore', () => {

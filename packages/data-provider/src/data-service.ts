@@ -1,8 +1,20 @@
+import type {
+  MailResearchSettings,
+  MailResearchSkill,
+  MailResearchSkillInput,
+  MailResearchCustomer,
+  MailResearchJob,
+  MailResearchRunRequest,
+} from './mailResearch';
 import type { AxiosResponse } from 'axios';
 import type {
+  MailWorkspaceChatRequest,
+  MailWorkspaceChatResponse,
   MailWorkspaceStatus,
   MailWorkspaceSettings,
   MailWorkspaceContent,
+  MailWorkspacePreview,
+  MailWorkspaceImagesRequest,
   MailWorkspaceFolder,
   MailWorkspaceParams,
   MailWorkspacePage,
@@ -19,17 +31,18 @@ import type {
   MailFollowupOutcome,
   MailDraftRequest,
   MailDraftOutcome,
+  MailDraftEditOutcome,
   MailAttachments,
 } from './types/mail';
 import type { TFileConfig } from './file-config';
 import type {
   BrainGraph,
+  BrainQuality,
   BrainGraphParams,
   BrainNode,
   BrainNodeInput,
   BrainNodeUpdate,
   BrainRecall,
-  BrainRecallUsage,
   BrainEdge,
   BrainExport,
   BrainHistoryStatus,
@@ -54,7 +67,7 @@ import * as r from './roles';
 
 export const getMailWorkspaceAvailability = (
   signal?: AbortSignal,
-): Promise<{ available: boolean }> =>
+): Promise<{ available: boolean; odooAvailable?: boolean }> =>
   request.get(endpoints.mailWorkspace('/availability'), { signal });
 export const getMailWorkspaceStatus = (signal?: AbortSignal): Promise<MailWorkspaceStatus> =>
   request.get(endpoints.mailWorkspace('/status'), { signal });
@@ -62,11 +75,43 @@ export const getMailWorkspaceResults = (
   params: MailWorkspaceParams,
   signal?: AbortSignal,
 ): Promise<MailWorkspacePage> => request.get(endpoints.mailWorkspaceResults(params), { signal });
+export const getMailWorkspaceInbox = (
+  params: { cursor?: string } = {},
+  signal?: AbortSignal,
+): Promise<MailWorkspacePage> =>
+  request.get(
+    endpoints.mailWorkspace(
+      `/inbox${params.cursor ? `?${new URLSearchParams({ cursor: params.cursor })}` : ''}`,
+    ),
+    { signal },
+  );
+export const getMailWorkspaceCorrespondence = (
+  id: string,
+  params: { search?: string; cursor?: string } = {},
+  signal?: AbortSignal,
+): Promise<MailWorkspacePage> => {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value) query.set(key, value);
+  return request.get(
+    `${endpoints.mailWorkspaceResult(id, 'correspondence')}${query.size ? `?${query}` : ''}`,
+    { signal },
+  );
+};
+export const chatMailWorkspace = (
+  id: string,
+  input: MailWorkspaceChatRequest,
+): Promise<MailWorkspaceChatResponse> =>
+  request.post(endpoints.mailWorkspaceResult(id, 'chat'), input);
 export const getMailWorkspaceContent = (
   id: string,
   signal?: AbortSignal,
 ): Promise<MailWorkspaceContent> =>
   request.get(endpoints.mailWorkspaceResult(id, 'content'), { signal });
+export const loadMailWorkspaceImages = (
+  id: string,
+  input: MailWorkspaceImagesRequest,
+): Promise<MailWorkspacePreview> =>
+  request.post(endpoints.mailWorkspaceResult(id, 'images'), input);
 export const getMailWorkspaceFolders = (
   parentId?: string,
   signal?: AbortSignal,
@@ -107,7 +152,11 @@ export const enqueueMailWorkspaceMove = (
   input: MailWorkspaceMoveRequest,
 ): Promise<{ job: MailWorkspaceMoveJob }> =>
   request.post(endpoints.mailWorkspace('/move-jobs'), input);
-export const saveMailWorkspaceDraft = (id: string, body: string, revision: string): Promise<void> =>
+export const saveMailWorkspaceDraft = (
+  id: string,
+  body: string,
+  revision: string,
+): Promise<MailDraftEditOutcome> =>
   request.put(endpoints.mailWorkspaceResult(id, 'draft'), { body, revision });
 export const rememberMailWorkspaceRule = (id: string, rule: MailWorkspaceRule): Promise<void> =>
   request.post(endpoints.mailWorkspaceResult(id, 'rule'), rule);
@@ -147,6 +196,34 @@ export const getMailWorkspaceAttachments = (
 ): Promise<MailAttachments> =>
   request.get(endpoints.mailWorkspaceResult(id, 'attachments'), { signal });
 
+export const downloadMailWorkspaceAttachment = (
+  id: string,
+  attachmentId: string,
+  revision: string,
+  signal?: AbortSignal,
+): Promise<Response> =>
+  request.authenticatedFetch(
+    endpoints.mailWorkspace(
+      `/results/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}/download`,
+    ),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision }),
+      signal,
+      cache: 'no-store',
+      redirect: 'error',
+      credentials: 'same-origin',
+    },
+  );
+
+export const getBrainQuality = (signal?: AbortSignal): Promise<BrainQuality> =>
+  request.get(endpoints.brainQuality(), { signal });
+export const applyBrainQuality = (
+  revision: number,
+  findingIds: string[],
+): Promise<BrainRebuildStatus> =>
+  request.post(endpoints.brainQualityApply(), { revision, findingIds });
 export const getBrainHistory = (signal?: AbortSignal): Promise<BrainHistoryStatus> =>
   request.get(endpoints.brainHistory(), { signal });
 export const getBrainLearning = (
@@ -197,13 +274,9 @@ export const deleteBrainNode = (id: string): Promise<{ deleted: true }> =>
 export const getBrainRecalls = (
   conversationId: string,
   signal?: AbortSignal,
+  messageId?: string,
 ): Promise<{ recalls: BrainRecall[] }> =>
-  request.get(endpoints.brainRecalls(conversationId), { signal });
-
-export const getBrainRecallUsage = (
-  conversationId: string,
-  signal?: AbortSignal,
-): Promise<BrainRecallUsage> => request.get(endpoints.brainRecallUsage(conversationId), { signal });
+  request.get(endpoints.brainRecalls(conversationId, messageId), { signal });
 
 export const exportBrain = (): Promise<BrainExport> => request.get(endpoints.brainExport());
 export const getBrainStatus = (signal?: AbortSignal): Promise<{ enabled: boolean }> =>
@@ -1617,3 +1690,30 @@ export interface ActiveJobsResponse {
 export const getActiveJobs = (): Promise<ActiveJobsResponse> => {
   return request.get(endpoints.activeJobs());
 };
+
+export const getMailResearchSettings = (signal?: AbortSignal): Promise<MailResearchSettings> =>
+  request.get(endpoints.mailWorkspace('/research/settings'), { signal });
+export const saveMailResearchSkill = (
+  id: string,
+  input: MailResearchSkillInput,
+): Promise<MailResearchSkill> =>
+  request.put(endpoints.mailWorkspace(`/research/skills/${encodeURIComponent(id)}`), input);
+export const getMailResearchCustomers = (
+  profileId: string,
+  search: string,
+  signal?: AbortSignal,
+): Promise<MailResearchCustomer[]> =>
+  request.get(
+    endpoints.mailWorkspace(`/research/customers?${new URLSearchParams({ profileId, search })}`),
+    { signal },
+  );
+export const runMailResearch = (
+  id: string,
+  input: MailResearchRunRequest,
+): Promise<MailResearchJob> => request.post(endpoints.mailWorkspaceResult(id, 'research'), input);
+export const getMailResearchJobs = (signal?: AbortSignal): Promise<MailResearchJob[]> =>
+  request.get(endpoints.mailWorkspace('/research/jobs'), { signal });
+export const getMailResearchJob = (id: string, signal?: AbortSignal): Promise<MailResearchJob> =>
+  request.get(endpoints.mailWorkspace(`/research/jobs/${encodeURIComponent(id)}`), { signal });
+export const cancelMailResearchJob = (id: string): Promise<MailResearchJob> =>
+  request.post(endpoints.mailWorkspace(`/research/jobs/${encodeURIComponent(id)}/cancel`), {});

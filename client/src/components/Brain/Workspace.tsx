@@ -26,6 +26,7 @@ import Details, { CreateNode } from './Details';
 import Graph from './Graph';
 import History from './History';
 import Learning from './Learning';
+import Quality from './Quality';
 
 function RecallTrace({ nodes, onSelect }: { nodes: BrainNode[]; onSelect: (id: string) => void }) {
   const localize = useLocalize();
@@ -239,6 +240,11 @@ export default function Workspace({
         )}
       </div>
       <History enabled={canCreate && canRead} progress={progress} />
+      <Quality
+        enabled={canCreate && canRead && canEdit}
+        busy={isDraft || progress.history.history.data?.status === 'running'}
+        onSelect={select}
+      />
       {isDraft && (
         <div className="brain-draft-banner" role="status">
           <span className="brain-draft-badge">{localize('com_ui_brain_rebuild_draft')}</span>

@@ -71,6 +71,11 @@ async function initialize() {
     },
   });
   mailAssistant?.engine.start();
+  mailAssistant?.research?.start();
+  process.once('exit', () => {
+    mailAssistant?.engine.stop();
+    mailAssistant?.research?.stop();
+  });
   webRouter = express.Router();
   webRouter.use(
     requireJwtAuth,

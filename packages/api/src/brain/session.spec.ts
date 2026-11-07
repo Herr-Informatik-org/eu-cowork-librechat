@@ -6,6 +6,7 @@ import {
   groundedBrainFacts,
   isBrainChatEligible,
   brainRecallLimitTokens,
+  brainContextInstructions,
 } from './session';
 import { conversationHash } from './conversation';
 import { brainRecallTimeoutMs } from './client';
@@ -174,6 +175,80 @@ describe('personal Brain scope and grounding', () => {
     revision = 2;
     await session.tools[0].invoke({ query: 'Projekt', seedIds: [] });
     expect(requests[2].contextBudgetTokens).toBe(requests[0].contextBudgetTokens);
+  });
+  it.each([false, true])(
+    'confirms only budget-accepted context for the exact assistant reply: %s',
+    async (oversized) => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(
+        async (url) =>
+          new Response(
+            JSON.stringify(
+              String(url).endsWith('/confirm')
+                ? { confirmed: true }
+                : {
+                    context: oversized ? 'x'.repeat(20000) : 'Own memory',
+                    nodes: [],
+                    edges: [],
+                    recall: { id: 'trace-1' },
+                    hasMore: false,
+                    suggestedIds: [],
+                    stopReason: 'fertig',
+                  },
+            ),
+            { status: 200 },
+          ),
+      );
+      const session = createBrainSession({
+        userId: 'owner',
+        conversationId: 'conversation',
+        messageId: 'assistant-response',
+        source,
+        contextBudgetTokens: 4000,
+        canWrite: false,
+        canUpdate: false,
+        countTokens: async (text) => text.length,
+      });
+      await session.tools[0].invoke({ query: 'Präferenz', seedIds: [] });
+      const confirms = fetchSpy.mock.calls.filter(([url]) => String(url).endsWith('/confirm'));
+      expect(confirms).toHaveLength(oversized ? 0 : 1);
+      if (!oversized)
+        expect(JSON.parse(String(confirms[0][1]?.body))).toEqual({
+          messageId: 'assistant-response',
+        });
+    },
+  );
+  it('binds every recall to the original authored contact rather than later model search text', async () => {
+    const scopes: Array<string[] | undefined> = [];
+    jest.spyOn(global, 'fetch').mockImplementation(async (_url, request) => {
+      const body = JSON.parse(String(request?.body));
+      scopes.push(body.applicableScopes);
+      return new Response(
+        JSON.stringify({
+          context: 'Regel für Anna',
+          nodes: [],
+          edges: [],
+          recall: {},
+          hasMore: false,
+          suggestedIds: [],
+          stopReason: 'fertig',
+        }),
+      );
+    });
+    const session = createBrainSession({
+      userId: 'owner',
+      conversationId: 'conversation',
+      messageId: 'response',
+      source: { ...source, text: 'Schreibe eine E-Mail an anna@example.test.' },
+      contextBudgetTokens: 12000,
+      canWrite: false,
+      canUpdate: false,
+    });
+    await session.initialize();
+    await session.tools[0].invoke({ query: 'E-Mail an bernd@example.test', seedIds: [] });
+    expect(scopes).toEqual([
+      ['Mail: anna@example.test', 'Mail'],
+      ['Mail: anna@example.test', 'Mail'],
+    ]);
   });
   describe('chat recall deadline and timing', () => {
     const recallResponse = () =>
@@ -669,8 +744,10 @@ describe('personal Brain scope and grounding', () => {
       const session = ceilingSession();
       session.setContextBudget(1500, 200000);
       await session.initialize();
-      expect(budgets[0].contextBudgetTokens).toBeLessThan(1500);
-      expect(budgets[0].contextBudgetTokens).toBeGreaterThan(1000);
+      const instructions = `${brainContextInstructions}\n\n<personal_brain_sources>\n\n</personal_brain_sources>`;
+      const reserve = Math.ceil(instructions.length / 4) + 64;
+      expect(budgets[0].contextBudgetTokens).toBe(1500 - reserve);
+      expect(budgets[0].contextBudgetTokens).toBeLessThan(brainRecallLimitTokens(200000));
     });
   });
 

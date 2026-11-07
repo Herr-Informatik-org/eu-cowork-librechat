@@ -1,3 +1,5 @@
+import { mailAnalysisSchema } from '../mailAssistant/engine';
+import { brainUsageSchema } from './usage';
 import type { ServerRequest } from '~/types';
 import type { BrainNode } from 'librechat-data-provider';
 import { readPersonalMailContext, rememberPersonalMailRule } from './mail';
@@ -18,6 +20,7 @@ const roles = jest.fn();
 const node = (id: string, scope: string | null) =>
   ({
     id,
+    kind: 'preference',
     text: 'Bitte Antworten immer kurz halten.',
     scope,
     sources: [],
@@ -43,27 +46,28 @@ it('does not retrieve or write when personal memory is off', async () => {
   expect(fetchBrain).not.toHaveBeenCalled();
 });
 it('loads contact and mail rules before general context, excluding another contact', async () => {
-  fetchBrain
-    .mockResolvedValueOnce({ nodes: [node('contact', 'Mail: a@example.com')] })
-    .mockResolvedValueOnce({ nodes: [node('mail', 'Mail')] })
-    .mockResolvedValueOnce({
-      nodes: [
-        node('wrong', 'Mail: b@example.com'),
-        node('contact', 'Mail: a@example.com'),
-        node('personal', null),
-      ],
-    });
+  fetchBrain.mockResolvedValue({
+    nodes: [
+      node('contact', 'Mail: a@example.com'),
+      node('mail', 'Mail'),
+      node('wrong', 'Mail: b@example.com'),
+      { ...node('project', 'Other project'), kind: 'project' },
+      node('personal', null),
+    ],
+  });
   const result = await readPersonalMailContext(req(), roles, {
     query: 'Eine beliebige Nachricht',
     sender: 'A@example.com',
   });
-  expect(result.count).toBe(3);
+  expect(result.count).toBe(4);
   expect(result.context).not.toContain('"wrong"');
-  expect(fetchBrain.mock.calls.map((call) => (call[3] as { scope?: string }).scope)).toEqual([
-    'Mail: a@example.com',
-    'Mail',
-    undefined,
-  ]);
+  expect(fetchBrain).toHaveBeenCalledTimes(1);
+  expect(fetchBrain.mock.calls[0][3]).toMatchObject({
+    purpose: 'mail',
+    applicableScopes: ['Mail: a@example.com', 'Mail'],
+    recordTrace: false,
+  });
+  expect(result.items?.map((item) => item.id)).toEqual(['contact', 'mail', 'project', 'personal']);
   expect(fetchBrain.mock.calls.every((call) => call[0] === 'owner')).toBe(true);
 });
 it('respects the callers actual context budget without fragmenting a rule', async () => {
@@ -121,4 +125,53 @@ it('preserves dates so the model can resolve explicitly changed rules within the
     createdAt: '2026-10-01T12:00:00Z',
     updatedAt: '2026-10-27T12:00:00Z',
   });
+});
+
+it('preserves a project preference selected by the shared recall without exposing another contact', async () => {
+  fetchBrain.mockResolvedValue({
+    nodes: [
+      node('atlas-rule', 'Projekt Atlas'),
+      node('foreign-contact', 'Mail: other@example.com'),
+    ],
+  });
+  const result = await readPersonalMailContext(req(), roles, {
+    query: 'Schreibe eine Antwort zu Projekt Atlas.',
+    sender: 'a@example.com',
+  });
+  expect(result.count).toBe(1);
+  expect(result.context).toContain('Projekt Atlas');
+  expect(result.context).not.toContain('foreign-contact');
+  expect(result.items?.map((item) => item.id)).toEqual(['atlas-rule']);
+});
+
+it('accepts cleared validity dates from the service JSON through the mail analysis contract', async () => {
+  const cleared = JSON.parse(
+    JSON.stringify({
+      ...node('cleaned-rule', 'Mail'),
+      title: 'Kurze Mailantworten',
+      status: 'active',
+      validFrom: null,
+      validUntil: null,
+    }),
+  ) as BrainNode;
+  fetchBrain.mockResolvedValue({ nodes: [cleared] });
+  const { context: _context, ...memory } = await readPersonalMailContext(req(), roles, {
+    query: 'Eine kurze Antwort schreiben.',
+    sender: 'a@example.com',
+  });
+  expect(memory.items?.[0].validFrom).toBeUndefined();
+  expect(memory.items?.[0].validUntil).toBeUndefined();
+  expect(JSON.stringify(memory)).not.toContain('validUntil');
+  expect(brainUsageSchema.safeParse(memory).success).toBe(true);
+  expect(
+    mailAnalysisSchema.safeParse({
+      priority: 'normal',
+      action: 'reply',
+      summary: 'Antwort nötig',
+      reason: 'Eine Rückfrage ist offen',
+      questions: [],
+      draft: '',
+      memory,
+    }).success,
+  ).toBe(true);
 });

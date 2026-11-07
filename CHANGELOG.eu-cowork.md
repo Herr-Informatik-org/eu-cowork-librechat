@@ -1,5 +1,186 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-10-30 — Geschützte Supportanalyse für OPS vorbereiten
+
+- Die eigene Supportroute verwendet ein festes EuRouter-Profil ohne Werkzeuge,
+  persönliches Brain, Dateien, Skills oder fremde Agenten. Ein Statusaufruf prüft
+  Identität und Profil, ohne eine Modellanfrage auszulösen.
+- Ein wiederholbarer Einrichtungshelfer erstellt ausschliesslich ein neues internes
+  Dienstkonto, einen privaten Agenten und einen geschützten internen Schlüssel.
+  Andere Remote-Agentenrouten bleiben für dieses Konto gesperrt; veränderte oder
+  bereits anderweitig verwendete Einrichtungsobjekte werden nicht überschrieben.
+- Die Funktion bleibt ohne ausdrückliche Laufzeitkonfiguration ausgeschaltet.
+
+
+## 2026-10-30 — Persönliches Wissen gezielter nutzen und weiterentwickeln
+
+- Chat und Mail verwenden den gemeinsamen Brain-Abruf mit passendem Geltungsbereich.
+  Neue automatische Erinnerungen übernehmen keine erfundenen Ablaufdaten; eigene
+  dauerhafte Regeln bleiben von einmaligen Änderungen und fremden Inhalten getrennt.
+- Ein Brain-Info-Knopf zeigt die zur jeweiligen Antwort bereitgestellten Erinnerungen
+  mit Quellen und Geltungsbereich. Bestätigte Abrufbelege gehören zur konkreten
+  Antwort; eine blosse Suche wird nicht als bereitgestellter Kontext ausgewiesen.
+- Ausdrückliche dauerhafte Stilkorrekturen im Mail-Chat können gelernt werden.
+  Beim Speichern eines überarbeiteten Entwurfs bleibt eine mögliche persönliche
+  Regel ein editierbarer Vorschlag mit gesonderter Speicherung.
+- Die Brain-Qualitätsvorschau bietet auswählbare Korrekturen und getrennte
+  Prüfbefunde. Eine vorbereitete Version wird erst über den vorhandenen
+  Aktivierungsweg verwendet; Originale bleiben innerhalb der Rückkehrfrist erhalten.
+
+## 2026-10-30 — Lange Agentenaufträge mit erhaltenem Zwischenstand begrenzen
+
+- Lange Werkzeugabläufe im Chat erhalten einen Hinweis zum gebündelten Abrufen und zum
+  rechtzeitigen Abschluss. Die konfigurierte Arbeitsgrenze bleibt bestehen;
+  bereits ausgeführte Aktionen werden beim Erreichen der Grenze nicht automatisch
+  erneut gestartet.
+- Ein Budgetabbruch erscheint als verständlicher, ausdrücklich unvollständiger
+  Zwischenstand. Bisherige Antwortteile, Werkzeugresultate und erfolgreich
+  verarbeitete Dateien bleiben in derselben Antwort erhalten.
+
+## 2026-10-30 — JSON- und XML-Exporte herunterladen
+
+- Dateikarten laden gespeicherte Dateien über den berechtigten Dateiweg herunter.
+  Externe Speicheradressen werden bei einer Downloadaktion nicht direkt geöffnet.
+- Downloadlinks in Antworten verwenden die zugehörigen Anhänge derselben Nachricht.
+  Sandbox-Verweise werden als Dateiauswahl aufgelöst, ohne das Schema im Browser
+  freizugeben. Mehrdeutige oder fehlende Dateien zeigen eine verständliche Meldung.
+- Dateiname und Originalinhalt bleiben erhalten. Freigaben, Kontozugriff und die
+  bestehende Zuordnung zum geschützten Code-Downloadweg werden weiter geprüft.
+
+
+## 2026-10-30 — Ruhige Mailvorschau mit sichtbaren Linkaktionen
+
+- Hinweise zu Vorschau, Linkprüfung und Bildern stehen hinter «Info» neben
+  «Kopieren». Die Mail selbst beginnt direkt unter der Werkzeugleiste.
+- Ein Klick auf einen freigegebenen Mail-Link zeigt das Ziel mit «In neuem Tab
+  öffnen» und einer Kopiermöglichkeit. Microsoft Safe Links bleiben erhalten.
+- Die Vorschau bleibt vom Anwendungsursprung getrennt. Nur eine statische,
+  per CSP-Hash freigegebene Klickvermittlung darf Linkindizes melden; Ziel und
+  aktuelle Freigabe werden nochmals im übergeordneten Fenster geprüft.
+
+
+## 2026-10-29 — Kompakte lokale Ordnerauswahl
+
+- Ein kleiner Ordnerknopf zeigt den gewählten Namen und öffnet eine kompakte Liste
+  mit verbundenen Ordnern, «Kein Ordner» und «Ordner öffnen…».
+- Der lange Hinweis unter dem Eingabefeld und im Werkzeugmenü entfällt. Laufender
+  Zugriff und Zugriffsfehler bleiben über Symbol und zugängliche Statusmeldung sichtbar.
+- Entfernen einzelner Freigaben oder aller Freigaben des aktuellen Chats bleibt
+  unmittelbar wirksam. Dateiverarbeitung, Berechtigungen und Grenzen bleiben erhalten.
+
+## 2026-10-29 — Lokale Ordner im Chat lesen
+
+- Hinter `EUCOWORK_LOCAL_FOLDERS=true` lassen sich bis zu drei lokale Ordner
+  im Chat verbinden. Browserfreigaben bleiben an Konto und Chat gebunden und
+  werden beim Entfernen, Abmelden oder Schliessen beendet.
+- Ein fester lesender Werkzeugweg fordert begrenzte Suchtreffer und Ausschnitte
+  im Browser an. Der Server prüft Besitzer, Generation, Aktion und Ausgabegrösse;
+  allgemeine Freigabe-Bypässe erlauben keinen direkten Dateizugriff.
+- Ein Browser-Worker verarbeitet UTF-8-Text und grosse Logs in Blöcken, PDFs über
+  Bytebereiche und Seiten, DOCX über den begrenzten Haupttext. Fortsetzungen und
+  nicht geprüfte Bereiche bleiben sichtbar; es gibt keine lokale Codeausführung.
+- Ergebnisse sind unzuverlässige Dokumentdaten im Chat, keine persönlichen
+  Benutzerangaben zum automatischen Lernen. Das Release wird zunächst nur auf
+  CWV01 über dessen gesonderten Updatehelfer bereitgestellt. Der gemeinsame
+  Build erhält den bereits installierten persönlichen Brain- und Mailstand.
+
+## 2026-10-29 — Sichere Mailbearbeitung und manuelle Kundenrecherche
+
+- Ctrl/Cmd+Enter funktioniert auch beim Anfordern eines Antwortentwurfs.
+  Tastaturfokus und zusätzliche Kürzel erschliessen Mailaktionen, Einstellungen,
+  Ordner, Bilder, Anhänge und die manuelle Recherche.
+- Der Mailkopf zeigt An und Cc. Neue Outlook-Entwürfe verwenden «Allen antworten»
+  mit überprüften Originalempfängern. Eine ausdrücklich neue Antwort kann trotz
+  geschütztem Entwurf angefordert werden; interne Weiterleitungen werden dabei
+  nicht als Kontext oder Empfänger übernommen. Bestehende Entwürfe bleiben erhalten.
+- Weiterleitungszeit wird aus Outlook-Metadaten gezeigt. Fehlende Empfängernachweise
+  bleiben als «nicht ermittelbar» sichtbar; es gibt keine Zuordnung allein nach Betreff.
+- Exakte Linkfreigaben sind administrativ pro Instanz pflegbar. Bekannte verschachtelte
+  Odoo-/Microsoft-Weiterleitungen bleiben nur bei eindeutig freigegebenem Endziel
+  erhalten. Die optionale lokale Reputationsprüfung übermittelt keine privaten URLs.
+- Bewusste Anhangsdownloads und neue Entwurfsanhänge können über einen getrennten
+  lokalen ClamAV-Dienst geprüft werden. Fehlende/alte Signaturen, Zeitüberschreitungen
+  und unvollständige Prüfungen sperren die Freigabe; vorhandene Entwürfe werden nicht
+  verändert. Dateiformate und Grössen bleiben begrenzt.
+- Persönliche versionierte Mail-Recherche-Skills werden nur ausdrücklich gespeichert
+  und gestartet. Festgelegte Odoo-/OPS-Abfragen verwenden aktuelle Benutzer-, Profil-
+  und Werkzeugrechte. Das Modell bekommt ausgewählte Quelldaten, keine Werkzeuge.
+  Ergebnisse bleiben intern; eine Übernahme in Antwortvorgaben erfolgt erst auf Klick.
+
+## 2026-10-28 — Outlook-Aktionsstatus und Tastenkürzel im Mail-Chat
+
+- Kompakte Symbole zeigen die letzte von Outlook gespeicherte Antwort oder
+  Weiterleitung in Liste und Mailkopf. Fehlende Kennzeichnungen bleiben unbekannt;
+  Betreff und vorhandene Entwürfe werden nicht als Antwortnachweis verwendet.
+- Ctrl+Enter und Cmd+Enter senden Fragen im Mail-Chat ab. Enter bleibt ein
+  Zeilenumbruch; laufende, leere oder doppelte Anfragen werden abgefangen.
+  Das Kürzel versendet keine Mail und speichert keinen Outlook-Entwurf.
+
+## 2026-10-28 — Eingebettete Mailbilder bewusst laden und direkt verschieben
+
+- Auf ausdrücklichen Klick erscheinen eingebettete PNG-/JPEG-Bilder derselben Mail.
+  Begrenzte Downloads, Dateityp- und Pixelprüfung sowie neu erzeugte PNG-Bilder
+  härten die isolierte Vorschau. Externe Bilder, aktive Formate und Animationen
+  bleiben gesperrt; die Bilddaten werden weder gespeichert noch ans Modell gegeben.
+- Einzel- und Mehrfachauswahlen starten den Verschiebeauftrag direkt. Der zusätzliche
+  Bestätigungsdialog entfällt; Zielordner, Versionsprüfung und Doppelklickschutz
+  bleiben erhalten. Laufende Aufträge blockieren die weitere Mailbearbeitung nicht.
+
+## 2026-10-28 — Gezielte ERP-Links in der Mailvorschau auf CWV01
+
+- Nur mit `MAIL_ASSISTANT_ERP_LINKS_ENABLED=true` auf der freigegebenen CW01-Instanz
+  bleiben HTTPS-Links zu genau `erp.rzcloud.ch` anklickbar. Bestehende Microsoft
+  Safe Links bleiben erhalten, wenn ihr eingebettetes Ziel ebenfalls dieser Host ist.
+- Server und Browser prüfen dieselbe begrenzte Linkregel. Bekannte Weiterleitungswege,
+  fremde Hosts, uneindeutige URLs und aktive Mailinhalte bleiben gesperrt. Es findet
+  kein Vorabruf statt; der Benutzer öffnet einen getrennten Tab ohne Referrer oder
+  Zugriff auf Cowork. Die Freigabe ist keine zusätzliche Malwareprüfung.
+
+## 2026-10-28 — Persönliche Signaturen mit passenden Abständen und Logo
+
+- Markierte Signaturtexte behalten ihre eigenen Schriftgrössen. Eingefügte
+  Outlook-Pixelgrössen werden begrenzt in Punktgrössen umgerechnet; passive
+  Formatierung bleibt erhalten, aktive Inhalte und fremde Bilder bleiben gesperrt.
+- Das eigene Logo kann an der Cursorposition stehen. Seine Breite ist einstellbar;
+  kompakte Absatzabstände stimmen zwischen Editor und neuen Entwürfen überein.
+- Ein persönliches Logo wird vor dem HTML-Verweis als Inline-Anhang geprüft.
+  Fehler und konkurrierende Änderungen bleiben sichtbar, vorhandene Entwürfe
+  werden nicht nachträglich neu formatiert und Mails weiterhin nie versendet.
+
+## 2026-10-27 — Vollständiger Posteingang, Mail-Chat und eigene Signatur
+
+- Die Übersicht lädt alle eigenen Inbox-Metadatenseiten und zeigt ungeprüfte Mails
+  getrennt von KI-Ergebnissen. Aktualisieren startet neu; einzelne Mails derselben
+  Unterhaltung bleiben sichtbar. Antwortbarrieren gelten weiterhin pro Unterhaltung.
+- Kompakte Zeilen, direkte Ablage mit E, alternative Ordnerwahl mit Shift+E und
+  weitere Tastenkürzel erleichtern die Bearbeitung. Offene Texte bleiben erhalten.
+- Ein eingebetteter Mail-Chat kann Fragen beantworten und auf ausdrücklichen Wunsch
+  eigene Korrespondenz mit demselben Partner aus Eingang und Gesendet einbeziehen.
+  Er nutzt die konfigurierte Modellroute mit Budget und Audit, ohne Schreibwerkzeuge.
+- Explizite Entwürfe nutzen bestätigte Antwortempfänger und ein einheitliches
+  HTML-Layout. Persönliche Signatur und bewusst hochgeladenes Logo sind verschlüsselt,
+  vom Modellkontext getrennt und bleiben beim Bearbeiten des Antwortteils erhalten.
+- Mail-HTML bleibt bereinigt und isoliert; externe Ressourcen und Dateianhänge
+  werden nicht automatisch geöffnet. Versand und Odoo-Aufgabenablage bleiben aus.
+
+## 2026-10-27 — Mailbearbeitung unabhängig von Odoo ausrollen
+
+- Die Odoo-Aufgabenablage ist standardmässig ausgeschaltet. Nur der ausdrückliche
+  Schalter `MAIL_ASSISTANT_ODOO_ENABLED=true` gibt die vorbereitete Erweiterung frei;
+  Benutzer-, Profil- und Werkzeugrechte werden weiterhin separat geprüft.
+- Ohne Freigabe erscheinen keine Odoo-Einstellungen oder Ablageaktionen. Auch direkte
+  Anfragen zur Vorbereitung und Ablage bleiben gesperrt.
+- Mailanalyse, manuelle Antwortentwürfe, Anhangsmetadaten, Mehrfachauswahl und
+  Tastenkürzel funktionieren unabhängig davon. Der CWV01-Rollout benötigt kein ERP-Modul.
+
+## 2026-10-27 — Isolierte Mailreleases und begrenzte Odoo-Vorschauen
+
+- Manuelle Image-Builds anderer Branches veröffentlichen nur ihren Commit-Tag.
+  Der allgemeine `eu-latest`-Tag bleibt dem Branch `eu-cowork` vorbehalten.
+- Die bestätigte Aufgabenbeschreibung hält das Limit von 20 000 Zeichen auch
+  einschliesslich Absender, Betreff und Kürzungshinweis ein. Lange Mails werden vor
+  der Bestätigung sichtbar gekürzt und nicht erst vom sicheren Odoo-Werkzeug abgelehnt.
+
 ## 2026-10-27 — Persönliches Wissen in Chats und Mailarbeit verwenden
 
 - Brain sucht nach dem eigentlichen Auftrag und berücksichtigt bei kurzen

@@ -73,6 +73,8 @@ import useSteerConvert from '~/hooks/Chat/useSteerConvert';
 import { useAuthContext } from '~/hooks/AuthContext';
 import useUsageHandler from './useUsageHandler';
 import store from '~/store';
+import { handleLocalFolderAction } from '~/localFolders/bridge';
+import { transferLocalFolders } from '~/localFolders/store';
 
 type ChatHelpers = Pick<
   EventHandlerParams,
@@ -626,7 +628,7 @@ export default function useResumableSSE(
   const queryClient = useQueryClient();
   const setActiveRunId = useSetRecoilState(store.activeRunFamily(runIndex));
 
-  const { token, isAuthenticated } = useAuthContext();
+  const { token, isAuthenticated, user } = useAuthContext();
   const { setMessages, getMessages, setConversation, setIsSubmitting, newConversation } =
     chatHelpers;
 
@@ -1204,9 +1206,49 @@ export default function useResumableSSE(
         }
         steerRetryFramesRef.current.clear();
       };
+      let currentPendingActionId: string | null = null;
       const applyPendingActionToMessages = (pendingAction: Agents.PendingAction, attempt = 0) => {
         if (!isCurrentSubscription()) {
           return;
+        }
+        if (attempt > 0 && currentPendingActionId !== pendingAction.actionId) return;
+        currentPendingActionId = pendingAction.actionId;
+        if (
+          startupConfig?.localFoldersEnabled === true &&
+          user?.id &&
+          generationCreatedAt != null
+        ) {
+          const conversation = currentSubmission.conversation;
+          handleLocalFolderAction({
+            pendingAction,
+            userId: user.id,
+            originConversationId: startedAsNewConversation
+              ? String(Constants.NEW_CONVO)
+              : (conversation.conversationId ?? String(Constants.NEW_CONVO)),
+            signal: lifecycleSignal,
+            verifyCurrent: async () => {
+              const status = await fetchStreamStatus(currentStreamId);
+              return (
+                status.active === true &&
+                status.createdAt === generationCreatedAt &&
+                status.pendingAction?.actionId === pendingAction.actionId
+              );
+            },
+            isCurrent: () =>
+              isCurrentSubscription() && currentPendingActionId === pendingAction.actionId,
+            fields: {
+              conversationId: currentStreamId,
+              generationCreatedAt,
+              endpoint: conversation.endpoint,
+              endpointType: conversation.endpointType,
+              agent_id: conversation.agent_id,
+              model: conversation.model,
+              spec: conversation.spec,
+              promptPrefix: conversation.promptPrefix,
+              ephemeralAgent: currentSubmission.ephemeralAgent,
+              isTemporary: currentSubmission.isTemporary,
+            },
+          });
         }
         const retryNextFrame = () => {
           if (attempt < PENDING_ACTION_MAX_RETRY_FRAMES) {
@@ -3137,6 +3179,8 @@ export default function useResumableSSE(
       getMessages,
       setMessages,
       startupConfig?.balance?.enabled,
+      startupConfig?.localFoldersEnabled,
+      user?.id,
       balanceQuery,
       removeActiveJob,
       queryClient,
@@ -3840,6 +3884,13 @@ export default function useResumableSSE(
           if (isInitialNewConversation(submission)) {
             optimisticStreamIdsRef.current.add(newStreamId);
             replaceNewConversationUrl(newStreamId);
+          }
+          if (isNewConvo && user?.id) {
+            transferLocalFolders(
+              user.id,
+              newStreamId,
+              submission.ephemeralAgent?.localFolders?.map((grant) => grant.id) ?? [],
+            );
           }
           const streamSubmission = addOptimisticConversation(newStreamId, submission);
           submissionRef.current = streamSubmission;

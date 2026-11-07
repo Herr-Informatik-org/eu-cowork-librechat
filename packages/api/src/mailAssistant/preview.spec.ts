@@ -1,10 +1,12 @@
 import { createMailGraph } from './graph';
+import type { MailAttachmentScanner } from './attachments';
+import { MailAttachmentScanError } from './scanner';
 import { sanitizeMailPreview } from './preview';
 
 describe('isolated mail HTML preview', () => {
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ', 'base64');
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
-  function setup(html = '<p>Mail</p>') {
+  function setup(html = '<p>Mail</p>', erpLinksEnabled = false) {
     const request = jest
       .fn()
       .mockResolvedValue(json({ id: 'mail', body: { contentType: 'html', content: html } }));
@@ -16,6 +18,7 @@ describe('isolated mail HTML preview', () => {
         fetch: request,
         token: async () => 'private-fixture-token',
         beforeRequest: guard,
+        erpLinksEnabled,
       }),
     };
   }
@@ -92,6 +95,46 @@ describe('isolated mail HTML preview', () => {
     expect(init).toMatchObject({ method: 'GET', redirect: 'error' });
     expect(init.headers.Prefer).toContain('outlook.body-content-type="html"');
   });
+  test('enables only validated ERP anchors through the deployment policy and makes no link request', async () => {
+    const href = 'https://erp.rzcloud.ch/mail/view?model=sale.order&amp;res_id=4';
+    const { graph, request } = setup(
+      `<a href="${href}" target="_top" ping="https://tracker.test" download onclick="alert(1)">Abonnement ansehen</a><a href="https://evil.test">Blocked</a>`,
+      true,
+    );
+    const result = await graph.preview('mail');
+    expect(result.linksEnabled).toBe(true);
+    expect(result.html).toContain(
+      'href="https://erp.rzcloud.ch/mail/view?model=sale.order&amp;res_id=4"',
+    );
+    expect(result.html).toContain('target="_blank"');
+    expect(result.html).toContain('rel="noopener noreferrer"');
+    expect(result.html).toContain('referrerpolicy="no-referrer"');
+    expect(result.html).not.toMatch(/_top|ping=|download|onclick|evil.test|tracker/);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(String(request.mock.calls[0][0])).toMatch(/^https:\/\/graph.microsoft.com\//);
+  });
+  test('keeps approved ERP links inert without deployment opt-in', async () => {
+    const { graph } = setup(
+      '<a href="https://erp.rzcloud.ch/odoo" data-links-enabled="true">ERP</a>',
+    );
+    const result = await graph.preview('mail');
+    expect(result.linksEnabled).toBe(false);
+    expect(result.html).not.toMatch(/<a|href|data-links-enabled/);
+    expect(result.html).toContain('ERP');
+  });
+  test('preserves only a valid existing Safe Links wrapper and strips active content with links enabled', () => {
+    const href =
+      'https://che01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ferp.rzcloud.ch%2Fmail%2Fview%3Fres_id%3D4&amp;reserved=0';
+    const result = sanitizeMailPreview(
+      `<a href="${href}">ERP</a><a href="https://erp.rzcloud.ch/r/code">Redirect</a><script>alert(1)</script><img src="https://erp.rzcloud.ch/pixel"><iframe src="https://erp.rzcloud.ch"></iframe><form action="https://erp.rzcloud.ch"><button>Submit</button></form>`,
+      new Map(),
+      true,
+    );
+    expect(result.html).toContain(`href="${href}"`);
+    expect(result.html).toContain('über Microsoft Safe Links');
+    expect(result.html).not.toMatch(/<script|<iframe|<form|src=|action=|\/r\/code/);
+    expect(result.blockedImages).toBe(1);
+  });
   test('bounds huge HTML and escapes plain text', async () => {
     const { graph, request } = setup('x'.repeat(1_000_001));
     expect(await graph.preview('mail')).toMatchObject({ truncated: true });
@@ -147,5 +190,314 @@ describe('isolated mail HTML preview', () => {
     const { graph, request } = setup();
     request.mockResolvedValueOnce(json({}, 403));
     await expect(graph.preview('mail')).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe('explicit embedded mail image boundary', () => {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWP4//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC',
+    'base64',
+  );
+  const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
+  const file = (overrides: Record<string, unknown> = {}) => ({
+    '@odata.type': '#microsoft.graph.fileAttachment',
+    id: 'image-id',
+    contentId: 'logo',
+    isInline: true,
+    contentType: 'image/png',
+    size: png.length,
+    ...overrides,
+  });
+  function setup(
+    rows: Record<string, unknown>[] = [file()],
+    html = '<p>Mail</p><img src="cid:logo"><img src="https://tracker.test/pixel">',
+    scanAttachment?: MailAttachmentScanner,
+  ) {
+    const request = jest.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.endsWith('/$value'))
+        return new Response(new Uint8Array(png), {
+          headers: { 'content-length': String(png.length) },
+        });
+      if (url.includes('/attachments?')) return json({ value: rows });
+      return json({ id: 'mail', body: { contentType: 'html', content: html } });
+    });
+    const guard = jest.fn().mockResolvedValue(undefined);
+    return {
+      request,
+      guard,
+      graph: createMailGraph({
+        fetch: request,
+        token: async () => 'fixture-only',
+        beforeRequest: guard,
+        scanAttachment,
+      }),
+    };
+  }
+  test('scans original embedded bytes before reencoding and withholds failed scans', async () => {
+    const scanner = jest.fn(async (_bytes: Buffer) => ({
+      verdict: 'no_known_threats' as const,
+      engine: 'ClamAV' as const,
+      scannedAt: '2026-10-29T10:00:00Z',
+      signaturesAt: '2026-10-29T09:00:00Z',
+    }));
+    const f = setup([file()], '<img src="cid:logo">', scanner);
+    const preview = await f.graph.preview('mail', true);
+    expect(scanner).toHaveBeenCalledWith(png);
+    expect(preview.html).toContain('data:image/png');
+    scanner.mockRejectedValue(new MailAttachmentScanError('found'));
+    const blocked = setup([file()], '<img src="cid:logo">', scanner);
+    await expect(blocked.graph.preview('mail', true)).rejects.toThrow();
+  });
+  test('loads only an explicitly requested referenced inline image and returns fresh PNG', async () => {
+    const { graph, request } = setup([
+      file(),
+      file({ id: 'document', contentId: 'unrelated', contentType: 'application/pdf' }),
+    ]);
+    const result = await graph.preview('mail', true);
+    expect(result).toMatchObject({
+      embeddedImagesAvailable: true,
+      imagesLoaded: true,
+      blockedImages: 1,
+    });
+    expect(result.html).toMatch(/src="data:image\/png;base64,iVBORw0KGgo/);
+    expect(result.html).not.toContain('tracker.test');
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(String(request.mock.calls[2][0])).toBe(
+      'https://graph.microsoft.com/v1.0/me/messages/mail/attachments/image-id/$value',
+    );
+  });
+  test('normal previews discover references without metadata or byte reads', async () => {
+    const { graph, request } = setup();
+    expect(await graph.preview('mail')).toMatchObject({
+      embeddedImagesAvailable: true,
+      imagesLoaded: false,
+      blockedImages: 2,
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+  test.each([
+    [file({ contentId: 'other' })],
+    [file({ isInline: false })],
+    [file({ '@odata.type': '#microsoft.graph.referenceAttachment' })],
+    [file({ contentType: 'image/svg+xml' })],
+    [file({ contentType: 'application/pdf' })],
+    [file({ size: 2_000_001 })],
+    [file({ size: -1 })],
+    [file(), file({ id: 'duplicate' })],
+  ])('never reads ambiguous or disallowed attachment bytes (case %#)', async (...rows) => {
+    const { graph, request } = setup(rows);
+    const result = await graph.preview('mail', true);
+    expect(result.html).not.toContain('<img');
+    expect(result.warnings).toHaveLength(1);
+    expect(request.mock.calls.some(([url]) => String(url).endsWith('/$value'))).toBe(false);
+  });
+  test('does not follow metadata pages or trust an incomplete CID uniqueness check', async () => {
+    const { graph, request } = setup();
+    const implementation = request.getMockImplementation()!;
+    request.mockImplementation(async (url) =>
+      String(url).includes('/attachments?')
+        ? json({ value: [file()], '@odata.nextLink': 'https://evil.test/private' })
+        : implementation(url),
+    );
+    const result = await graph.preview('mail', true);
+    expect(result.html).not.toContain('<img');
+    expect(result.warnings).toHaveLength(1);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+  test('streams with an actual byte cap even when metadata understates size', async () => {
+    const { graph, request } = setup();
+    const implementation = request.getMockImplementation()!;
+    const cancelled = jest.fn();
+    request.mockImplementation(async (url) =>
+      String(url).endsWith('/$value')
+        ? new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new Uint8Array(2_000_001));
+              },
+              cancel: cancelled,
+            }),
+          )
+        : implementation(url),
+    );
+    const result = await graph.preview('mail', true);
+    expect(result.html).not.toContain('<img');
+    expect(cancelled).toHaveBeenCalled();
+  });
+  test('rejects active bytes disguised by MIME and leaves other attachments unopened', async () => {
+    const { graph, request } = setup();
+    const implementation = request.getMockImplementation()!;
+    request.mockImplementation(async (url) =>
+      String(url).endsWith('/$value')
+        ? new Response('<svg onload="alert(1)">')
+        : implementation(url),
+    );
+    expect((await graph.preview('mail', true)).html).not.toMatch(/<img|svg|onload/);
+  });
+  test('revocation after byte download is fatal and not converted into an image warning', async () => {
+    const { graph, request, guard } = setup();
+    const implementation = request.getMockImplementation()!;
+    request.mockImplementation(async (url) => {
+      const response = await implementation(url);
+      if (String(url).endsWith('/$value')) guard.mockRejectedValue(new Error('revoked'));
+      return response;
+    });
+    await expect(graph.preview('mail', true)).rejects.toThrow('revoked');
+  });
+  test('limits concurrent explicit image previews and releases slots after failures', async () => {
+    const a = setup();
+    const b = setup();
+    const c = setup();
+    let rejectFirst!: (reason: Error) => void;
+    let rejectSecond!: (reason: Error) => void;
+    a.request.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFirst = reject;
+        }),
+    );
+    b.request.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSecond = reject;
+        }),
+    );
+    const first = a.graph.preview('mail', true).catch(() => undefined);
+    const second = b.graph.preview('mail', true).catch(() => undefined);
+    await expect(c.graph.preview('mail', true)).rejects.toMatchObject({ status: 429 });
+    expect(c.request).not.toHaveBeenCalled();
+    while (!rejectFirst || !rejectSecond) await Promise.resolve();
+    rejectFirst(new Error('fixture failure'));
+    rejectSecond(new Error('fixture failure'));
+    await Promise.all([first, second]);
+    await expect(c.graph.preview('mail', true)).resolves.toMatchObject({ imagesLoaded: true });
+  });
+  test('cancels an unread byte response when authorization is revoked immediately after fetch', async () => {
+    const { graph, request, guard } = setup();
+    const implementation = request.getMockImplementation()!;
+    const cancelled = jest.fn();
+    request.mockImplementation(async (url) => {
+      if (!String(url).endsWith('/$value')) return implementation(url);
+      guard.mockRejectedValue(new Error('revoked'));
+      return new Response(new ReadableStream({ cancel: cancelled }));
+    });
+    await expect(graph.preview('mail', true)).rejects.toThrow('revoked');
+    expect(cancelled).toHaveBeenCalled();
+  });
+  test('Graph authorization failures are fatal rather than partial success', async () => {
+    const { graph, request } = setup();
+    const implementation = request.getMockImplementation()!;
+    request.mockImplementation(async (url) =>
+      String(url).endsWith('/$value') ? json({}, 403) : implementation(url),
+    );
+    await expect(graph.preview('mail', true)).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe('tenant link policy and local reputation in mail previews', () => {
+  function fixture(policy: () => Promise<import('./preview').MailPreviewLinkPolicy>, html: string) {
+    const fetch = jest.fn(
+      async (_url: string | URL | Request, _init?: RequestInit) =>
+        new Response(JSON.stringify({ id: 'mail', body: { contentType: 'html', content: html } })),
+    );
+    return {
+      fetch,
+      graph: createMailGraph({
+        token: async () => 'fixture',
+        beforeRequest: async () => undefined,
+        fetch,
+        linkPolicy: policy,
+      }),
+    };
+  }
+  const checkedPolicy = (trustedOrigins = ['https://customer.example']) => ({
+    trustedOrigins,
+    status: 'not_listed' as const,
+    checkedAt: '2026-10-29T12:00:00.000Z',
+    sourceUpdatedAt: '2026-10-29T10:00:00.000Z',
+    check: jest.fn(() => 'not_listed' as import('./reputation').MailReputationVerdict),
+  });
+  test('allows only configured exact origins and never fetches navigation targets', async () => {
+    const policy = checkedPolicy();
+    const f = fixture(
+      async () => policy,
+      '<a href="https://customer.example/tasks/12">Allowed</a><a href="https://erp.rzcloud.ch/odoo">Not configured</a>',
+    );
+    const preview = await f.graph.preview('mail');
+    expect(preview.html).toContain('href="https://customer.example/tasks/12"');
+    expect(preview.html).not.toContain('href="https://erp.rzcloud.ch');
+    expect(preview.html).toContain('customer.example in neuem Tab');
+    expect(preview).toMatchObject({
+      linksEnabled: true,
+      trustedOrigins: ['https://customer.example'],
+      linkCheck: {
+        status: 'not_listed',
+        checkedAt: policy.checkedAt,
+        sourceUpdatedAt: policy.sourceUpdatedAt,
+        blocked: 1,
+      },
+    });
+    expect(policy.check).toHaveBeenCalledWith('https://customer.example/tasks/12');
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+    expect(String(f.fetch.mock.calls[0][0])).toMatch(/^https:\/\/graph.microsoft.com\//);
+  });
+  test('preserves nested Odoo and Safe Links while checking only the final URL locally', async () => {
+    const destination = 'https://erp.rzcloud.ch/mail/view?model=account.move&res_id=12';
+    const wrapper = `https://redirect-url.email/?link=${encodeURIComponent(destination)}&apn=com.odoo.mobile&afl=${encodeURIComponent(destination)}&ibi=com.odoo.mobile&ifl=${encodeURIComponent(destination)}`;
+    const href = `https://che01.safelinks.protection.outlook.com/?url=${encodeURIComponent(wrapper)}&data=opaque&sdata=opaque&reserved=0`;
+    const policy = checkedPolicy(['https://erp.rzcloud.ch']);
+    const f = fixture(async () => policy, `<a href="${href.replace(/&/g, '&amp;')}">Invoice</a>`);
+    expect((await f.graph.preview('mail')).html).toContain(`href="${href.replace(/&/g, '&amp;')}"`);
+    expect(policy.check).toHaveBeenCalledWith(destination);
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  });
+  test('known threat overrides administrator trust', async () => {
+    const policy = checkedPolicy();
+    policy.check.mockReturnValue('known_threat');
+    const f = fixture(
+      async () => policy,
+      '<a href="https://customer.example/tasks/12">Blocked</a>',
+    );
+    const preview = await f.graph.preview('mail');
+    expect(preview.html).not.toMatch(/<a|href=/);
+    expect(preview.linkCheck).toMatchObject({ status: 'known_threat', blocked: 1 });
+  });
+  test.each(['unavailable', 'disabled'] as const)(
+    'blocks links with %s reputation',
+    async (status) => {
+      const policy = { ...checkedPolicy(), status };
+      const f = fixture(
+        async () => policy,
+        '<a href="https://customer.example/tasks/12">Blocked</a>',
+      );
+      const preview = await f.graph.preview('mail');
+      expect(preview.html).not.toMatch(/<a|href=/);
+      expect(preview.linksEnabled).toBe(false);
+      expect(preview.linkCheck).toMatchObject({ status, blocked: 1 });
+      expect(policy.check).not.toHaveBeenCalled();
+    },
+  );
+  test('failed policy read preserves readable content but blocks all links', async () => {
+    const f = fixture(async () => {
+      throw new Error('private details');
+    }, '<p>Readable</p><a href="https://erp.rzcloud.ch/odoo">Blocked</a>');
+    const preview = await f.graph.preview('mail');
+    expect(preview.html).toContain('<p>Readable</p>');
+    expect(preview.html).not.toMatch(/<a|href=|private details/);
+    expect(preview).toMatchObject({
+      linksEnabled: false,
+      trustedOrigins: [],
+      linkCheck: { status: 'unavailable' },
+    });
+  });
+  test('re-reads administrator policy for each later preview', async () => {
+    const policy = checkedPolicy();
+    const read = jest.fn(async () => policy);
+    const f = fixture(read, '<a href="https://customer.example/tasks/12">Task</a>');
+    expect((await f.graph.preview('mail')).html).toContain('href=');
+    policy.trustedOrigins = [];
+    expect((await f.graph.preview('mail')).html).not.toContain('href=');
+    expect(read).toHaveBeenCalledTimes(2);
   });
 });

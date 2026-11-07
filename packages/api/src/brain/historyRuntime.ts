@@ -38,7 +38,6 @@ import { conversationHash } from './conversation';
 import { createBrainSourceManifest, registerBrainSourceManifest } from './provenance';
 import { brainReviewVersion, reviewBrainConversation, validateContextualFacts } from './review';
 import { brainAutomaticWithholding } from './safety';
-import { ownBrainOrganizations, withoutOwnBrainScope } from './scope';
 
 interface BrainHistoryRuntimeDependencies {
   connectionHints?: (req: ServerRequest) => Promise<string[]>;
@@ -582,23 +581,9 @@ export function createBrainHistoryProcessor(
             ...(fact.supersedesId ? [fact.supersedesId] : []),
           ]),
         );
-        const ownTexts = new Map(
-          source.messages.flatMap((message) =>
-            message.role === 'user' ? [[message.id, message.text] as const] : [],
-          ),
+        const valid = validateContextualFacts(facts, source.messages, knownIds).filter(
+          (fact) => !brainAutomaticWithholding(fact),
         );
-        /** Like a chat command, only the user's own evidence message for a fact can name the employer. */
-        const valid = validateContextualFacts(facts, source.messages, knownIds)
-          .filter((fact) => !brainAutomaticWithholding(fact))
-          .flatMap((fact) =>
-            withoutOwnBrainScope(
-              [fact],
-              (fact.evidence ?? []).flatMap((entry) => {
-                const text = ownTexts.get(entry.messageId);
-                return text === undefined ? [] : ownBrainOrganizations(text);
-              }),
-            ),
-          );
         const manifest = createBrainSourceManifest(
           source.conversationId,
           rebuildId,

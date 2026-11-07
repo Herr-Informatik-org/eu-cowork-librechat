@@ -226,6 +226,25 @@ describe('personal mail follow-up', () => {
     expect(f.odoo.create).not.toHaveBeenCalled();
     expect(f.odoo.note).not.toHaveBeenCalled();
   });
+  it('bounds the entire confirmed task text including its header and truncation notice', async () => {
+    const f = fixture();
+    await f.settings();
+    jest.mocked(f.engine.content).mockResolvedValue({
+      message: {
+        subject: 'Server Backup',
+        sender: 'customer@example.test',
+        receivedAt: result.receivedAt,
+        body: 'a'.repeat(20000),
+        bodyTruncated: false,
+      },
+    } as Awaited<ReturnType<MailAssistantEngine['content']>>);
+    const preview = await f.prepare();
+    expect(preview.body).toHaveLength(20000);
+    expect(preview.body).toContain('Von: customer@example.test');
+    expect(preview.body).toMatch(/\[Mailtext gekürzt; vollständige Mail im eigenen Postfach\.\]$/);
+    await f.service.commit(owner, { token: preview.token });
+    expect(f.odoo.create).toHaveBeenCalledWith(expect.objectContaining({ body: preview.body }));
+  });
   it('uses a verified personal To-do assignee and no project', async () => {
     const f = fixture();
     await f.service.saveSettings(owner, { profile: 'odoo-technik', mode: 'todo' });

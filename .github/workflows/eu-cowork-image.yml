@@ -1,13 +1,5 @@
-# EU-Cowork: baut das Fork-Image und schiebt es nach ghcr.
-#
-# Bewusst eine EIGENE Workflow-Datei statt einer Änderung an den Upstream-
-# Workflows: Diese Datei kollidiert bei keinem Upstream-Rebase, weil Upstream
-# sie nicht kennt. Die Upstream-Workflows bleiben unverändert liegen; keiner
-# von ihnen triggert auf Pushes nach `eu-cowork`.
-#
-# Gebaut wird `Dockerfile` mit Target `node` — das ist exakt die Kombination,
-# aus der Upstream sein `librechat-dev`-Image baut (siehe dev-images.yml), also
-# der Stand, der bei uns produktiv läuft.
+# Build the fork separately from unchanged upstream workflows.
+# The Dockerfile node target is the production runtime.
 name: EU-Cowork Image Build
 
 on:
@@ -24,22 +16,11 @@ concurrency:
   group: eu-cowork-image-${{ github.ref }}
   cancel-in-progress: true
 
-# KEIN fest verdrahteter Bildname mehr. Er stand hier als
-# `ghcr.io/herr-informatik/eu-cowork-librechat` und war nach der Umbenennung der
-# Organisation (herr-informatik -> Herr-Informatik-org) tot: gebaut wurde weiter
-# sauber, nur das Schieben endete in
-# `denied: permission_denied: The requested installation does not exist` — der
-# GITHUB_TOKEN gilt fuer die JETZIGE Organisation, nicht fuer die alte. Abgeleitet
-# aus `github.repository` ueberlebt der Name jede weitere Umbenennung von selbst.
-# Kleinschreibung ist Pflicht: eine OCI-Referenz erlaubt keine Grossbuchstaben,
-# `github.repository` liefert sie aber in der Schreibweise der Organisation.
-
+# Derive the lowercase OCI repository from github.repository so organization
+# renames do not leave an inaccessible hardcoded registry path behind.
 jobs:
   build:
-    # Je Plattform ein NATIVER Runner statt eines QEMU-Laufs: arm64 unter QEMU
-    # braucht für den Client-Build ein Vielfaches der Zeit (Upstream setzt
-    # deshalb timeout-minutes: 130). arm64-Hosted-Runner sind für öffentliche
-    # Repos kostenlos, damit bleiben beide Plattformen Pflicht statt optional.
+    # Use native runners for both architectures; emulated frontend builds are slow.
     name: Build ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 150
@@ -79,8 +60,7 @@ jobs:
           echo "BUILD_BRANCH=${{ github.ref_name }}" >> "$GITHUB_ENV"
           echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
 
-      # Push per Digest; die Tags setzt erst der merge-Job auf die
-      # zusammengeführte Manifest-Liste.
+      # Publish per-platform digests, then tag the merged manifest list.
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
@@ -147,9 +127,12 @@ jobs:
         working-directory: /tmp/digests
         run: |
           set -euo pipefail
+          tags=(-t "${REGISTRY_IMAGE}:${GITHUB_SHA}")
+          if [ "$GITHUB_REF" = refs/heads/eu-cowork ]; then
+            tags+=(-t "${REGISTRY_IMAGE}:eu-latest")
+          fi
           docker buildx imagetools create \
-            -t "${REGISTRY_IMAGE}:${GITHUB_SHA}" \
-            -t "${REGISTRY_IMAGE}:eu-latest" \
+            "${tags[@]}" \
             $(printf "${REGISTRY_IMAGE}@sha256:%s " *)
 
       - name: Inspect image

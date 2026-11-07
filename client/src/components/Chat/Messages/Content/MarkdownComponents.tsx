@@ -6,7 +6,9 @@ import Mermaid, { MermaidErrorBoundary } from '~/components/Messages/Content/Mer
 import CodeBlock from '~/components/Messages/Content/CodeBlock';
 import useHasAccess from '~/hooks/Roles/useHasAccess';
 import { useFileDownload } from '~/data-provider';
-import { useCodeBlockContext } from '~/Providers';
+import { useCodeBlockContext, useMessageContext } from '~/Providers';
+import GeneratedFileLink from './GeneratedFileLink';
+import { isRegisteredFileLink } from './generatedFileLinks';
 import { handleDoubleClick, triggerDownload } from '~/utils';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
@@ -107,6 +109,7 @@ type TAnchorProps = {
 
 export const a: React.ElementType = memo(function MarkdownAnchor({ href, children }: TAnchorProps) {
   const user = useRecoilValue(store.user);
+  const { downloadAttachments } = useMessageContext();
   const { showToast } = useToastContext();
   const localize = useLocalize();
 
@@ -129,6 +132,10 @@ export const a: React.ElementType = memo(function MarkdownAnchor({ href, childre
 
   const { refetch: downloadFile } = useFileDownload(user?.id ?? '', file_id, { direct: false });
   const props: { target?: string; onClick?: React.MouseEventHandler } = { target: '_blank' };
+
+  if (isRegisteredFileLink(href, downloadAttachments)) {
+    return <GeneratedFileLink data-sandbox-path={href}>{children}</GeneratedFileLink>;
+  }
 
   if (!file_id || !filename) {
     return (

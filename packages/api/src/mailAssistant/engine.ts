@@ -1,3 +1,5 @@
+import { brainUsageSchema } from '../brain/usage';
+import type { MailDraftEditOutcome } from 'librechat-data-provider';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type {
@@ -22,6 +24,8 @@ import type {
   MailDraftRequest,
   MailDraftResponse,
   MailAttachments,
+  MailHtmlPreview,
+  MailAttachmentDownload,
 } from './types';
 import { MAIL_CATEGORIES, MAIL_CONSENT_VERSION } from './types';
 import {
@@ -33,6 +37,8 @@ import {
 } from './schedule';
 import { MailGraphError, safeOutlookUrl } from './graph';
 import { activeMoveJob, publicMoveJob, summarizeMove } from './moves';
+import { sanitizeMailSignature } from './signature';
+import { replyAllRecipients, recipientFingerprint } from './recipients';
 
 export class MailAssistantError extends Error {}
 class ManualMovePending extends Error {}
@@ -54,13 +60,7 @@ export const mailAnalysisSchema: z.ZodType<MailAnalysis> = z
     reason: z.string().min(1).max(800),
     questions: z.array(z.string().min(1).max(500)).max(10),
     draft: z.string().max(12000),
-    memory: z
-      .object({
-        status: z.enum(['available', 'empty', 'disabled', 'unavailable']),
-        count: z.number().int().min(0),
-      })
-      .strict()
-      .optional(),
+    memory: brainUsageSchema.optional(),
   })
   .strict();
 
@@ -71,9 +71,13 @@ function publicResult(value: StoredMailResult): MailResult {
     sourceHash: _source,
     categoryApplied: _category,
     draftId: _draft,
+    draftMemory: _draftMemory,
+    draftTextHash: _draftTextHash,
     operationPending: _pending,
     moveDestination: _destination,
     editPending: _edit,
+    connectionGeneration: _generation,
+    correspondent: _correspondent,
     ...result
   } = value;
   return {
@@ -159,10 +163,15 @@ export function createMailAssistantEngine({
         : mail.isDraft || Date.parse(mail.receivedAt) < Date.parse(job.enabledAt!)
     )
       return;
-    const resultId = hash([owner, mail.conversationId]);
+    const existingMessage = (await store.results(owner)).find(
+      (item) => item.messageId === mail.id && item.analysisStatus !== 'pending',
+    );
+    const resultId = existingMessage?.id ?? hash([owner, 'message', mail.id]);
     const previous = await store.result(owner, resultId);
     if (previous?.moveStatus && previous.messageId === mail.id) return;
-    const barrier = await store.draftState(owner, resultId);
+    const barrier =
+      (await store.draftState(owner, hash([owner, mail.conversationId]))) ??
+      (await store.draftState(owner, resultId));
     const uncertain =
       barrier?.state === 'pending' ||
       previous?.operationPending ||
@@ -237,6 +246,12 @@ export function createMailAssistantEngine({
     if (uncertain) draftStatus = 'uncertain';
     const result: StoredMailResult = {
       id: resultId,
+      connectionGeneration: (await adapter.connection(owner)).generation,
+      mailboxLocation: 'inbox',
+      isRead: mail.isRead,
+      hasAttachments: mail.hasAttachments,
+      responseAction: latestMail.responseAction,
+      responseActionAt: latestMail.responseActionAt,
       messageId: mail.id,
       conversationId: mail.conversationId,
       sourceHash: sourceHash(mail),
@@ -527,6 +542,10 @@ export function createMailAssistantEngine({
       throw new MailAssistantError('Bitte verbinde dein persönliches Microsoft-Konto erneut.');
     const result = await store.result(owner, id);
     if (!result) throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
+    if (result.connectionGeneration && result.connectionGeneration !== connection.generation)
+      throw new MailAssistantError(
+        'Diese Mail gehört zu einer früheren Verbindung. Bitte den Posteingang neu laden.',
+      );
     const guard = async () => {
       await adapter.authorize(owner);
       const latest = await store.read(owner);
@@ -580,10 +599,19 @@ export function createMailAssistantEngine({
         message.isDraft
       )
         throw new MailAssistantError('Die Originalmail passt nicht mehr zum Mail-Vorgang.');
+      const recipients = replyAllRecipients(message, [connection.mailbox]);
       const response: MailResultContent = {
         resultId: id,
         mailbox: connection.mailbox,
         message: {
+          responseAction: message.responseAction,
+          responseActionAt: message.responseActionAt,
+          replyMode: 'all',
+          replyRecipients: recipients.to,
+          replyCcRecipients: recipients.cc,
+          toRecipients: message.toRecipients,
+          ccRecipients: message.ccRecipients,
+          senderName: message.senderName,
           subject: message.subject,
           sender: message.sender,
           receivedAt: message.receivedAt,
@@ -619,6 +647,8 @@ export function createMailAssistantEngine({
               try {
                 const editable = await graph.editableReply(result.draftId);
                 await guard();
+                if (result.draftMemory && result.draftTextHash === hash(editable.text))
+                  response.draft.memory = result.draftMemory;
                 response.draft.replyText = editable.text;
                 response.draft.revision = hash([result.draftId, editable.etag]);
               } catch (error) {
@@ -647,6 +677,55 @@ export function createMailAssistantEngine({
       throw error;
     }
   }
+  async function images(
+    owner: string,
+    id: string,
+    kind: 'original' | 'draft',
+    revision: string,
+  ): Promise<MailHtmlPreview> {
+    const { result, guard } = await readContext(owner, id);
+    if (!['original', 'draft'].includes(kind) || revision !== resultRevision(result))
+      throw new MailAssistantError('Die Mail wurde verändert. Bitte die Übersicht aktualisieren.');
+    const draft = kind === 'draft';
+    if (
+      draft &&
+      (!result.draftId ||
+        !['created', 'existing', 'stale'].includes(result.draftStatus) ||
+        result.operationPending ||
+        result.editPending)
+    )
+      throw new MailAssistantError('Der Entwurf ist nicht verfügbar. Bitte erneut öffnen.');
+    const messageId = draft ? result.draftId! : result.messageId;
+    await adapter.audit(owner, 'embedded_images_requested', id);
+    const graph = await adapter.graph(owner, guard);
+    const message = await graph.message(messageId);
+    await guard();
+    if (
+      message.id !== messageId ||
+      message.conversationId !== result.conversationId ||
+      message.isDraft !== draft ||
+      !message.changeKey
+    )
+      throw new MailAssistantError(
+        'Die Mail passt nicht mehr zum Mail-Vorgang. Bitte erneut öffnen.',
+      );
+    const preview = await graph.preview(messageId, true);
+    await guard();
+    const current = await graph.message(messageId);
+    await guard();
+    if (
+      current.id !== messageId ||
+      current.conversationId !== message.conversationId ||
+      current.isDraft !== draft ||
+      current.changeKey !== message.changeKey
+    )
+      throw new MailAssistantError(
+        'Die Mail wurde während des Ladens verändert. Bitte erneut öffnen.',
+      );
+    await adapter.audit(owner, 'embedded_images_read', id);
+    await guard();
+    return preview;
+  }
   async function attachments(owner: string, id: string): Promise<MailAttachments> {
     const { result, guard } = await readContext(owner, id);
     await adapter.audit(owner, 'attachment_metadata_requested', id);
@@ -663,6 +742,54 @@ export function createMailAssistantEngine({
     await adapter.audit(owner, 'attachment_metadata_read', id);
     await guard();
     return metadata;
+  }
+  async function downloadAttachment(
+    owner: string,
+    id: string,
+    attachmentId: string,
+    revision: string,
+  ): Promise<MailAttachmentDownload> {
+    const { result, guard } = await readContext(owner, id);
+    if (
+      revision !== resultRevision(result) ||
+      !attachmentId ||
+      attachmentId.length > 2048 ||
+      result.operationPending ||
+      result.moveStatus ||
+      result.editPending
+    )
+      throw new MailAssistantError('Die Mail wurde verändert. Bitte die Übersicht aktualisieren.');
+    const graph = await adapter.graph(owner, guard);
+    if (!graph.downloadAttachment)
+      throw new MailAssistantError(
+        'Die geprüfte Anhangfreigabe ist in dieser Umgebung nicht aktiviert.',
+      );
+    const message = await graph.message(result.messageId);
+    await guard();
+    if (
+      message.id !== result.messageId ||
+      message.conversationId !== result.conversationId ||
+      message.isDraft ||
+      !message.changeKey
+    )
+      throw new MailAssistantError('Die Originalmail passt nicht mehr zum Mail-Vorgang.');
+    await adapter.audit(owner, 'attachment_scan_requested', id);
+    const attachment = await graph.downloadAttachment(result.messageId, attachmentId);
+    await guard();
+    const current = await graph.message(result.messageId);
+    await guard();
+    if (
+      current.id !== result.messageId ||
+      current.isDraft ||
+      current.conversationId !== message.conversationId ||
+      current.changeKey !== message.changeKey
+    )
+      throw new MailAssistantError(
+        'Die Mail wurde während der Anhangprüfung verändert. Bitte erneut öffnen.',
+      );
+    await adapter.audit(owner, 'attachment_scan_released', id);
+    await guard();
+    return attachment;
   }
   async function folders(owner: string, parentId?: string): Promise<MailFolder[]> {
     await adapter.authorize(owner);
@@ -755,9 +882,17 @@ export function createMailAssistantEngine({
   ): Promise<T> {
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id))
       throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
-    return manualLease(owner, async (token, guard) => {
+    return manualLease(owner, async (token, guard, _job, connection) => {
       const result = await store.result(owner, id);
       if (!result) throw new MailAssistantError('Mail-Vorgang nicht gefunden.');
+      if (result.connectionGeneration && result.connectionGeneration !== connection.generation)
+        throw new MailAssistantError(
+          'Diese Mail gehört zu einer früheren Verbindung. Bitte den Posteingang neu laden.',
+        );
+      if (result.mailboxLocation === 'sent')
+        throw new MailAssistantError(
+          'Gesendete Korrespondenz wird hier nur angezeigt. Bitte zum Antworten eine empfangene Mail wählen.',
+        );
       return action(result, token, guard);
     });
   }
@@ -902,9 +1037,17 @@ export function createMailAssistantEngine({
     const selected = await Promise.all(
       request.items.map(async (item) => {
         const result = await store.result(owner, item.id);
-        if (!result || resultRevision(result) !== item.revision)
+        if (
+          !result ||
+          resultRevision(result) !== item.revision ||
+          (result.connectionGeneration && result.connectionGeneration !== connection.generation)
+        )
           throw new MailAssistantError(
             'Eine ausgewählte Mail wurde verändert. Bitte die Liste neu laden und erneut auswählen.',
+          );
+        if (result.mailboxLocation === 'sent')
+          throw new MailAssistantError(
+            'Gesendete Korrespondenz kann hier nicht verschoben werden.',
           );
         if (result.moveStatus)
           throw new MailAssistantError(
@@ -1022,6 +1165,10 @@ export function createMailAssistantEngine({
         try {
           const result = await store.result(owner, item.id);
           if (!result) throw new MailAssistantError('Mail-Vorgang nicht mehr vorhanden.');
+          if (result.connectionGeneration && result.connectionGeneration !== connection.generation)
+            throw new MailAssistantError(
+              'Die persönliche Verbindung wurde geändert. Bitte neu auswählen.',
+            );
           const moved = await moveWithLease(
             owner,
             item.id,
@@ -1086,6 +1233,7 @@ export function createMailAssistantEngine({
         revision: z.string().regex(/^[a-f0-9]{64}$/),
         instructions: z.string().max(4000),
         requestId: z.string().uuid(),
+        newReply: z.boolean().optional(),
       })
       .strict()
       .parse(input);
@@ -1094,11 +1242,40 @@ export function createMailAssistantEngine({
       throw new MailAssistantError('Die manuelle Entwurfserstellung ist nicht verfügbar.');
     const generate = adapter.analyzeDraft;
     return manualOperation(owner, id, async (result, token, guard) => {
+      const response = (status: MailDraftResponse['status'], url?: string): MailDraftResponse => ({
+        status,
+        ...(safeOutlookUrl(url) && { draftUrl: safeOutlookUrl(url) }),
+        ...(status === 'created' && result.draftMemory ? { memory: result.draftMemory } : {}),
+      });
+      // Bind an explicit new-reply request before checking its now possibly stale UI revision.
+      const requestKey = hash([owner, 'manual-new-reply-request', parsed.requestId]);
+      const requestHash = hash([
+        id,
+        result.messageId,
+        parsed.revision,
+        parsed.instructions,
+        !!parsed.newReply,
+      ]);
+      if (parsed.newReply) {
+        const requested = await store.draftState(owner, requestKey);
+        if (requested && requested.sourceHash !== requestHash)
+          throw new MailAssistantError(
+            'Diese Auftragskennung wurde bereits für einen anderen Entwurf verwendet. Bitte neu laden.',
+          );
+        if (requested?.state === 'pending') return response('uncertain');
+        if (requested?.state === 'completed') {
+          if (result.operationPending || result.draftStatus === 'uncertain')
+            return response('uncertain');
+          return response('existing', result.draftUrl);
+        }
+      }
       if (parsed.revision !== resultRevision(result))
         throw new MailAssistantError(
           'Die Mail wurde inzwischen geändert. Bitte neu laden und erneut auswählen.',
         );
-      const barrier = await store.draftState(owner, id);
+      const conversationKey = hash([owner, result.conversationId]);
+      const barrier =
+        (await store.draftState(owner, conversationKey)) ?? (await store.draftState(owner, id));
       if (
         result.operationPending ||
         result.draftStatus === 'uncertain' ||
@@ -1106,10 +1283,6 @@ export function createMailAssistantEngine({
       )
         return { status: 'uncertain' as const };
       const graph = await adapter.graph(owner, guard);
-      const response = (status: MailDraftResponse['status'], url?: string): MailDraftResponse => ({
-        status,
-        ...(safeOutlookUrl(url) && { draftUrl: safeOutlookUrl(url) }),
-      });
       const rememberExisting = async (draft: MailMessage) => {
         await adapter.audit(owner, 'manual_draft_existing', id);
         await guard();
@@ -1129,17 +1302,33 @@ export function createMailAssistantEngine({
         mail.id !== result.messageId ||
         mail.conversationId !== result.conversationId ||
         mail.isDraft ||
-        sourceHash(mail) !== result.sourceHash
+        (parsed.newReply && !mail.changeKey) ||
+        (result.analysisStatus !== 'pending' && sourceHash(mail) !== result.sourceHash)
       )
         throw new MailAssistantError(
           'Die Originalmail passt nicht mehr zum Mail-Vorgang. Bitte neu prüfen.',
         );
-      const thread = await graph.thread(mail.conversationId);
+      if (result.analysisStatus === 'pending') {
+        result.sourceHash = sourceHash(mail);
+        await guard();
+        await store.putResult(owner, token, result);
+      }
+      const operationKey = parsed.newReply
+        ? hash([owner, 'manual-new-reply-source', result.messageId, result.sourceHash])
+        : conversationKey;
+      const newReplyBarrier = parsed.newReply ? await store.draftState(owner, operationKey) : null;
+      if (newReplyBarrier?.state === 'pending') return response('uncertain');
+      if (newReplyBarrier?.state === 'completed') return response('existing', result.draftUrl);
+      // A deliberate additional answer uses only its selected original, never internal forwards.
+      const thread = parsed.newReply
+        ? { messages: [mail], complete: true }
+        : await graph.thread(mail.conversationId);
       const existing = thread.messages.find((item) => item.isDraft);
       if (existing) return rememberExisting(existing);
       if (
-        result.draftId ||
-        (barrier?.state === 'completed' && barrier.sourceHash === result.sourceHash)
+        !parsed.newReply &&
+        (result.draftId ||
+          (barrier?.state === 'completed' && barrier.sourceHash === result.sourceHash))
       )
         return response('existing', result.draftUrl);
       const context = thread.messages
@@ -1147,6 +1336,7 @@ export function createMailAssistantEngine({
         .sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt));
       if (!context.some((item) => item.id === mail.id)) context.push(mail);
       const changed = (messages: MailMessage[]) =>
+        !parsed.newReply &&
         messages.some(
           (item) =>
             item.isDraft ||
@@ -1166,16 +1356,51 @@ export function createMailAssistantEngine({
         throw new MailAssistantError(
           'Der Gesprächsverlauf ist unvollständig oder wurde bereits fortgesetzt. Bitte in Outlook prüfen.',
         );
-      await adapter.audit(owner, 'manual_draft_requested', id);
+      await adapter.audit(
+        owner,
+        parsed.newReply ? 'manual_new_reply_requested' : 'manual_draft_requested',
+        id,
+      );
       await guard();
+      const identity = await graph.identity();
+      const connection = await adapter.connection(owner);
+      const mailbox = connection.mailbox?.toLowerCase();
+      if (
+        !mailbox ||
+        ![identity.mail, identity.userPrincipalName].some(
+          (value) => value?.toLowerCase() === mailbox,
+        )
+      )
+        throw new MailAssistantError(
+          'Die persönliche Absenderidentität konnte nicht bestätigt werden.',
+        );
+      const signature = (await store.read(owner))?.settings.signature;
+      const selfAddresses = [mailbox, identity.mail, identity.userPrincipalName].filter(Boolean);
+      const recipients = replyAllRecipients(mail, selfAddresses);
+      const draftContext = {
+        sender: { name: (identity.displayName ?? '').slice(0, 200), address: mailbox },
+        recipients: recipients.to.map((recipient) => ({
+          ...recipient,
+          name: recipient.name.slice(0, 200),
+        })),
+        ccRecipients: recipients.cc.map((recipient) => ({
+          ...recipient,
+          name: recipient.name.slice(0, 200),
+        })),
+        replyMode: 'all' as const,
+        signatureEnabled: signature?.enabled === true,
+      };
+      const generated = await generate(owner, context, parsed.instructions, guard, draftContext);
       const text = z
         .string()
         .trim()
         .min(1)
         .max(12000)
-        .parse(await generate(owner, context, parsed.instructions, guard));
+        .parse(typeof generated === 'string' ? generated : generated.text);
       await guard();
-      const fresh = await graph.thread(mail.conversationId);
+      const fresh = parsed.newReply
+        ? { messages: [await graph.message(result.messageId)], complete: true }
+        : await graph.thread(mail.conversationId);
       const newDraft = fresh.messages.find((item) => item.isDraft);
       if (newDraft) return rememberExisting(newDraft);
       const fingerprint = (messages: MailMessage[]) => hash(messages.map(sourceHash).sort());
@@ -1188,22 +1413,44 @@ export function createMailAssistantEngine({
           'Der Gesprächsverlauf wurde inzwischen geändert. Es wurde kein Entwurf erstellt. Bitte neu laden.',
         );
       const current = await graph.message(result.messageId);
-      if (sourceHash(current) !== result.sourceHash)
+      if (
+        sourceHash(current) !== result.sourceHash ||
+        (parsed.newReply && current.changeKey !== mail.changeKey) ||
+        recipientFingerprint(replyAllRecipients(current, selfAddresses)) !==
+          recipientFingerprint(recipients)
+      )
         throw new MailAssistantError(
           'Die Originalmail wurde inzwischen geändert. Es wurde kein Entwurf erstellt.',
         );
       await guard();
-      if (!(await store.reserveDraft(owner, token, id, result.sourceHash, true)))
+      if (
+        parsed.newReply &&
+        !(await store.reserveDraft(owner, token, requestKey, requestHash, true))
+      )
         throw new MailAssistantError(
           'Diese Entwurfserstellung wurde bereits angefordert. Bitte neu laden.',
         );
+      if (!(await store.reserveDraft(owner, token, operationKey, result.sourceHash, true))) {
+        if (parsed.newReply) await store.finishDraft(owner, requestKey, requestHash, 'failed');
+        throw new MailAssistantError(
+          'Diese Entwurfserstellung wurde bereits angefordert. Bitte neu laden.',
+        );
+      }
       result.operationPending = true;
       result.draftStatus = 'uncertain';
       await store.putResult(owner, token, result);
       try {
-        const created = await graph.createReply(result.messageId, text);
-        await store.finishDraft(owner, id, result.sourceHash, 'completed');
+        const created = await graph.createReply(result.messageId, text, signature, {
+          selfAddresses,
+          ...recipients,
+        });
+        await store.finishDraft(owner, operationKey, result.sourceHash, 'completed');
+        if (parsed.newReply) await store.finishDraft(owner, requestKey, requestHash, 'completed');
         result.draftId = created.id;
+        if (typeof generated !== 'string' && generated.memory) {
+          result.draftMemory = generated.memory;
+          result.draftTextHash = hash(text);
+        }
         result.draftUrl = safeOutlookUrl(created.url);
         result.draftStatus = 'created';
         result.operationPending = false;
@@ -1214,7 +1461,8 @@ export function createMailAssistantEngine({
         return response('created', created.url);
       } catch (error) {
         if (error instanceof MailGraphError && !error.uncertain) {
-          await store.finishDraft(owner, id, result.sourceHash, 'failed');
+          await store.finishDraft(owner, operationKey, result.sourceHash, 'failed');
+          if (parsed.newReply) await store.finishDraft(owner, requestKey, requestHash, 'failed');
           result.operationPending = false;
           result.draftStatus = 'error';
           await store.putResult(owner, token, result);
@@ -1231,12 +1479,12 @@ export function createMailAssistantEngine({
     id: string,
     body: string,
     revision: string,
-  ): Promise<void> {
+  ): Promise<MailDraftEditOutcome> {
     if (!body.trim() || body.length > 12000 || !/^[a-f0-9]{64}$/.test(revision))
       throw new MailAssistantError(
         'Bitte einen vollständigen Antworttext mit höchstens 12000 Zeichen eingeben.',
       );
-    await manualOperation(owner, id, async (result, token, guard) => {
+    return manualOperation(owner, id, async (result, token, guard) => {
       if (
         !result.draftId ||
         result.draftStatus !== 'created' ||
@@ -1275,6 +1523,14 @@ export function createMailAssistantEngine({
         await guard();
         await store.putResult(owner, token, { ...result, editPending: false });
         await adapter.audit(owner, 'manual_draft_edit_completed', id);
+        return body.trim().length >= 40 && body.length < editable.text.length * 0.65
+          ? {
+              ruleProposal: {
+                text: 'Bitte Antworten an diesen Kontakt knapp und auf das Wesentliche beschränkt formulieren.',
+                scope: 'sender' as const,
+              },
+            }
+          : {};
       } catch (error) {
         if (error instanceof MailGraphError && !error.uncertain) {
           await store.finishDraft(owner, operationKey, revision, 'failed');
@@ -1386,6 +1642,8 @@ export function createMailAssistantEngine({
     rememberRule,
     requestDraft,
     attachments,
+    downloadAttachment,
+    images,
     async status(owner: string) {
       await adapter.authorize(owner);
       const availability = await adapter.availability(owner);
@@ -1449,6 +1707,8 @@ export function createMailAssistantEngine({
           );
       }
       await adapter.audit(owner, parsed.data.enabled ? 'settings_enabled' : 'settings_disabled');
+      if (parsed.data.signature)
+        parsed.data.signature = await sanitizeMailSignature(parsed.data.signature);
       await store.saveSettings(owner, parsed.data, now());
       await store.cancelStaleMoves(owner, now());
     },

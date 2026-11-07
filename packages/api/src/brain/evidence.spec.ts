@@ -22,6 +22,19 @@ const fact: BrainCandidate = {
   evidence: [{ messageId: 'source', quote: messages[0].text }],
 };
 
+const datedMessages = [
+  {
+    ...messages[0],
+    text: 'Für Projekt Atlas benötigen Änderungen ab 2026-09-15 bis 2026-09-16 eine Freigabe.',
+  },
+];
+const datedFact = {
+  ...fact,
+  text: datedMessages[0].text,
+  quote: datedMessages[0].text,
+  evidence: [{ messageId: 'source', quote: datedMessages[0].text }],
+};
+
 describe('contextual candidate storage contract', () => {
   it('validates a bounded exact quote against an oversized original source', () => {
     const source = { ...messages[0], text: 'Kontext. '.repeat(15000) + messages[0].text };
@@ -63,40 +76,45 @@ describe('contextual candidate storage contract', () => {
   it('compares actual timestamps before storing a validity range', () => {
     expect(
       validateContextualFacts(
-        [{ ...fact, validFrom: '2026-09-15T00:00:00.9Z', validUntil: '2026-09-15T00:00:00Z' }],
-        messages,
+        [{ ...datedFact, validFrom: '2026-09-16T00:00:00.9Z', validUntil: '2026-09-16T00:00:00Z' }],
+        datedMessages,
       ),
     ).toEqual([]);
     const [valid] = validateContextualFacts(
-      [{ ...fact, validFrom: '2026-09-15T00:00:00Z', validUntil: '2026-09-15T00:00:00.9Z' }],
-      messages,
+      [{ ...datedFact, validFrom: '2026-09-15T00:00:00Z', validUntil: '2026-09-16T00:00:00Z' }],
+      datedMessages,
     );
     expect(valid).toMatchObject({
       validFrom: '2026-09-15T00:00:00Z',
-      validUntil: '2026-09-15T00:00:00.9Z',
+      validUntil: '2026-09-16T00:00:00Z',
     });
   });
 
-  it('preserves service-valid wire values for request replay across an update', () => {
-    for (const original of [
-      fact,
-      {
-        ...fact,
-        title: undefined,
-        tags: [' Atlas ', 'Atlas'],
-        scope: '',
-        validFrom: '2026-09-15T00:00:00Z',
-      },
-    ]) {
-      const [valid] = validateContextualFacts([original], messages);
-      expect(JSON.stringify(valid)).toBe(JSON.stringify(original));
-    }
+  it('preserves service-valid, evidenced wire values for request replay across an update', () => {
+    const original = {
+      ...datedFact,
+      title: undefined,
+      tags: [' Atlas ', 'Atlas'],
+      scope: '',
+      validFrom: '2026-09-15T00:00:00Z',
+      validUntil: '2026-09-16T00:00:00Z',
+    };
+    expect(JSON.stringify(validateContextualFacts([original], datedMessages)[0])).toBe(
+      JSON.stringify(original),
+    );
+    expect(JSON.stringify(validateContextualFacts([fact], messages)[0])).toBe(JSON.stringify(fact));
   });
 
   it('normalizes oversized date representations without dropping time qualification', () => {
     const [valid] = validateContextualFacts(
-      [{ ...fact, validFrom: `2026-09-15T00:00:00.${'0'.repeat(40)}Z` }],
-      messages,
+      [
+        {
+          ...datedFact,
+          validFrom: `2026-09-15T00:00:00.${'0'.repeat(40)}Z`,
+          validUntil: '2026-09-16T00:00:00Z',
+        },
+      ],
+      datedMessages,
     );
     expect(valid.validFrom).toBe('2026-09-15T00:00:00.000Z');
     expect(validateContextualFacts([{ ...fact, validFrom: 'not-a-date' }], messages)).toEqual([]);

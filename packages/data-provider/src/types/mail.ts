@@ -1,14 +1,40 @@
+import type { BrainUsage } from './brain';
+
+export type MailSignature = {
+  enabled: boolean;
+  html: string;
+  fontFamily: 'Aptos' | 'Calibri' | 'Arial';
+  fontSize: 10 | 11 | 12 | 14;
+  logo?: { contentBytes: string };
+};
+export type MailWorkspaceChatRequest = {
+  revision: string;
+  message: string;
+  history: { role: 'user' | 'assistant'; content: string }[];
+  draft?: string;
+  includeCorrespondence?: boolean;
+};
+export type MailWorkspaceChatResponse = {
+  answer: string;
+  modelLabel?: string;
+  sources?: MailWorkspaceResult[];
+  memory?: BrainUsage;
+  learning?: MailRuleLearning;
+};
 export type MailWorkspacePriority = 'important' | 'normal' | 'low';
+/** Last recorded Outlook action; absence means unknown, not unanswered. */
+export type MailWorkspaceResponseAction = 'replied' | 'forwarded';
 export type MailWorkspaceRule = {
   text: string;
   scope: 'sender' | 'global';
   revision: string;
 };
-export type MailWorkspaceMemory = {
-  status: 'available' | 'empty' | 'disabled' | 'unavailable';
-  count: number;
-};
+export type MailWorkspaceMemory = BrainUsage;
+export type MailRuleProposal = { text: string; scope: 'sender' | 'global' };
+export type MailRuleLearning = { status: 'saved' | 'disabled' | 'unavailable'; nodeId?: string };
+export type MailDraftEditOutcome = { ruleProposal?: MailRuleProposal };
 export type MailWorkspaceSettings = {
+  signature?: MailSignature;
   enabled: boolean;
   mode: 'manual' | 'scheduled';
   weekdays: number[];
@@ -20,6 +46,12 @@ export type MailWorkspaceSettings = {
   history?: { mode: 'off' | 'since' | 'all'; from?: string };
 };
 export type MailWorkspaceResult = {
+  mailboxLocation?: 'inbox' | 'sent';
+  analysisStatus?: 'pending' | 'complete';
+  isRead?: boolean;
+  hasAttachments?: boolean;
+  responseAction?: MailWorkspaceResponseAction;
+  responseActionAt?: string;
   id: string;
   revision: string;
   subject: string;
@@ -38,6 +70,7 @@ export type MailWorkspaceResult = {
 };
 export type MailWorkspaceStatus = {
   available: boolean;
+  odooAvailable?: boolean;
   reason?: string;
   modelLabel: string;
   modelFingerprint?: string;
@@ -63,7 +96,21 @@ export type MailWorkspaceStatus = {
   };
   results: MailWorkspaceResult[];
 };
+export type MailWorkspaceImagesRequest = {
+  kind: 'original' | 'draft';
+  revision: string;
+};
 export type MailWorkspacePreview = {
+  embeddedImagesAvailable?: boolean;
+  imagesLoaded?: boolean;
+  linksEnabled?: boolean;
+  trustedOrigins?: string[];
+  linkCheck?: {
+    status: 'not_listed' | 'known_threat' | 'unavailable' | 'disabled';
+    checkedAt?: string;
+    sourceUpdatedAt?: string;
+    blocked: number;
+  };
   html: string;
   blockedImages: number;
   truncated: boolean;
@@ -73,6 +120,14 @@ export type MailWorkspaceContent = {
   resultId: string;
   mailbox: string;
   message: {
+    responseAction?: MailWorkspaceResponseAction;
+    responseActionAt?: string;
+    replyRecipients?: { name: string; address: string }[];
+    replyCcRecipients?: { name: string; address: string }[];
+    replyMode?: 'all';
+    toRecipients?: { name: string; address: string }[];
+    ccRecipients?: { name: string; address: string }[];
+    senderName?: string;
     subject: string;
     sender: string;
     receivedAt: string;
@@ -81,6 +136,7 @@ export type MailWorkspaceContent = {
     preview?: MailWorkspacePreview;
   };
   draft?: {
+    memory?: BrainUsage;
     subject: string;
     url?: string;
     body: string;
@@ -105,7 +161,11 @@ export type MailWorkspaceParams = {
   priority?: MailWorkspacePriority;
   state?: 'open' | 'done' | 'all';
 };
-export type MailWorkspacePage = { results: MailWorkspaceResult[]; nextCursor?: string };
+export type MailWorkspacePage = {
+  results: MailWorkspaceResult[];
+  nextCursor?: string;
+  complete?: boolean;
+};
 
 export type MailWorkspaceMoveRequest = {
   requestId: string;
@@ -167,12 +227,15 @@ export type MailDraftRequest = {
   revision: string;
   instructions: string;
   requestId: string;
+  newReply?: boolean;
 };
 export type MailDraftOutcome = {
   status: 'created' | 'existing' | 'uncertain';
   draftUrl?: string;
+  memory?: BrainUsage;
 };
 export type MailAttachments = {
+  downloadAvailable?: boolean;
   attachments: {
     id: string;
     name: string;

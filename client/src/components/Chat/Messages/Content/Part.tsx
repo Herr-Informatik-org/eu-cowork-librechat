@@ -32,6 +32,7 @@ import AskUserQuestion from './AskUserQuestion';
 import RetrievalCall from './RetrievalCall';
 import { ProposalOutcome } from './Proposal';
 import ToolApproval from './ToolApproval';
+import LocalFolderActionStatus from '~/localFolders/ActionStatus';
 import AgentHandoff from './AgentHandoff';
 import CodeAnalyze from './CodeAnalyze';
 import Container from './Container';
@@ -365,6 +366,18 @@ const Part = memo(function Part({
        *  still surfaces approve/reject/edit/respond. Only while the call is unresolved
        *  (no output yet). */
       if (toolCall.approval != null && (toolCall.output?.length ?? 0) === 0) {
+        if (toolCall.name === 'local_folder') {
+          return (
+            <>
+              {card}
+              <LocalFolderActionStatus
+                approval={toolCall.approval}
+                toolCallId={toolCall.id ?? ''}
+                args={toolCall.args}
+              />
+            </>
+          );
+        }
         /** The proposal card names the step and its values; the tool card above it
          *  would announce the step as already running while it awaits a decision. */
         return (

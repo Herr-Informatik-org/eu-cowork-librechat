@@ -20,7 +20,6 @@ import MessageIcon from '~/components/Chat/Messages/MessageIcon';
 import SubRow from '~/components/Chat/Messages/SubRow';
 import NextSteps from '~/components/Chat/NextSteps';
 import { fontSizeAtom } from '~/store/fontSize';
-import BrainUsage from '~/components/Brain/Usage';
 import store from '~/store';
 
 type ContentRenderProps = {
@@ -240,7 +239,6 @@ const ContentRender = memo(function ContentRender({
               />
             </SubRow>
           )}
-          <BrainUsage message={msg} isSubmitting={isSubmitting} />
           {isLast && <NextSteps message={msg} isSubmitting={isSubmitting} />}
         </div>
       </div>

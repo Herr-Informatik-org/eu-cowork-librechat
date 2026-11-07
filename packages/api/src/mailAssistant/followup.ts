@@ -437,7 +437,13 @@ export function createMailFollowup(deps: {
           name: text(task.name),
           ...(Array.isArray(task.partner_id) ? { customer: text(task.partner_id[1]) } : {}),
         }));
-        const body = `Mail zur späteren Bearbeitung\nVon: ${sender}\nEmpfangen: ${text(content.message.receivedAt)}\nBetreff: ${title}\n\n${text(content.message.body, 20000)}${content.message.bodyTruncated || content.message.body.length > 20000 ? '\n\n[Mailtext gekürzt; vollständige Mail im eigenen Postfach.]' : ''}`;
+        const header = `Mail zur späteren Bearbeitung\nVon: ${sender}\nEmpfangen: ${text(content.message.receivedAt)}\nBetreff: ${title}\n\n`;
+        const truncated =
+          content.message.bodyTruncated || header.length + content.message.body.length > 20000;
+        const suffix = truncated
+          ? '\n\n[Mailtext gekürzt; vollständige Mail im eigenen Postfach.]'
+          : '';
+        const body = `${header}${text(content.message.body, 20000 - header.length - suffix.length)}${suffix}`;
         const token = randomUUID();
         const expiresAt = new Date(now().getTime() + 10 * 60000).toISOString();
         const preview: Preview = {
