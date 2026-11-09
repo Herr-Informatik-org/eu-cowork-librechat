@@ -1,3 +1,4 @@
+const releaseLifecycle = require('~/server/services/daytimeRelease');
 const { nanoid } = require('nanoid');
 const { logger } = require('@librechat/data-schemas');
 const {
@@ -742,93 +743,101 @@ function createToolEndCallback({ req, res, artifactPromises, streamId = null, jo
 
     if (output.artifact[Tools.file_search]) {
       artifactPromises.push(
-        (async () => {
-          const user = req.user;
-          const attachment = await processFileCitations({
-            user,
-            metadata,
-            appConfig: req.config,
-            toolArtifact: output.artifact,
-            toolCallId: output.tool_call_id,
-          });
-          if (!attachment) {
-            return null;
-          }
-          if (!streamId && !res.headersSent) {
+        releaseLifecycle.runTask('agent-artifact', () =>
+          (async () => {
+            const user = req.user;
+            const attachment = await processFileCitations({
+              user,
+              metadata,
+              appConfig: req.config,
+              toolArtifact: output.artifact,
+              toolCallId: output.tool_call_id,
+            });
+            if (!attachment) {
+              return null;
+            }
+            if (!streamId && !res.headersSent) {
+              return attachment;
+            }
+            writeAttachment(res, streamId, attachment, jobCreatedAt);
             return attachment;
-          }
-          writeAttachment(res, streamId, attachment, jobCreatedAt);
-          return attachment;
-        })().catch((error) => {
-          logger.error('Error processing file citations:', error);
-          return null;
-        }),
+          })().catch((error) => {
+            logger.error('Error processing file citations:', error);
+            return null;
+          }),
+        ),
       );
     }
 
     if (output.artifact[Tools.ui_resources]) {
       artifactPromises.push(
-        (async () => {
-          const attachment = {
-            type: Tools.ui_resources,
-            messageId: metadata.run_id,
-            toolCallId: output.tool_call_id,
-            conversationId: metadata.thread_id,
-            [Tools.ui_resources]: output.artifact[Tools.ui_resources].data,
-          };
-          if (!streamId && !res.headersSent) {
+        releaseLifecycle.runTask('agent-artifact', () =>
+          (async () => {
+            const attachment = {
+              type: Tools.ui_resources,
+              messageId: metadata.run_id,
+              toolCallId: output.tool_call_id,
+              conversationId: metadata.thread_id,
+              [Tools.ui_resources]: output.artifact[Tools.ui_resources].data,
+            };
+            if (!streamId && !res.headersSent) {
+              return attachment;
+            }
+            writeAttachment(res, streamId, attachment, jobCreatedAt);
             return attachment;
-          }
-          writeAttachment(res, streamId, attachment, jobCreatedAt);
-          return attachment;
-        })().catch((error) => {
-          logger.error('Error processing artifact content:', error);
-          return null;
-        }),
+          })().catch((error) => {
+            logger.error('Error processing artifact content:', error);
+            return null;
+          }),
+        ),
       );
     }
 
     if (output.artifact[Tools.web_search]) {
       artifactPromises.push(
-        (async () => {
-          const attachment = {
-            type: Tools.web_search,
-            messageId: metadata.run_id,
-            toolCallId: output.tool_call_id,
-            conversationId: metadata.thread_id,
-            [Tools.web_search]: { ...output.artifact[Tools.web_search] },
-          };
-          if (!streamId && !res.headersSent) {
+        releaseLifecycle.runTask('agent-artifact', () =>
+          (async () => {
+            const attachment = {
+              type: Tools.web_search,
+              messageId: metadata.run_id,
+              toolCallId: output.tool_call_id,
+              conversationId: metadata.thread_id,
+              [Tools.web_search]: { ...output.artifact[Tools.web_search] },
+            };
+            if (!streamId && !res.headersSent) {
+              return attachment;
+            }
+            writeAttachment(res, streamId, attachment, jobCreatedAt);
             return attachment;
-          }
-          writeAttachment(res, streamId, attachment, jobCreatedAt);
-          return attachment;
-        })().catch((error) => {
-          logger.error('Error processing artifact content:', error);
-          return null;
-        }),
+          })().catch((error) => {
+            logger.error('Error processing artifact content:', error);
+            return null;
+          }),
+        ),
       );
     }
 
     if (output.artifact[Tools.memory]) {
       artifactPromises.push(
-        (async () => {
-          const attachment = {
-            type: Tools.memory,
-            messageId: metadata.run_id,
-            toolCallId: output.tool_call_id,
-            conversationId: metadata.thread_id,
-            [Tools.memory]: output.artifact[Tools.memory],
-          };
-          if (!streamId && !res.headersSent) {
+        releaseLifecycle.runTask('agent-artifact', () =>
+          (async () => {
+            const attachment = {
+              type: Tools.memory,
+              messageId: metadata.run_id,
+              toolCallId: output.tool_call_id,
+              conversationId: metadata.thread_id,
+              [Tools.memory]: output.artifact[Tools.memory],
+            };
+            if (!streamId && !res.headersSent) {
+              return attachment;
+            }
+            writeAttachment(res, streamId, attachment, jobCreatedAt);
             return attachment;
-          }
-          writeAttachment(res, streamId, attachment, jobCreatedAt);
-          return attachment;
-        })().catch((error) => {
-          logger.error('Error processing memory artifact content:', error);
-          return null;
-        }),
+          })().catch((error) => {
+            logger.error('Error processing memory artifact content:', error);
+            return null;
+          }),
+        ),
       );
     }
 
@@ -851,35 +860,37 @@ function createToolEndCallback({ req, res, artifactPromises, streamId = null, jo
         }
         const { url } = part.image_url;
         artifactPromises.push(
-          (async () => {
-            const filename = `${output.name}_img_${nanoid()}`;
-            const file_id = output.artifact.file_ids?.[i];
-            const file = await saveBase64Image(url, {
-              req,
-              file_id,
-              filename,
-              endpoint: metadata.provider,
-              context: FileContext.image_generation,
-            });
-            const fileMetadata = Object.assign(file, {
-              messageId: metadata.run_id,
-              toolCallId: output.tool_call_id,
-              conversationId: metadata.thread_id,
-            });
-            if (!streamId && !res.headersSent) {
+          releaseLifecycle.runTask('agent-artifact', () =>
+            (async () => {
+              const filename = `${output.name}_img_${nanoid()}`;
+              const file_id = output.artifact.file_ids?.[i];
+              const file = await saveBase64Image(url, {
+                req,
+                file_id,
+                filename,
+                endpoint: metadata.provider,
+                context: FileContext.image_generation,
+              });
+              const fileMetadata = Object.assign(file, {
+                messageId: metadata.run_id,
+                toolCallId: output.tool_call_id,
+                conversationId: metadata.thread_id,
+              });
+              if (!streamId && !res.headersSent) {
+                return fileMetadata;
+              }
+
+              if (!fileMetadata) {
+                return null;
+              }
+
+              writeAttachment(res, streamId, fileMetadata, jobCreatedAt);
               return fileMetadata;
-            }
-
-            if (!fileMetadata) {
+            })().catch((error) => {
+              logger.error('Error processing artifact content:', error);
               return null;
-            }
-
-            writeAttachment(res, streamId, fileMetadata, jobCreatedAt);
-            return fileMetadata;
-          })().catch((error) => {
-            logger.error('Error processing artifact content:', error);
-            return null;
-          }),
+            }),
+          ),
         );
       }
       return;
@@ -906,91 +917,93 @@ function createToolEndCallback({ req, res, artifactPromises, streamId = null, jo
       const { id, name } = file;
       const toolCallId = output.tool_call_id;
       artifactPromises.push(
-        (async () => {
-          const result = await processCodeOutput({
-            req,
-            id,
-            name,
-            messageId: metadata.run_id,
-            toolCallId,
-            conversationId: metadata.thread_id,
-            /**
-             * Use the FILE's `storage_session_id` (storage session),
-             * not the top-level artifact `session_id` (exec session).
-             * The codeapi worker reports two distinct ids on a tool
-             * result:
-             *   - `artifact.session_id` is the EXEC session — the
-             *     sandbox VM that ran the bash command. Files don't
-             *     live there; it's torn down post-execution.
-             *   - `file.storage_session_id` is the STORAGE session —
-             *     the file-server bucket prefix where artifacts
-             *     actually live and are served from.
-             * `processCodeOutput` builds `/download/{session_id}/{id}`,
-             * so passing the exec id resolves to a path the file-server
-             * doesn't know about and 404s. Fall back to artifact-level
-             * for older worker payloads that may not populate per-file
-             * ids.
-             */
-            session_id: file.storage_session_id ?? output.artifact.session_id,
-          });
-          const fileMetadata = result?.file ?? null;
-          const finalize = result?.finalize;
-          if (!fileMetadata) {
+        releaseLifecycle.runTask('agent-artifact', () =>
+          (async () => {
+            const result = await processCodeOutput({
+              req,
+              id,
+              name,
+              messageId: metadata.run_id,
+              toolCallId,
+              conversationId: metadata.thread_id,
+              /**
+               * Use the FILE's `storage_session_id` (storage session),
+               * not the top-level artifact `session_id` (exec session).
+               * The codeapi worker reports two distinct ids on a tool
+               * result:
+               *   - `artifact.session_id` is the EXEC session — the
+               *     sandbox VM that ran the bash command. Files don't
+               *     live there; it's torn down post-execution.
+               *   - `file.storage_session_id` is the STORAGE session —
+               *     the file-server bucket prefix where artifacts
+               *     actually live and are served from.
+               * `processCodeOutput` builds `/download/{session_id}/{id}`,
+               * so passing the exec id resolves to a path the file-server
+               * doesn't know about and 404s. Fall back to artifact-level
+               * for older worker payloads that may not populate per-file
+               * ids.
+               */
+              session_id: file.storage_session_id ?? output.artifact.session_id,
+            });
+            const fileMetadata = result?.file ?? null;
+            const finalize = result?.finalize;
+            if (!fileMetadata) {
+              return null;
+            }
+            /* Initial emit: ship the attachment to the client immediately
+             * (carries `status: 'pending'` for office buckets so the UI
+             * shows "preparing preview…"). The agent's response stops
+             * blocking on extraction here.
+             *
+             * Use the shared `isStreamWritable` predicate rather than the
+             * narrower `streamId || res.headersSent` check that lived
+             * here before — a client disconnect mid-stream
+             * (`res.writableEnded`) would otherwise hit `res.write` and
+             * raise `ERR_STREAM_WRITE_AFTER_END` (caught by the outer
+             * IIFE catch but logged as noise). Same gate the Responses
+             * path uses below. */
+            if (isStreamWritable(res, streamId)) {
+              writeAttachment(res, streamId, fileMetadata, jobCreatedAt);
+            }
+            /* Deferred preview rendering: extraction continues running
+             * even after the HTTP response closes. If the stream is still
+             * open when the preview resolves, push an `attachment`
+             * update event so the UI patches in place; otherwise React
+             * Query polling on `/api/files/:file_id/preview` picks it up.
+             *
+             * Spread the full updated record (mirroring the initial emit
+             * shape) and overlay `messageId`/`toolCallId` from the
+             * current run. The DB record preserves the original
+             * `messageId` across cross-turn filename reuse so
+             * `getCodeGeneratedFiles` can trace the file back to its
+             * original assistant message; routing the update SSE by the
+             * persisted id would land the patch on a stale message
+             * slot — turn-N's pending placeholder would stay stuck while
+             * turn-1's already-resolved attachment got re-merged.
+             * (Codex P1 review on PR #12957.) */
+            runPreviewFinalize({
+              finalize,
+              fileId: fileMetadata.file_id,
+              previewRevision: result?.previewRevision,
+              onResolved: (updated) => {
+                writeAttachmentUpdate(
+                  res,
+                  streamId,
+                  {
+                    ...updated,
+                    messageId: metadata.run_id,
+                    toolCallId,
+                  },
+                  jobCreatedAt,
+                );
+              },
+            });
+            return fileMetadata;
+          })().catch((error) => {
+            logger.error('Error processing code output:', error);
             return null;
-          }
-          /* Initial emit: ship the attachment to the client immediately
-           * (carries `status: 'pending'` for office buckets so the UI
-           * shows "preparing preview…"). The agent's response stops
-           * blocking on extraction here.
-           *
-           * Use the shared `isStreamWritable` predicate rather than the
-           * narrower `streamId || res.headersSent` check that lived
-           * here before — a client disconnect mid-stream
-           * (`res.writableEnded`) would otherwise hit `res.write` and
-           * raise `ERR_STREAM_WRITE_AFTER_END` (caught by the outer
-           * IIFE catch but logged as noise). Same gate the Responses
-           * path uses below. */
-          if (isStreamWritable(res, streamId)) {
-            writeAttachment(res, streamId, fileMetadata, jobCreatedAt);
-          }
-          /* Deferred preview rendering: extraction continues running
-           * even after the HTTP response closes. If the stream is still
-           * open when the preview resolves, push an `attachment`
-           * update event so the UI patches in place; otherwise React
-           * Query polling on `/api/files/:file_id/preview` picks it up.
-           *
-           * Spread the full updated record (mirroring the initial emit
-           * shape) and overlay `messageId`/`toolCallId` from the
-           * current run. The DB record preserves the original
-           * `messageId` across cross-turn filename reuse so
-           * `getCodeGeneratedFiles` can trace the file back to its
-           * original assistant message; routing the update SSE by the
-           * persisted id would land the patch on a stale message
-           * slot — turn-N's pending placeholder would stay stuck while
-           * turn-1's already-resolved attachment got re-merged.
-           * (Codex P1 review on PR #12957.) */
-          runPreviewFinalize({
-            finalize,
-            fileId: fileMetadata.file_id,
-            previewRevision: result?.previewRevision,
-            onResolved: (updated) => {
-              writeAttachmentUpdate(
-                res,
-                streamId,
-                {
-                  ...updated,
-                  messageId: metadata.run_id,
-                  toolCallId,
-                },
-                jobCreatedAt,
-              );
-            },
-          });
-          return fileMetadata;
-        })().catch((error) => {
-          logger.error('Error processing code output:', error);
-          return null;
-        }),
+          }),
+        ),
       );
     }
   };
@@ -1088,67 +1101,73 @@ function createResponsesToolEndCallback({ req, res, tracker, artifactPromises })
 
     if (output.artifact[Tools.file_search]) {
       artifactPromises.push(
-        (async () => {
-          const user = req.user;
-          const attachment = await processFileCitations({
-            user,
-            metadata,
-            appConfig: req.config,
-            toolArtifact: output.artifact,
-            toolCallId: output.tool_call_id,
-          });
-          if (!attachment) {
+        releaseLifecycle.runTask('agent-artifact', () =>
+          (async () => {
+            const user = req.user;
+            const attachment = await processFileCitations({
+              user,
+              metadata,
+              appConfig: req.config,
+              toolArtifact: output.artifact,
+              toolCallId: output.tool_call_id,
+            });
+            if (!attachment) {
+              return null;
+            }
+            // For Responses API, emit attachment during streaming
+            if (res.headersSent && !res.writableEnded) {
+              writeResponsesAttachment(res, tracker, attachment, metadata);
+            }
+            return attachment;
+          })().catch((error) => {
+            logger.error('Error processing file citations:', error);
             return null;
-          }
-          // For Responses API, emit attachment during streaming
-          if (res.headersSent && !res.writableEnded) {
-            writeResponsesAttachment(res, tracker, attachment, metadata);
-          }
-          return attachment;
-        })().catch((error) => {
-          logger.error('Error processing file citations:', error);
-          return null;
-        }),
+          }),
+        ),
       );
     }
 
     if (output.artifact[Tools.ui_resources]) {
       artifactPromises.push(
-        (async () => {
-          const attachment = {
-            type: Tools.ui_resources,
-            toolCallId: output.tool_call_id,
-            [Tools.ui_resources]: output.artifact[Tools.ui_resources].data,
-          };
-          // For Responses API, always emit attachment during streaming
-          if (res.headersSent && !res.writableEnded) {
-            writeResponsesAttachment(res, tracker, attachment, metadata);
-          }
-          return attachment;
-        })().catch((error) => {
-          logger.error('Error processing artifact content:', error);
-          return null;
-        }),
+        releaseLifecycle.runTask('agent-artifact', () =>
+          (async () => {
+            const attachment = {
+              type: Tools.ui_resources,
+              toolCallId: output.tool_call_id,
+              [Tools.ui_resources]: output.artifact[Tools.ui_resources].data,
+            };
+            // For Responses API, always emit attachment during streaming
+            if (res.headersSent && !res.writableEnded) {
+              writeResponsesAttachment(res, tracker, attachment, metadata);
+            }
+            return attachment;
+          })().catch((error) => {
+            logger.error('Error processing artifact content:', error);
+            return null;
+          }),
+        ),
       );
     }
 
     if (output.artifact[Tools.web_search]) {
       artifactPromises.push(
-        (async () => {
-          const attachment = {
-            type: Tools.web_search,
-            toolCallId: output.tool_call_id,
-            [Tools.web_search]: { ...output.artifact[Tools.web_search] },
-          };
-          // For Responses API, always emit attachment during streaming
-          if (res.headersSent && !res.writableEnded) {
-            writeResponsesAttachment(res, tracker, attachment, metadata);
-          }
-          return attachment;
-        })().catch((error) => {
-          logger.error('Error processing artifact content:', error);
-          return null;
-        }),
+        releaseLifecycle.runTask('agent-artifact', () =>
+          (async () => {
+            const attachment = {
+              type: Tools.web_search,
+              toolCallId: output.tool_call_id,
+              [Tools.web_search]: { ...output.artifact[Tools.web_search] },
+            };
+            // For Responses API, always emit attachment during streaming
+            if (res.headersSent && !res.writableEnded) {
+              writeResponsesAttachment(res, tracker, attachment, metadata);
+            }
+            return attachment;
+          })().catch((error) => {
+            logger.error('Error processing artifact content:', error);
+            return null;
+          }),
+        ),
       );
     }
 
@@ -1171,43 +1190,45 @@ function createResponsesToolEndCallback({ req, res, tracker, artifactPromises })
         }
         const { url } = part.image_url;
         artifactPromises.push(
-          (async () => {
-            const filename = `${output.name}_img_${nanoid()}`;
-            const file_id = output.artifact.file_ids?.[i];
-            const file = await saveBase64Image(url, {
-              req,
-              file_id,
-              filename,
-              endpoint: metadata.provider,
-              context: FileContext.image_generation,
-            });
-            const fileMetadata = Object.assign(file, {
-              toolCallId: output.tool_call_id,
-            });
+          releaseLifecycle.runTask('agent-artifact', () =>
+            (async () => {
+              const filename = `${output.name}_img_${nanoid()}`;
+              const file_id = output.artifact.file_ids?.[i];
+              const file = await saveBase64Image(url, {
+                req,
+                file_id,
+                filename,
+                endpoint: metadata.provider,
+                context: FileContext.image_generation,
+              });
+              const fileMetadata = Object.assign(file, {
+                toolCallId: output.tool_call_id,
+              });
 
-            if (!fileMetadata) {
+              if (!fileMetadata) {
+                return null;
+              }
+
+              // For Responses API, emit attachment during streaming
+              if (res.headersSent && !res.writableEnded) {
+                const attachment = {
+                  file_id: fileMetadata.file_id,
+                  filename: fileMetadata.filename,
+                  type: fileMetadata.type,
+                  url: fileMetadata.filepath,
+                  width: fileMetadata.width,
+                  height: fileMetadata.height,
+                  tool_call_id: output.tool_call_id,
+                };
+                writeResponsesAttachment(res, tracker, attachment, metadata);
+              }
+
+              return fileMetadata;
+            })().catch((error) => {
+              logger.error('Error processing artifact content:', error);
               return null;
-            }
-
-            // For Responses API, emit attachment during streaming
-            if (res.headersSent && !res.writableEnded) {
-              const attachment = {
-                file_id: fileMetadata.file_id,
-                filename: fileMetadata.filename,
-                type: fileMetadata.type,
-                url: fileMetadata.filepath,
-                width: fileMetadata.width,
-                height: fileMetadata.height,
-                tool_call_id: output.tool_call_id,
-              };
-              writeResponsesAttachment(res, tracker, attachment, metadata);
-            }
-
-            return fileMetadata;
-          })().catch((error) => {
-            logger.error('Error processing artifact content:', error);
-            return null;
-          }),
+            }),
+          ),
         );
       }
       return;
@@ -1234,77 +1255,79 @@ function createResponsesToolEndCallback({ req, res, tracker, artifactPromises })
       const { id, name } = file;
       const toolCallId = output.tool_call_id;
       artifactPromises.push(
-        (async () => {
-          const result = await processCodeOutput({
-            req,
-            id,
-            name,
-            messageId: metadata.run_id,
-            toolCallId,
-            conversationId: metadata.thread_id,
-            /**
-             * Use the FILE's `storage_session_id` (storage session),
-             * not the top-level artifact `session_id` (exec session).
-             * The codeapi worker reports two distinct ids on a tool
-             * result:
-             *   - `artifact.session_id` is the EXEC session — the
-             *     sandbox VM that ran the bash command. Files don't
-             *     live there; it's torn down post-execution.
-             *   - `file.storage_session_id` is the STORAGE session —
-             *     the file-server bucket prefix where artifacts
-             *     actually live and are served from.
-             * `processCodeOutput` builds `/download/{session_id}/{id}`,
-             * so passing the exec id resolves to a path the file-server
-             * doesn't know about and 404s. Fall back to artifact-level
-             * for older worker payloads that may not populate per-file
-             * ids.
-             */
-            session_id: file.storage_session_id ?? output.artifact.session_id,
-          });
-          const fileMetadata = result?.file ?? null;
-          const finalize = result?.finalize;
-          if (!fileMetadata) {
-            return null;
-          }
+        releaseLifecycle.runTask('agent-artifact', () =>
+          (async () => {
+            const result = await processCodeOutput({
+              req,
+              id,
+              name,
+              messageId: metadata.run_id,
+              toolCallId,
+              conversationId: metadata.thread_id,
+              /**
+               * Use the FILE's `storage_session_id` (storage session),
+               * not the top-level artifact `session_id` (exec session).
+               * The codeapi worker reports two distinct ids on a tool
+               * result:
+               *   - `artifact.session_id` is the EXEC session — the
+               *     sandbox VM that ran the bash command. Files don't
+               *     live there; it's torn down post-execution.
+               *   - `file.storage_session_id` is the STORAGE session —
+               *     the file-server bucket prefix where artifacts
+               *     actually live and are served from.
+               * `processCodeOutput` builds `/download/{session_id}/{id}`,
+               * so passing the exec id resolves to a path the file-server
+               * doesn't know about and 404s. Fall back to artifact-level
+               * for older worker payloads that may not populate per-file
+               * ids.
+               */
+              session_id: file.storage_session_id ?? output.artifact.session_id,
+            });
+            const fileMetadata = result?.file ?? null;
+            const finalize = result?.finalize;
+            if (!fileMetadata) {
+              return null;
+            }
 
-          /* Initial emit (Open Responses extension format). The agent's
-           * response no longer blocks on extraction. */
-          if (isStreamWritable(res, null)) {
-            writeResponsesAttachment(
-              res,
-              tracker,
-              buildResponsesAttachment(fileMetadata, toolCallId),
-              metadata,
-            );
-          }
-
-          /* Deferred preview rendering: extract HTML in the background
-           * and emit a follow-up `librechat:attachment` with the same
-           * `file_id` so the client merges the resolved record over the
-           * pending placeholder. Fire-and-forget — survives response
-           * close; polling covers the post-close gap. */
-          runPreviewFinalize({
-            finalize,
-            fileId: fileMetadata.file_id,
-            previewRevision: result?.previewRevision,
-            onResolved: (updated) => {
-              if (!isStreamWritable(res, null)) {
-                return;
-              }
+            /* Initial emit (Open Responses extension format). The agent's
+             * response no longer blocks on extraction. */
+            if (isStreamWritable(res, null)) {
               writeResponsesAttachment(
                 res,
                 tracker,
-                buildResponsesAttachment(updated, toolCallId),
+                buildResponsesAttachment(fileMetadata, toolCallId),
                 metadata,
               );
-            },
-          });
+            }
 
-          return fileMetadata;
-        })().catch((error) => {
-          logger.error('Error processing code output:', error);
-          return null;
-        }),
+            /* Deferred preview rendering: extract HTML in the background
+             * and emit a follow-up `librechat:attachment` with the same
+             * `file_id` so the client merges the resolved record over the
+             * pending placeholder. Fire-and-forget — survives response
+             * close; polling covers the post-close gap. */
+            runPreviewFinalize({
+              finalize,
+              fileId: fileMetadata.file_id,
+              previewRevision: result?.previewRevision,
+              onResolved: (updated) => {
+                if (!isStreamWritable(res, null)) {
+                  return;
+                }
+                writeResponsesAttachment(
+                  res,
+                  tracker,
+                  buildResponsesAttachment(updated, toolCallId),
+                  metadata,
+                );
+              },
+            });
+
+            return fileMetadata;
+          })().catch((error) => {
+            logger.error('Error processing code output:', error);
+            return null;
+          }),
+        ),
       );
     }
   };

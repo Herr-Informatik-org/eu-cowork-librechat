@@ -1,3 +1,4 @@
+const releaseLifecycle = require('~/server/services/daytimeRelease');
 const fs = require('fs').promises;
 const express = require('express');
 const mongoose = require('mongoose');
@@ -70,8 +71,21 @@ async function initialize() {
       upsertBalanceFields: db.upsertBalanceFields,
     },
   });
-  mailAssistant?.engine.start();
-  mailAssistant?.research?.start();
+  if (releaseLifecycle.enabled) {
+    releaseLifecycle.registerWorker('mail', {
+      start: () => {
+        mailAssistant?.engine.start();
+        mailAssistant?.research?.start();
+      },
+      stop: () => {
+        mailAssistant?.engine.stop();
+        mailAssistant?.research?.stop();
+      },
+    });
+  } else {
+    mailAssistant?.engine.start();
+    mailAssistant?.research?.start();
+  }
   process.once('exit', () => {
     mailAssistant?.engine.stop();
     mailAssistant?.research?.stop();

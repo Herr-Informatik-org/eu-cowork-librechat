@@ -1,3 +1,4 @@
+const releaseLifecycle = require('~/server/services/daytimeRelease');
 const { logger, tenantStorage } = require('@librechat/data-schemas');
 const { v5: uuidv5 } = require('uuid');
 const {
@@ -1331,18 +1332,20 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
         const sendPromise = client.sendMessage(text, messageOptions);
 
         if (titleEligible && titleTiming === 'immediate') {
-          immediateTitlePromise = addTitle(req, {
-            text,
-            conversationId,
-            client,
-            immediate: true,
-            convoReady,
-            signal: titleAbortController.signal,
-            discardSignal: titleDiscardController.signal,
-            onTitleGenerated: emitTitleEvent,
-          }).catch((err) => {
-            logger.error('[ResumableAgentController] Error in immediate title generation', err);
-          });
+          immediateTitlePromise = releaseLifecycle.runTask('generation-title', () =>
+            addTitle(req, {
+              text,
+              conversationId,
+              client,
+              immediate: true,
+              convoReady,
+              signal: titleAbortController.signal,
+              discardSignal: titleDiscardController.signal,
+              onTitleGenerated: emitTitleEvent,
+            }).catch((err) => {
+              logger.error('[ResumableAgentController] Error in immediate title generation', err);
+            }),
+          );
         }
 
         const response = await sendPromise;
@@ -1814,27 +1817,29 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
     };
 
     // Start generation and handle any unhandled errors
-    startGeneration().catch(async (err) => {
-      logger.error(
-        `[ResumableAgentController] Unhandled error in background generation: ${err.message}`,
-      );
-      startupTelemetry?.end('error', err);
-      if (!pausePersistenceFailed) {
-        await GenerationJobManager.completeJob(streamId, err.message, jobCreatedAt).catch(
-          (completeErr) => {
-            logger.warn(
-              '[ResumableAgentController] completeJob failed during background-error cleanup',
-              completeErr,
-            );
-          },
+    releaseLifecycle.runTask('generation', () =>
+      startGeneration().catch(async (err) => {
+        logger.error(
+          `[ResumableAgentController] Unhandled error in background generation: ${err.message}`,
         );
-      }
-      try {
-        await finishResumableRequest(req, userId);
-      } finally {
-        disposeBackgroundClient();
-      }
-    });
+        startupTelemetry?.end('error', err);
+        if (!pausePersistenceFailed) {
+          await GenerationJobManager.completeJob(streamId, err.message, jobCreatedAt).catch(
+            (completeErr) => {
+              logger.warn(
+                '[ResumableAgentController] completeJob failed during background-error cleanup',
+                completeErr,
+              );
+            },
+          );
+        }
+        try {
+          await finishResumableRequest(req, userId);
+        } finally {
+          disposeBackgroundClient();
+        }
+      }),
+    );
   } catch (error) {
     logger.error('[ResumableAgentController] Initialization error:', error);
     try {
@@ -2269,13 +2274,16 @@ const _LegacyAgentController = async (req, res, next, initializeClient, addTitle
     }
   } catch (error) {
     // Handle error without capturing much scope
-    handleAbortError(res, req, error, {
-      conversationId,
-      sender: client?.sender,
-      messageId: responseMessageId,
-      parentMessageId: overrideParentMessageId ?? userMessageId ?? parentMessageId,
-      userMessageId,
-    })
+    releaseLifecycle
+      .runTask('generation-abort-cleanup', () =>
+        handleAbortError(res, req, error, {
+          conversationId,
+          sender: client?.sender,
+          messageId: responseMessageId,
+          parentMessageId: overrideParentMessageId ?? userMessageId ?? parentMessageId,
+          userMessageId,
+        }),
+      )
       .catch((err) => {
         logger.error('[api/server/controllers/agents/request] Error in `handleAbortError`', err);
       })
@@ -2285,4 +2293,5 @@ const _LegacyAgentController = async (req, res, next, initializeClient, addTitle
   }
 };
 
-module.exports = AgentController;
+module.exports = (...args) =>
+  releaseLifecycle.runTask('agent-controller', () => AgentController(...args));

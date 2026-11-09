@@ -1,3 +1,4 @@
+const releaseLifecycle = require('~/server/services/daytimeRelease');
 const { logger } = require('@librechat/data-schemas');
 const { Constants, EModelEndpoint } = require('librechat-data-provider');
 const {
@@ -751,11 +752,13 @@ const ResumeAgentController = async (req, res, next, initializeClient, addTitle)
    * runtime. Rebuild it from the queue so the resumed segment honours an
    * interrupt the user already had acknowledged.
    */
-  const preemptRearm = GenerationJobManager.rearmQueuedPreempts(streamId, job.createdAt).catch(
-    (error) => {
+  const preemptRearm = releaseLifecycle
+    .runTask('resume-preempt-rearm', () =>
+      GenerationJobManager.rearmQueuedPreempts(streamId, job.createdAt),
+    )
+    .catch((error) => {
       logger.error('[ResumeAgentController] Failed to re-arm queued preempts', error);
-    },
-  );
+    });
 
   /**
    * BOUNDED, and the bound is the point. `.catch` only fires on rejection,
@@ -1095,4 +1098,5 @@ const ResumeAgentController = async (req, res, next, initializeClient, addTitle)
   }
 };
 
-module.exports = ResumeAgentController;
+module.exports = (...args) =>
+  releaseLifecycle.runTask('agent-resume', () => ResumeAgentController(...args));

@@ -110,6 +110,10 @@
           }
         }
         window.__lcRecoverStaleAssets = function () {
+          // Managed releases retain old assets and must never reload active work.
+          if ('%VITE_KISUNO_RELEASE_MANAGED%' === 'true') {
+            return false;
+          }
           if (!shouldRecover()) {
             return false;
           }

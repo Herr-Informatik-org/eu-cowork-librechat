@@ -1,5 +1,17 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-09 — Laufende Arbeit bei vorbereiteten Tagesupdates erhalten
+
+- Ein ausdrücklich aktivierter Betriebsmodus führt API-Generationen von Bereitschaft
+  über Annahme und Auslaufen bis zur endgültigen Sperre. KI-Aufträge, Rückfragen,
+  Mailarbeit und ausstehende Speicherung verhindern eine vorzeitige Stilllegung.
+- Tenant-eigenes Redis, geprüfte Checkpoints und eine kontrollierte Workerübergabe
+  erhalten die Zuordnung laufender Arbeit. Fehlende Nachweise sperren den Wechsel.
+- Der separate Managed-Frontend-Build deaktiviert automatische PWA-Updates und
+  erzwungenes Neuladen. Er ersetzt keinen Wartungsplan für Infrastrukturänderungen.
+- Lokal geprüft; Ersteinrichtung und vollständige Doppel-API-Abnahme bleiben vor
+  der Migration erforderlich. Noch kein Produktionsrelease.
+
 ## 2026-10-30 — Lange Agentenaufträge mit erhaltenem Zwischenstand begrenzen
 
 - Lange Werkzeugabläufe im Chat erhalten einen Hinweis zum gebündelten Abrufen und zum

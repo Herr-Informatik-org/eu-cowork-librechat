@@ -3,6 +3,7 @@ import type { TokenMethods, IUser } from '@librechat/data-schemas';
 import type { MCPOAuthTokens } from './types';
 import { MCPServersRegistry } from '~/mcp/registry/MCPServersRegistry';
 import { OAuthReconnectionTracker } from './OAuthReconnectionTracker';
+import { releaseLifecycle } from '~/app/daytimeRelease';
 import { FlowStateManager } from '~/flow/manager';
 import { MCPManager } from '~/mcp/MCPManager';
 
@@ -88,6 +89,16 @@ export class OAuthReconnectionManager {
     // 3. attempt to reconnect the servers with staggered delays to avoid connection storms
     for (let i = 0; i < serversToReconnect.length; i++) {
       const serverName = serversToReconnect[i];
+      if (releaseLifecycle.enabled) {
+        void releaseLifecycle
+          .runTask('oauth-reconnect', async () => {
+            if (i > 0)
+              await new Promise<void>((resolve) => setTimeout(resolve, i * RECONNECT_STAGGER_MS));
+            await this.safeTryReconnect(userId, serverName);
+          })
+          .catch((error) => logger.error('[OAuthReconnectionManager] Release task failed:', error));
+        continue;
+      }
       if (i === 0) {
         this.safeTryReconnect(userId, serverName);
       } else {
@@ -104,8 +115,8 @@ export class OAuthReconnectionManager {
    * `RECONNECTION_TIMEOUT_MS` window if an error escapes
    * {@link tryReconnect}'s internal try/catch.
    */
-  private safeTryReconnect(userId: string, serverName: string): void {
-    this.tryReconnect(userId, serverName).catch((error) => {
+  private safeTryReconnect(userId: string, serverName: string): Promise<void> {
+    return this.tryReconnect(userId, serverName).catch((error) => {
       logger.error(
         `[OAuthReconnectionManager][User: ${userId}][${serverName}] Unexpected reconnect error`,
         error,

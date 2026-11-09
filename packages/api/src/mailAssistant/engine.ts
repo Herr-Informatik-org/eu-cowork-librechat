@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
   MailAnalysis,
   MailAssistantEngine,
@@ -25,7 +25,6 @@ import type {
   MailHtmlPreview,
   MailAttachmentDownload,
 } from './types';
-import { MAIL_CATEGORIES, MAIL_CONSENT_VERSION } from './types';
 import {
   defaultMailSettings,
   insideMailWindow,
@@ -33,10 +32,12 @@ import {
   nextMailRun,
   mailHistoryStart,
 } from './schedule';
-import { MailGraphError, safeOutlookUrl } from './graph';
-import { activeMoveJob, publicMoveJob, summarizeMove } from './moves';
-import { sanitizeMailSignature } from './signature';
 import { replyAllRecipients, recipientFingerprint } from './recipients';
+import { activeMoveJob, publicMoveJob, summarizeMove } from './moves';
+import { MAIL_CATEGORIES, MAIL_CONSENT_VERSION } from './types';
+import { MailGraphError, safeOutlookUrl } from './graph';
+import { releaseLifecycle } from '~/app/daytimeRelease';
+import { sanitizeMailSignature } from './signature';
 
 export class MailAssistantError extends Error {}
 class ManualMovePending extends Error {}
@@ -107,7 +108,9 @@ export function createMailAssistantEngine({
     if (!timer || moveWakeups.has(owner)) return;
     const timeout = setTimeout(() => {
       moveWakeups.delete(owner);
-      void processMove(owner).catch(() => {});
+      void releaseLifecycle
+        .runTask('mail-move', () => processMove(owner), { worker: true })
+        .catch(() => {});
     }, 1000);
     timeout.unref();
     moveWakeups.set(owner, timeout);
@@ -1698,7 +1701,7 @@ export function createMailAssistantEngine({
       await store.saveSettings(owner, parsed.data, now());
       await store.cancelStaleMoves(owner, now());
     },
-    run,
+    run: (...args) => releaseLifecycle.runTask('mail-manual-run', () => run(...args)),
     async pause(owner: string) {
       await adapter.authorize(owner);
       await store.pause(owner);
@@ -1766,7 +1769,7 @@ export function createMailAssistantEngine({
     start() {
       if (!timer) {
         timer = setInterval(() => {
-          void tick().catch(() => {});
+          void releaseLifecycle.runTask('mail-tick', tick, { worker: true }).catch(() => {});
         }, 5000);
         timer.unref();
       }

@@ -1,3 +1,4 @@
+const releaseLifecycle = require('~/server/services/daytimeRelease');
 const path = require('path');
 const { v4 } = require('uuid');
 const { logger } = require('@librechat/data-schemas');
@@ -245,47 +246,49 @@ const runPreviewFinalize = ({ finalize, fileId, previewRevision, onResolved }) =
   if (typeof finalize !== 'function') {
     return;
   }
-  finalize()
-    .then((updated) => {
-      if (!updated || !onResolved) {
-        return;
-      }
-      /* Isolated try/catch — a throw inside `onResolved` (transport-side
-       * SSE write race, emitter listener error) MUST NOT propagate to
-       * the outer `.catch`, which would downgrade an already-resolved
-       * record to `failed` with `previewError: 'unexpected'`.
-       * Extraction succeeded at this point and `finalizePreview` has
-       * already persisted the terminal status; the polling layer / next
-       * page load will surface the resolved preview even if this turn's
-       * SSE emit didn't land. */
-      try {
-        onResolved(updated);
-      } catch (emitError) {
-        logger.error(
-          `[runPreviewFinalize] onResolved threw for ${fileId}; record stays at the finalized status:`,
-          emitError,
-        );
-      }
-    })
-    .catch((error) => {
-      logger.error('Error rendering deferred preview:', error);
-      if (!fileId) {
-        return;
-      }
-      updateFile(
-        {
-          file_id: fileId,
-          status: 'failed',
-          previewError: 'unexpected',
-        },
-        previewRevision ? { previewRevision } : undefined,
-      ).catch((updateErr) => {
-        logger.error(
-          `[runPreviewFinalize] also failed to mark ${fileId} as failed after error:`,
-          updateErr,
-        );
-      });
-    });
+  void releaseLifecycle.runTask('artifact-preview', () =>
+    finalize()
+      .then((updated) => {
+        if (!updated || !onResolved) {
+          return;
+        }
+        /* Isolated try/catch — a throw inside `onResolved` (transport-side
+         * SSE write race, emitter listener error) MUST NOT propagate to
+         * the outer `.catch`, which would downgrade an already-resolved
+         * record to `failed` with `previewError: 'unexpected'`.
+         * Extraction succeeded at this point and `finalizePreview` has
+         * already persisted the terminal status; the polling layer / next
+         * page load will surface the resolved preview even if this turn's
+         * SSE emit didn't land. */
+        try {
+          onResolved(updated);
+        } catch (emitError) {
+          logger.error(
+            `[runPreviewFinalize] onResolved threw for ${fileId}; record stays at the finalized status:`,
+            emitError,
+          );
+        }
+      })
+      .catch((error) => {
+        logger.error('Error rendering deferred preview:', error);
+        if (!fileId) {
+          return;
+        }
+        return updateFile(
+          {
+            file_id: fileId,
+            status: 'failed',
+            previewError: 'unexpected',
+          },
+          previewRevision ? { previewRevision } : undefined,
+        ).catch((updateErr) => {
+          logger.error(
+            `[runPreviewFinalize] also failed to mark ${fileId} as failed after error:`,
+            updateErr,
+          );
+        });
+      }),
+  );
 };
 
 /**

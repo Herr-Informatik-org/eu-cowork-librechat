@@ -1,4 +1,5 @@
 const { nanoid } = require('nanoid');
+const releaseLifecycle = require('~/server/services/daytimeRelease');
 const { v4: uuidv4 } = require('uuid');
 const { logger } = require('@librechat/data-schemas');
 const { Callback, ToolEndHandler, formatAgentMessages } = require('@librechat/agents');
@@ -832,26 +833,36 @@ const executeResponse = async (envelope, { req, res }) => {
       // Record token usage against balance
       const balanceConfig = getBalanceConfig(appConfig);
       const transactionsConfig = getTransactionsConfig(appConfig);
-      recordCollectedUsage(
-        {
-          spendTokens: db.spendTokens,
-          spendStructuredTokens: db.spendStructuredTokens,
-          pricing: { getMultiplier: db.getMultiplier, getCacheMultiplier: db.getCacheMultiplier },
-          bulkWriteOps: { insertMany: db.bulkInsertTransactions, updateBalance: db.updateBalance },
-        },
-        {
-          user: userId,
-          conversationId,
-          collectedUsage,
-          context: 'message',
-          messageId: responseId,
-          balance: balanceConfig,
-          transactions: transactionsConfig,
-          model: primaryConfig.model || agent.model_parameters?.model,
-        },
-      ).catch((err) => {
-        logger.error('[Responses API] Error recording usage:', err);
-      });
+      releaseLifecycle
+        .runTask('remote-response-usage', () =>
+          recordCollectedUsage(
+            {
+              spendTokens: db.spendTokens,
+              spendStructuredTokens: db.spendStructuredTokens,
+              pricing: {
+                getMultiplier: db.getMultiplier,
+                getCacheMultiplier: db.getCacheMultiplier,
+              },
+              bulkWriteOps: {
+                insertMany: db.bulkInsertTransactions,
+                updateBalance: db.updateBalance,
+              },
+            },
+            {
+              user: userId,
+              conversationId,
+              collectedUsage,
+              context: 'message',
+              messageId: responseId,
+              balance: balanceConfig,
+              transactions: transactionsConfig,
+              model: primaryConfig.model || agent.model_parameters?.model,
+            },
+          ),
+        )
+        .catch((err) => {
+          logger.error('[Responses API] Error recording usage:', err);
+        });
 
       // Finalize the stream
       finalizeStream();
@@ -884,9 +895,11 @@ const executeResponse = async (envelope, { req, res }) => {
 
       // Wait for artifact processing after response ends (non-blocking)
       if (artifactPromises.length > 0) {
-        Promise.all(artifactPromises).catch((artifactError) => {
-          logger.warn('[Responses API] Error processing artifacts:', artifactError);
-        });
+        releaseLifecycle
+          .runTask('remote-response-artifacts', () => Promise.all(artifactPromises))
+          .catch((artifactError) => {
+            logger.warn('[Responses API] Error processing artifacts:', artifactError);
+          });
       }
     } else {
       const aggregatorHandlers = createAggregatorEventHandlers(aggregator);
@@ -1013,26 +1026,36 @@ const executeResponse = async (envelope, { req, res }) => {
       // Record token usage against balance
       const balanceConfig = getBalanceConfig(appConfig);
       const transactionsConfig = getTransactionsConfig(appConfig);
-      recordCollectedUsage(
-        {
-          spendTokens: db.spendTokens,
-          spendStructuredTokens: db.spendStructuredTokens,
-          pricing: { getMultiplier: db.getMultiplier, getCacheMultiplier: db.getCacheMultiplier },
-          bulkWriteOps: { insertMany: db.bulkInsertTransactions, updateBalance: db.updateBalance },
-        },
-        {
-          user: userId,
-          conversationId,
-          collectedUsage,
-          context: 'message',
-          messageId: responseId,
-          balance: balanceConfig,
-          transactions: transactionsConfig,
-          model: primaryConfig.model || agent.model_parameters?.model,
-        },
-      ).catch((err) => {
-        logger.error('[Responses API] Error recording usage:', err);
-      });
+      releaseLifecycle
+        .runTask('remote-response-usage', () =>
+          recordCollectedUsage(
+            {
+              spendTokens: db.spendTokens,
+              spendStructuredTokens: db.spendStructuredTokens,
+              pricing: {
+                getMultiplier: db.getMultiplier,
+                getCacheMultiplier: db.getCacheMultiplier,
+              },
+              bulkWriteOps: {
+                insertMany: db.bulkInsertTransactions,
+                updateBalance: db.updateBalance,
+              },
+            },
+            {
+              user: userId,
+              conversationId,
+              collectedUsage,
+              context: 'message',
+              messageId: responseId,
+              balance: balanceConfig,
+              transactions: transactionsConfig,
+              model: primaryConfig.model || agent.model_parameters?.model,
+            },
+          ),
+        )
+        .catch((err) => {
+          logger.error('[Responses API] Error recording usage:', err);
+        });
 
       if (artifactPromises.length > 0) {
         try {
@@ -1288,7 +1311,8 @@ const getResponse = async (req, res) => {
 };
 
 module.exports = {
-  createResponse,
+  createResponse: (...args) =>
+    releaseLifecycle.runTask('remote-response', () => createResponse(...args)),
   getResponse,
   listModels,
 };
