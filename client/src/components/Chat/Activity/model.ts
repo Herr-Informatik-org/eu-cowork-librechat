@@ -1,6 +1,6 @@
 import { ContentTypes } from 'librechat-data-provider';
 import type { TMessage } from 'librechat-data-provider';
-import type { ConversationActivity } from '~/store/activity';
+import type { ConversationActivity, BackgroundActivityUpdate } from '~/store/activity';
 import { findLiveAskUserQuestion } from '~/utils/approval';
 
 export function activityFromMessages(messages: TMessage[], responseId?: string) {
@@ -36,6 +36,22 @@ export function activityFromMessages(messages: TMessage[], responseId?: string) 
   }
   if (latest.text) return { state: 'running', stage: 'writing', messageId } as const;
   return { state: 'waiting', stage: 'waiting', messageId } as const;
+}
+
+/**
+ * The outcome of a run that ended without an attached stream, read from its saved messages.
+ * Open questions and approvals win; a missing response means the run did not finish.
+ */
+export function outcomeFromMessages(messages: TMessage[]): BackgroundActivityUpdate | null {
+  const live = activityFromMessages(messages);
+  if (live.state === 'needs-input') return live;
+  const latest = messages[messages.length - 1];
+  if (!latest) return null;
+  const { messageId } = latest;
+  if (latest.error === true) return { state: 'error', stage: 'waiting', messageId };
+  if (latest.isCreatedByUser || latest.unfinished === true)
+    return { state: 'stopped', stage: 'waiting', messageId };
+  return { state: 'done', stage: 'waiting', messageId };
 }
 
 export function activityLabel(activity: ConversationActivity) {

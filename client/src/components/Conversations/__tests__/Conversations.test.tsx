@@ -88,8 +88,15 @@ jest.mock('@librechat/client', () => ({
   NewChatIcon: () => <svg data-testid="new-chat-icon" />,
 }));
 
+let mockActiveJobs: { activeJobIds: string[] } | undefined;
+const mockUseBackgroundActivity = jest.fn();
+
 jest.mock('~/data-provider', () => ({
-  useActiveJobs: () => ({ data: undefined }),
+  useActiveJobs: () => ({ data: mockActiveJobs }),
+}));
+
+jest.mock('~/components/Chat/Activity/useActivity', () => ({
+  useBackgroundActivity: (...args: unknown[]) => mockUseBackgroundActivity(...args),
 }));
 
 jest.mock('~/utils', () => ({
@@ -105,7 +112,9 @@ jest.mock('~/components/Nav/Favorites/FavoritesList', () => ({
 
 jest.mock('../Convo', () => ({
   __esModule: true,
-  default: () => <div data-testid="convo" />,
+  default: ({ isGenerating }: { isGenerating?: boolean }) => (
+    <div data-testid="convo" data-generating={String(isGenerating)} />
+  ),
 }));
 
 describe('Conversations – favorites CellMeasurerCache key invalidation', () => {
@@ -252,5 +261,51 @@ describe('Conversations – pinned header', () => {
   it('does not show the pinned header during search', () => {
     const { queryByText } = renderConversations([pinnedConvo], 'some query');
     expect(queryByText('com_ui_pinned')).not.toBeInTheDocument();
+  });
+});
+
+describe('Conversations – run status', () => {
+  const containerRef = createRef<List>();
+
+  beforeEach(() => {
+    mockActiveJobs = undefined;
+    mockUseBackgroundActivity.mockClear();
+    mockFavoritesState.favorites = [];
+    mockShowMarketplace = false;
+  });
+
+  const renderList = () =>
+    render(
+      <RecoilRoot>
+        <Conversations
+          conversations={[pinnedConvo]}
+          moveToTop={jest.fn()}
+          toggleNav={jest.fn()}
+          containerRef={containerRef}
+          loadMoreConversations={jest.fn()}
+          isLoading={false}
+          isSearchLoading={false}
+          isChatsExpanded={true}
+          setIsChatsExpanded={jest.fn()}
+        />
+      </RecoilRoot>,
+    );
+
+  it('hands every job poll to the background outcome tracker', () => {
+    mockActiveJobs = { activeJobIds: ['pinned-1'] };
+    renderList();
+    expect(mockUseBackgroundActivity).toHaveBeenLastCalledWith(mockActiveJobs);
+  });
+
+  it('marks rows with an active job as running', () => {
+    mockActiveJobs = { activeJobIds: ['pinned-1'] };
+    const { getByTestId } = renderList();
+    expect(getByTestId('convo')).toHaveAttribute('data-generating', 'true');
+  });
+
+  it('rows without a job are not running', () => {
+    mockActiveJobs = { activeJobIds: [] };
+    const { getByTestId } = renderList();
+    expect(getByTestId('convo')).toHaveAttribute('data-generating', 'false');
   });
 });

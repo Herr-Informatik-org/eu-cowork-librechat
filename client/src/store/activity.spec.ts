@@ -1,11 +1,14 @@
 import type { TMessage, TSubmission } from 'librechat-data-provider';
 import {
-  beginConversationActivity,
-  clearConversationActivities,
-  finishConversationActivity,
+  setViewedConversation,
+  getLiveConversationIds,
   getConversationActivity,
-  updateConversationActivity,
+  applyBackgroundActivity,
+  beginConversationActivity,
   failConversationActivity,
+  updateConversationActivity,
+  finishConversationActivity,
+  clearConversationActivities,
   setConversationActivityUser,
 } from './activity';
 
@@ -26,6 +29,7 @@ const submission = (clientRequestId = 'request', conversationId = 'chat') =>
 
 beforeEach(() => {
   sessionStorage.clear();
+  setViewedConversation(null);
   setConversationActivityUser('test-user');
   clearConversationActivities();
 });
@@ -176,5 +180,135 @@ test('failures and live input requests retain distinct states', () => {
   expect(getConversationActivity('paused')?.state).toBe('needs-input');
   beginConversationActivity(submission());
   failConversationActivity(submission());
+  expect(getConversationActivity('chat')?.state).toBe('error');
+});
+
+describe('seen outcomes', () => {
+  test('opening a conversation marks its outcome seen without changing the result', () => {
+    beginConversationActivity(submission());
+    finishConversationActivity(submission(), { final: true, responseMessage: message });
+    const finished = getConversationActivity('chat')!;
+    expect(finished.seen).toBeUndefined();
+
+    setViewedConversation('chat');
+
+    expect(getConversationActivity('chat')).toMatchObject({
+      state: 'done',
+      seen: true,
+      updatedAt: finished.updatedAt,
+    });
+  });
+
+  test('a run that finishes while its conversation is on screen is seen at once', () => {
+    setViewedConversation('chat');
+    beginConversationActivity(submission());
+    expect(getConversationActivity('chat')?.seen).toBeUndefined();
+    failConversationActivity(submission());
+    expect(getConversationActivity('chat')).toMatchObject({ state: 'error', seen: true });
+  });
+
+  test('an open question stays unseen until it is answered', () => {
+    updateConversationActivity('paused', {
+      state: 'needs-input',
+      stage: 'question',
+      messageId: 'ask',
+    });
+    setViewedConversation('paused');
+    expect(getConversationActivity('paused')?.seen).toBeUndefined();
+  });
+
+  test('seen outcomes are not restored after a reload', () => {
+    beginConversationActivity(submission('viewed-run', 'viewed-chat'));
+    finishConversationActivity(submission('viewed-run', 'viewed-chat'), {
+      final: true,
+      responseMessage: message,
+    });
+    beginConversationActivity(submission('waiting-run', 'waiting-chat'));
+    finishConversationActivity(submission('waiting-run', 'waiting-chat'), {
+      final: true,
+      responseMessage: message,
+    });
+    setViewedConversation('viewed-chat');
+
+    const saved = sessionStorage.getItem('eucowork:activity:v1:test-user') ?? '';
+    expect(saved).not.toContain('viewed-chat');
+    expect(saved).toContain('waiting-chat');
+  });
+});
+
+describe('background observations', () => {
+  test('an ended job without an attached stream records its saved outcome', () => {
+    applyBackgroundActivity('remote', { state: 'done', stage: 'waiting' }, null);
+    expect(getConversationActivity('remote')).toMatchObject({ state: 'done' });
+    expect(getConversationActivity('remote')?.runId).toMatch(/^job:remote:/);
+  });
+
+  test('a live stream that changed the conversation meanwhile wins', () => {
+    const before = getConversationActivity('chat');
+    beginConversationActivity(submission());
+    applyBackgroundActivity('chat', { state: 'done', stage: 'waiting' }, before);
+    expect(getConversationActivity('chat')?.state).toBe('waiting');
+  });
+
+  test('a background outcome keeps the identity of the run it completes', () => {
+    beginConversationActivity(submission('left-behind'));
+    const live = getConversationActivity('chat');
+    applyBackgroundActivity('chat', { state: 'needs-input', stage: 'question' }, live);
+    expect(getConversationActivity('chat')).toMatchObject({
+      runId: 'left-behind',
+      state: 'needs-input',
+    });
+  });
+
+  test('a new background result is announced again after an earlier one was seen', () => {
+    setViewedConversation('remote');
+    applyBackgroundActivity('remote', { state: 'done', stage: 'waiting' }, null);
+    const seen = getConversationActivity('remote');
+    expect(seen?.seen).toBe(true);
+    setViewedConversation('other');
+    applyBackgroundActivity('remote', { state: 'done', stage: 'waiting' }, seen);
+    expect(getConversationActivity('remote')?.seen).toBeUndefined();
+  });
+
+  test('a removed conversation forgets its run', () => {
+    beginConversationActivity(submission());
+    applyBackgroundActivity('chat', null, getConversationActivity('chat'));
+    expect(getConversationActivity('chat')).toBeNull();
+  });
+
+  test('a resumed stream takes over a run that was only observed in the background', () => {
+    applyBackgroundActivity('chat', { state: 'needs-input', stage: 'question' }, null);
+    beginConversationActivity(submission('resumed'), 'chat', false);
+    finishConversationActivity(submission('resumed'), { final: true, responseMessage: message });
+    expect(getConversationActivity('chat')).toMatchObject({ runId: 'resumed', state: 'done' });
+  });
+
+  test('only unfinished runs are reported as live', () => {
+    beginConversationActivity(submission('working', 'working-chat'));
+    beginConversationActivity(submission('pending', 'new'));
+    applyBackgroundActivity('finished', { state: 'done', stage: 'waiting' }, null);
+    applyBackgroundActivity('asking', { state: 'needs-input', stage: 'question' }, null);
+    expect(getLiveConversationIds()).toEqual(['working-chat']);
+  });
+});
+
+test('a cleared submission describes no run and never throws', () => {
+  const cleared = {} as TSubmission;
+  expect(() => beginConversationActivity(cleared, 'chat', false)).not.toThrow();
+  expect(() => beginConversationActivity(cleared)).not.toThrow();
+  expect(getConversationActivity('chat')).toBeNull();
+  expect(getConversationActivity('new')).toBeNull();
+
+  beginConversationActivity(submission());
+  expect(() => finishConversationActivity(cleared, { final: true })).not.toThrow();
+  expect(() => failConversationActivity(cleared)).not.toThrow();
+  expect(() => finishConversationActivity(null, { final: true })).not.toThrow();
+  expect(getConversationActivity('chat')?.state).toBe('waiting');
+});
+
+test('a failure without a saved user message is still reported as an error', () => {
+  const withoutMessage = { clientRequestId: 'request', conversation: { conversationId: 'chat' } };
+  beginConversationActivity(withoutMessage);
+  failConversationActivity(withoutMessage);
   expect(getConversationActivity('chat')?.state).toBe('error');
 });

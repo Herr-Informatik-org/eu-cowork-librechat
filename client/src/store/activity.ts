@@ -11,22 +11,45 @@ export type ConversationActivity = {
   messageId?: string;
   startedAt: number;
   updatedAt: number;
+  /** A terminal outcome the user has already looked at; the sidebar no longer announces it. */
+  seen?: boolean;
 };
+type TerminalState = Extract<ActivityState, 'done' | 'error' | 'stopped'>;
+/** The submission fields a run is identified by. A cleared submission (`{}`) has none. */
+type RunSubmission = Partial<
+  Pick<TSubmission, 'clientRequestId' | 'initialResponse' | 'userMessage' | 'conversation'>
+>;
+export type BackgroundActivityUpdate = Pick<ConversationActivity, 'state' | 'stage'> &
+  Partial<Pick<ConversationActivity, 'messageId'>>;
 
 const activities = new Map<string, ConversationActivity>();
 const runConversations = new Map<string, string>();
 const listeners = new Set<() => void>();
 const TERMINAL = new Set<ActivityState>(['done', 'error', 'stopped']);
+const LIVE = new Set<ActivityState>(['waiting', 'running']);
 const STORAGE_PREFIX = 'eucowork:activity:v1:';
+/** Runs reconstructed outside an attached stream; a stream may take them over. */
+const PROJECTED_RUN_PREFIXES = ['question:', 'job:'];
 let activityUserId: string | null = null;
 let hasUserScope = false;
+let viewedConversationId: string | null = null;
+
+export const isTerminalActivity = (
+  activity?: ConversationActivity | null,
+): activity is ConversationActivity & { state: TerminalState } =>
+  activity != null && TERMINAL.has(activity.state);
+
+const isProjectedRun = (runId: string) =>
+  PROJECTED_RUN_PREFIXES.some((prefix) => runId.startsWith(prefix));
+
+const notify = () => listeners.forEach((listener) => listener());
 
 /** Store observed outcomes only, without message content, tool names, or live work. */
 function persistOutcomes() {
   if (!activityUserId) return;
   try {
     const outcomes = [...activities.values()]
-      .filter((activity) => TERMINAL.has(activity.state))
+      .filter((activity) => TERMINAL.has(activity.state) && activity.seen !== true)
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, 200)
       .map(({ conversationId, runId, state, startedAt, updatedAt }) => ({
@@ -84,7 +107,7 @@ export function setConversationActivityUser(userId?: string | null) {
       // Ignore invalid or unavailable storage rather than inventing a status.
     }
   }
-  listeners.forEach((listener) => listener());
+  notify();
 }
 
 export const getConversationActivity = (conversationId: string) =>
@@ -95,8 +118,12 @@ export function subscribeActivity(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-function publish(activity: ConversationActivity) {
+function publish(next: ConversationActivity) {
   if (hasUserScope && !activityUserId) return;
+  const seen =
+    TERMINAL.has(next.state) &&
+    (next.seen === true || next.conversationId === viewedConversationId);
+  const activity: ConversationActivity = { ...next, seen: seen || undefined };
   const previous = activities.get(activity.conversationId);
   if (previous && previous.runId !== activity.runId) runConversations.delete(previous.runId);
   activities.set(activity.conversationId, activity);
@@ -111,30 +138,33 @@ function publish(activity: ConversationActivity) {
     }
   }
   persistOutcomes();
-  listeners.forEach((listener) => listener());
+  notify();
 }
 
-const submissionRunId = (submission: TSubmission) =>
-  submission.clientRequestId ??
-  submission.initialResponse?.messageId ??
-  submission.userMessage.messageId;
+/** `undefined` when the submission describes no run, for example after a new chat cleared it. */
+const submissionRunId = (submission?: RunSubmission | null) =>
+  submission?.clientRequestId ||
+  submission?.initialResponse?.messageId ||
+  submission?.userMessage?.messageId ||
+  undefined;
 
 /** A completed historical message is not evidence of an observed successful run. */
 export function beginConversationActivity(
-  submission: TSubmission,
+  submission: RunSubmission | null | undefined,
   resolvedId?: string | null,
   replace = true,
   responseId?: string,
 ) {
-  const conversationId = resolvedId ?? submission.conversation.conversationId ?? 'new';
   const runId = submissionRunId(submission);
+  if (!runId) return;
+  const conversationId = resolvedId ?? submission?.conversation?.conversationId ?? 'new';
   const current = activities.get(conversationId);
   if (current?.runId === runId) {
     if (responseId && current.messageId !== responseId)
       publish({ ...current, messageId: responseId });
     return;
   }
-  if (current && !replace && !current.runId.startsWith('question:')) return;
+  if (current && !replace && !isProjectedRun(current.runId)) return;
   const pending = activities.get('new');
   if (conversationId !== 'new' && pending?.runId === runId) {
     activities.delete('new');
@@ -146,7 +176,7 @@ export function beginConversationActivity(
     runId,
     state: 'waiting',
     stage: 'waiting',
-    messageId: responseId ?? submission.initialResponse?.messageId,
+    messageId: responseId ?? submission?.initialResponse?.messageId,
     startedAt: Date.now(),
     updatedAt: Date.now(),
   });
@@ -189,20 +219,22 @@ export function updateConversationActivity(
 }
 
 export function finishConversationActivity(
-  submission: TSubmission,
+  submission: RunSubmission | null | undefined,
   result: {
     conversationId?: string | null;
     final?: boolean;
     aborted?: boolean;
     earlyAbort?: boolean;
+    error?: boolean;
     responseMessage?: TMessage;
   },
 ) {
   const runId = submissionRunId(submission);
+  if (!runId) return;
   const conversationId =
     result.conversationId && result.conversationId !== 'new'
       ? result.conversationId
-      : (runConversations.get(runId) ?? submission.conversation.conversationId ?? 'new');
+      : (runConversations.get(runId) ?? submission?.conversation?.conversationId ?? 'new');
   const pending = activities.get('new');
   const current =
     activities.get(conversationId) ?? (pending?.runId === runId ? pending : undefined);
@@ -212,7 +244,7 @@ export function finishConversationActivity(
   let state: ActivityState = 'done';
   if (result.aborted || result.earlyAbort || response?.unfinished || !result.final)
     state = 'stopped';
-  if (response?.error) state = 'error';
+  if (response?.error || result.error) state = 'error';
   if (conversationId !== 'new' && activities.get('new')?.runId === runId) activities.delete('new');
   publish({
     conversationId,
@@ -225,9 +257,13 @@ export function finishConversationActivity(
   });
 }
 
-export function failConversationActivity(submission: TSubmission) {
+export function failConversationActivity(submission: RunSubmission | null | undefined) {
+  const userMessage = submission?.userMessage;
   finishConversationActivity(submission, {
-    responseMessage: { ...submission.userMessage, isCreatedByUser: false, error: true },
+    error: true,
+    responseMessage: userMessage
+      ? { ...userMessage, isCreatedByUser: false, error: true }
+      : undefined,
   });
 }
 
@@ -235,5 +271,67 @@ export function clearConversationActivities() {
   activities.clear();
   runConversations.clear();
   persistOutcomes();
-  listeners.forEach((listener) => listener());
+  notify();
+}
+
+/** Conversations whose last observation is an unfinished run. */
+export function getLiveConversationIds() {
+  const ids: string[] = [];
+  for (const [conversationId, activity] of activities) {
+    if (conversationId !== 'new' && LIVE.has(activity.state)) ids.push(conversationId);
+  }
+  return ids;
+}
+
+/**
+ * The conversation on screen. Its outcomes count as seen at once, so the sidebar only
+ * announces results the user has not looked at yet. An open question stays visible.
+ */
+export function setViewedConversation(conversationId?: string | null) {
+  viewedConversationId = conversationId || null;
+  if (!viewedConversationId) return;
+  const current = activities.get(viewedConversationId);
+  if (!current || !TERMINAL.has(current.state) || current.seen === true) return;
+  publish({ ...current, seen: true });
+}
+
+/**
+ * Applies a status observed without an attached stream (job list, stream status or saved
+ * messages). It is dropped when anything changed the conversation since `expected` was read,
+ * so a live stream always wins over a background observation. `null` forgets the run.
+ */
+export function applyBackgroundActivity(
+  conversationId: string,
+  update: BackgroundActivityUpdate | null,
+  expected: ConversationActivity | null,
+) {
+  if (hasUserScope && !activityUserId) return;
+  const current = activities.get(conversationId) ?? null;
+  if (current !== expected) return;
+  if (!update) {
+    if (!current) return;
+    activities.delete(conversationId);
+    runConversations.delete(current.runId);
+    persistOutcomes();
+    notify();
+    return;
+  }
+  const live = current && !TERMINAL.has(current.state) ? current : null;
+  if (
+    live &&
+    !TERMINAL.has(update.state) &&
+    live.state === update.state &&
+    live.stage === update.stage
+  )
+    return;
+  const now = Date.now();
+  publish({
+    conversationId,
+    runId: live?.runId ?? `job:${conversationId}:${now}`,
+    state: update.state,
+    stage: update.stage,
+    messageId: update.messageId ?? live?.messageId,
+    startedAt: live?.startedAt ?? now,
+    updatedAt: now,
+  });
 }

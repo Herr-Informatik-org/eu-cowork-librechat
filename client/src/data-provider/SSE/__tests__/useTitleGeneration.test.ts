@@ -26,6 +26,18 @@ const mockSetQueryData = jest.fn();
 const mockRemoveQueries = jest.fn();
 const mockResetQueries = jest.fn();
 const mockUpdateConvoInAllQueries = jest.fn();
+type CacheEvent = {
+  type: string;
+  action: { type: string; manual?: boolean };
+  query: { queryKey: unknown[]; state: { data: unknown } };
+};
+let mockCacheListener: ((event: CacheEvent) => void) | null = null;
+const mockSubscribe = jest.fn((listener: (event: CacheEvent) => void) => {
+  mockCacheListener = listener;
+  return () => {
+    mockCacheListener = null;
+  };
+});
 
 jest.mock('@tanstack/react-query', () => ({
   useQuery: jest.fn(() => ({ data: { activeJobIds: mockActiveJobIds } })),
@@ -33,12 +45,15 @@ jest.mock('@tanstack/react-query', () => ({
     mockCapturedQueries = queries;
     return mockQueriesResults;
   }),
-  useQueryClient: jest.fn(() => ({
-    setQueryData: mockSetQueryData,
-    removeQueries: mockRemoveQueries,
-    resetQueries: mockResetQueries,
-  })),
+  useQueryClient: jest.fn(() => mockQueryClient),
 }));
+
+const mockQueryClient = {
+  setQueryData: mockSetQueryData,
+  removeQueries: mockRemoveQueries,
+  resetQueries: mockResetQueries,
+  getQueryCache: () => ({ subscribe: mockSubscribe }),
+};
 
 jest.mock('../../Endpoints', () => ({
   useGetStartupConfig: () => ({ data: { titleGenerationTiming: mockTiming } }),
@@ -56,7 +71,11 @@ jest.mock('~/utils', () => ({
 
 jest.mock('librechat-data-provider', () => ({
   apiBaseUrl: () => '',
-  QueryKeys: { conversation: 'conversation', activeJobs: 'activeJobs' },
+  QueryKeys: {
+    conversation: 'conversation',
+    activeJobs: 'activeJobs',
+    allConversations: 'allConversations',
+  },
   request: { get: jest.fn() },
   dataService: { genTitle: jest.fn(), getActiveJobs: jest.fn() },
 }));
@@ -174,5 +193,61 @@ describe('useTitleGeneration — result handling', () => {
     rerender();
 
     expect(mockResetQueries).toHaveBeenCalledWith(genTitleQueryKey('conv-done404'));
+  });
+});
+
+describe('useTitleGeneration — titles survive a refetch before the server saved them', () => {
+  const listEvent = (conversationId: string, title: string, manual = false): CacheEvent => ({
+    type: 'updated',
+    action: { type: 'success', manual },
+    query: {
+      queryKey: ['allConversations', {}],
+      state: { data: { pages: [{ conversations: [{ conversationId, title }] }] } },
+    },
+  });
+  const flush = () => act(async () => Promise.resolve());
+  const appliedTitle = (conversationId: string) => {
+    const call = mockUpdateConvoInAllQueries.mock.calls.find(([, id]) => id === conversationId);
+    const updater = call?.[2] as ((c: { title?: string }) => { title?: string }) | undefined;
+    return updater?.({ title: 'New Chat' }).title;
+  };
+
+  it('restores a title that a list refetch replaced with the placeholder', async () => {
+    renderHook(() => useTitleGeneration(true));
+    act(() => markTitleGenerationProcessed('conv-refetch', 'Budget review'));
+
+    act(() => mockCacheListener?.(listEvent('conv-refetch', 'New Chat')));
+    await flush();
+
+    expect(appliedTitle('conv-refetch')).toBe('Budget review');
+  });
+
+  it('forgets the title once the server returns a real one', async () => {
+    renderHook(() => useTitleGeneration(true));
+    act(() => markTitleGenerationProcessed('conv-saved', 'Budget review'));
+
+    act(() => mockCacheListener?.(listEvent('conv-saved', 'Budget review')));
+    await flush();
+    act(() => mockCacheListener?.(listEvent('conv-saved', 'New Chat', true)));
+    await flush();
+
+    expect(mockUpdateConvoInAllQueries).not.toHaveBeenCalled();
+  });
+
+  it('keeps the title when only a local write repeats it', async () => {
+    renderHook(() => useTitleGeneration(true));
+    act(() => markTitleGenerationProcessed('conv-local', 'Offer draft'));
+
+    act(() => mockCacheListener?.(listEvent('conv-local', 'Offer draft', true)));
+    await flush();
+    act(() => mockCacheListener?.(listEvent('conv-local', 'New Chat', true)));
+    await flush();
+
+    expect(appliedTitle('conv-local')).toBe('Offer draft');
+  });
+
+  it('does not watch the cache while signed out', () => {
+    renderHook(() => useTitleGeneration(false));
+    expect(mockSubscribe).not.toHaveBeenCalled();
   });
 });

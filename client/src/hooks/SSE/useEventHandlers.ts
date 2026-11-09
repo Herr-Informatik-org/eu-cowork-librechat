@@ -643,7 +643,7 @@ export default function useEventHandlers({
         convo ? { ...convo, title } : convo,
       );
       updateConvoInAllQueries(queryClient, conversationId, (convo) => ({ ...convo, title }));
-      markTitleGenerationProcessed(conversationId);
+      markTitleGenerationProcessed(conversationId, title);
 
       if (location.pathname.includes(conversationId)) {
         document.title = title;

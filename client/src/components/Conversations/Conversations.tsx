@@ -16,6 +16,7 @@ import {
   useElementSize,
 } from '~/hooks';
 import { groupConversationsByDate, clearMessagesCache, cn } from '~/utils';
+import { useBackgroundActivity } from '~/components/Chat/Activity/useActivity';
 import FavoritesList from '~/components/Nav/Favorites/FavoritesList';
 import { useActiveJobs } from '~/data-provider';
 import Convo from './Convo';
@@ -211,6 +212,7 @@ const Conversations: FC<ConversationsProps> = ({
     () => new Set(activeJobsData?.activeJobIds ?? []),
     [activeJobsData?.activeJobIds],
   );
+  useBackgroundActivity(activeJobsData);
 
   // Determine if FavoritesList will render content
   const shouldShowFavorites =

@@ -15,6 +15,8 @@ import type { TConversation } from 'librechat-data-provider';
 import type { MeasuredCellParent } from '~/components/Conversations/Conversations';
 import ConversationEndpointIcon from '~/components/Conversations/ConversationEndpointIcon';
 import { areConversationRenderPropsEqual } from '~/components/Conversations/utils';
+import ActivityStatusBadge from '~/components/Chat/Activity/ActivityStatusBadge';
+import { useBackgroundActivity } from '~/components/Chat/Activity/useActivity';
 import { DateLabel } from '~/components/Conversations/Conversations';
 import { useLocalize, useNavigateToConvo } from '~/hooks';
 import { groupConversationsByDate, cn } from '~/utils';
@@ -94,10 +96,12 @@ const ConversationRow = memo(
           <span className="block truncate text-sm font-medium text-text-primary">{title}</span>
           <span className="block truncate text-xs text-text-secondary">{formattedDate}</span>
         </span>
-        {isGenerating && (
-          <Spinner
-            className="h-4 w-4 shrink-0 text-text-primary"
-            aria-label={localize('com_ui_generating')}
+        {conversation.conversationId && (
+          <ActivityStatusBadge
+            conversationId={conversation.conversationId}
+            active={isGenerating}
+            compact
+            className="shrink-0"
           />
         )}
       </button>
@@ -122,6 +126,7 @@ const ProjectChatList = ({
     () => new Set(activeJobsData?.activeJobIds ?? []),
     [activeJobsData?.activeJobIds],
   );
+  useBackgroundActivity(activeJobsData);
   const flattenedItems = useMemo(() => {
     if (isLoading) {
       return [{ type: 'loading' as const }];

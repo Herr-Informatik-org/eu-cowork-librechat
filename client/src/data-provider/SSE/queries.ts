@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import { apiBaseUrl, QueryKeys, request, dataService } from 'librechat-data-provider';
-import type { Agents, TConversation, TPendingSteer } from 'librechat-data-provider';
+import type {
+  Agents,
+  TConversation,
+  TPendingSteer,
+  ConversationData,
+} from 'librechat-data-provider';
+import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { generationProtocolHeaders, withGenerationProtocolQuery } from './protocol';
 import { isNotFoundError, updateConvoInAllQueries } from '~/utils';
 import { useGetStartupConfig } from '../Endpoints';
@@ -69,6 +75,163 @@ const deferredTitles = new Set<string>();
 /** Listeners to notify when queue changes (for non-resumable streams like assistants) */
 const queueListeners = new Set<() => void>();
 
+/** Titles this session received before the server persisted them. In immediate mode the
+ * server saves a title only when the response ends, so a list or conversation refetch in
+ * between returns "New Chat" and would erase a title the user has already seen. */
+const generatedTitles = new Map<string, string>();
+const MAX_GENERATED_TITLES = 200;
+/** Conversations whose persisted title is being read after their job ended. */
+const titleRefreshes = new Set<string>();
+const TITLE_REFRESH_DELAYS_MS = [0, 4_000, 12_000];
+
+export const isPlaceholderTitle = (title?: string | null) =>
+  title == null || title === '' || title === 'New Chat';
+
+function rememberGeneratedTitle(conversationId: string, title?: string | null) {
+  if (!conversationId || title == null || isPlaceholderTitle(title)) {
+    return;
+  }
+  generatedTitles.delete(conversationId);
+  generatedTitles.set(conversationId, title);
+  if (generatedTitles.size > MAX_GENERATED_TITLES) {
+    const oldest = generatedTitles.keys().next().value;
+    if (oldest != null) {
+      generatedTitles.delete(oldest);
+    }
+  }
+}
+
+/** Writes a generated title to every cached copy of the conversation. */
+export function applyConversationTitle(
+  queryClient: QueryClient,
+  conversationId: string,
+  title: string,
+) {
+  rememberGeneratedTitle(conversationId, title);
+  queryClient.setQueryData(
+    [QueryKeys.conversation, conversationId],
+    (convo: TConversation | undefined) => (convo ? { ...convo, title } : convo),
+  );
+  updateConvoInAllQueries(queryClient, conversationId, (c) => ({ ...c, title }));
+  if (window.location.pathname.includes(conversationId)) {
+    document.title = title;
+  }
+}
+
+/** Cached list title of a conversation; `undefined` when no list holds it. */
+function getCachedListTitle(queryClient: QueryClient, conversationId: string) {
+  const lists = queryClient.getQueriesData<ConversationData>([QueryKeys.allConversations]);
+  for (const [, data] of lists) {
+    for (const page of data?.pages ?? []) {
+      const convo = page.conversations.find((c) => c.conversationId === conversationId);
+      if (convo) {
+        return { title: convo.title };
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Puts remembered titles back where a refetch replaced them with a placeholder. A real
+ * title from the server (persisted or renamed) ends the need to remember it. */
+function restoreGeneratedTitles(
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+  data: unknown,
+  fromServer: boolean,
+) {
+  const [scope, id] = queryKey;
+  const stale = new Map<string, string>();
+  const check = (conversationId?: string | null, title?: string | null) => {
+    const known = conversationId ? generatedTitles.get(conversationId) : undefined;
+    if (!conversationId || known == null) {
+      return;
+    }
+    if (isPlaceholderTitle(title)) {
+      stale.set(conversationId, known);
+    } else if (fromServer) {
+      generatedTitles.delete(conversationId);
+    }
+  };
+  if (scope === QueryKeys.conversation && typeof id === 'string' && data != null) {
+    check(id, (data as TConversation).title);
+  } else if (scope === QueryKeys.allConversations) {
+    for (const page of (data as ConversationData | undefined)?.pages ?? []) {
+      for (const convo of page.conversations) {
+        check(convo.conversationId, convo.title);
+      }
+    }
+  }
+  stale.forEach((title, conversationId) =>
+    applyConversationTitle(queryClient, conversationId, title),
+  );
+}
+
+function useGeneratedTitleGuard(queryClient: QueryClient, enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (
+        generatedTitles.size === 0 ||
+        event?.type !== 'updated' ||
+        event.action.type !== 'success'
+      ) {
+        return;
+      }
+      const { queryKey, state } = event.query;
+      if (queryKey[0] !== QueryKeys.conversation && queryKey[0] !== QueryKeys.allConversations) {
+        return;
+      }
+      const fromServer = event.action.manual !== true;
+      Promise.resolve().then(() =>
+        restoreGeneratedTitles(queryClient, queryKey, state.data, fromServer),
+      );
+    });
+  }, [enabled, queryClient]);
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Reads the persisted title of a conversation whose job just ended, when the list still
+ * shows a placeholder. Covers titles that were missed while the conversation ran in the
+ * background (no attached stream, paused title retries) without waiting for window focus.
+ */
+export async function refreshConversationTitle(queryClient: QueryClient, conversationId: string) {
+  if (titleRefreshes.has(conversationId)) {
+    return;
+  }
+  titleRefreshes.add(conversationId);
+  try {
+    for (const delay of TITLE_REFRESH_DELAYS_MS) {
+      if (delay > 0) {
+        await wait(delay);
+      }
+      const cached = getCachedListTitle(queryClient, conversationId);
+      if (!cached || !isPlaceholderTitle(cached.title)) {
+        return;
+      }
+      const known = generatedTitles.get(conversationId);
+      if (known != null) {
+        applyConversationTitle(queryClient, conversationId, known);
+        return;
+      }
+      const convo = await dataService.getConversationById(conversationId);
+      if (convo?.title != null && !isPlaceholderTitle(convo.title)) {
+        applyConversationTitle(queryClient, conversationId, convo.title);
+        markTitleGenerationProcessed(conversationId);
+        return;
+      }
+    }
+  } catch {
+    // A deleted or unreadable conversation keeps its current title.
+  } finally {
+    titleRefreshes.delete(conversationId);
+  }
+}
+
 /** Queue a conversation for title generation (call when starting new conversation) */
 export function queueTitleGeneration(conversationId: string) {
   if (!processedTitles.has(conversationId)) {
@@ -77,7 +240,8 @@ export function queueTitleGeneration(conversationId: string) {
   }
 }
 
-export function markTitleGenerationProcessed(conversationId: string) {
+export function markTitleGenerationProcessed(conversationId: string, title?: string | null) {
+  rememberGeneratedTitle(conversationId, title);
   processedTitles.add(conversationId);
   titleQueue.delete(conversationId);
   deferredTitles.delete(conversationId);
@@ -101,6 +265,8 @@ export function useTitleGeneration(enabled = true) {
   const { data: startupConfig } = useGetStartupConfig();
   /** Defaults to immediate until startup config loads. */
   const timing = startupConfig?.titleGenerationTiming ?? 'immediate';
+
+  useGeneratedTitleGuard(queryClient, enabled);
 
   const [queueVersion, setQueueVersion] = useState(0);
   const [readyToFetch, setReadyToFetch] = useState<string[]>([]);
@@ -172,16 +338,8 @@ export function useTitleGeneration(enabled = true) {
 
       if (titleQuery.isSuccess && titleQuery.data) {
         const { title } = titleQuery.data;
-        queryClient.setQueryData(
-          [QueryKeys.conversation, conversationId],
-          (convo: TConversation | undefined) => (convo ? { ...convo, title } : convo),
-        );
-        updateConvoInAllQueries(queryClient, conversationId, (c) => ({ ...c, title }));
-        // Only update document title if this conversation is currently active
-        if (window.location.pathname.includes(conversationId)) {
-          document.title = title;
-        }
-        markTitleGenerationProcessed(conversationId);
+        applyConversationTitle(queryClient, conversationId, title);
+        markTitleGenerationProcessed(conversationId, title);
         setReadyToFetch((prev) => prev.filter((id) => id !== conversationId));
       } else if (titleQuery.isError) {
         // Retries are exhausted here (the query only retries on 404). A title may
@@ -225,6 +383,8 @@ export function useActiveJobs(enabled = true) {
     refetchOnMount: true,
     refetchOnWindowFocus: true,
     refetchInterval: (data) => ((data?.activeJobIds?.length ?? 0) > 0 ? 5_000 : false),
+    /** Job ends drive the sidebar outcome and title refresh; they must not wait for focus. */
+    refetchIntervalInBackground: true,
     retry: false,
   });
 }

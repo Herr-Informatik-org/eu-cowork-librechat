@@ -1,7 +1,7 @@
 import { ContentTypes, ToolCallTypes } from 'librechat-data-provider';
 import type { TMessage } from 'librechat-data-provider';
 import { applyPendingAction } from '~/utils/approval';
-import { activityFromMessages } from './model';
+import { activityFromMessages, outcomeFromMessages } from './model';
 
 const response: TMessage = {
   messageId: 'current',
@@ -98,5 +98,46 @@ test('a proposal waiting for a decision asks for input instead of showing a runn
   expect(activityFromMessages([{ ...response, content }])).toMatchObject({
     state: 'needs-input',
     stage: 'question',
+  });
+});
+
+describe('outcomeFromMessages for a run that ended in the background', () => {
+  const user: TMessage = { ...response, messageId: 'user', isCreatedByUser: true, text: 'Hi' };
+
+  test('a saved answer is a completed run', () => {
+    expect(outcomeFromMessages([user, { ...response, text: 'Answer' }])).toEqual({
+      state: 'done',
+      stage: 'waiting',
+      messageId: 'current',
+    });
+  });
+
+  test('a saved error and an unfinished answer keep distinct outcomes', () => {
+    expect(outcomeFromMessages([user, { ...response, error: true }])?.state).toBe('error');
+    expect(outcomeFromMessages([user, { ...response, unfinished: true }])?.state).toBe('stopped');
+  });
+
+  test('a run without a saved response did not finish', () => {
+    expect(outcomeFromMessages([user])).toMatchObject({ state: 'stopped', messageId: 'user' });
+  });
+
+  test('an open question waits for the user instead of claiming completion', () => {
+    const pending = applyPendingAction(
+      { ...response, text: 'Before I continue' },
+      {
+        actionId: 'ask-two',
+        streamId: 'stream-two',
+        createdAt: 0,
+        payload: { type: 'ask_user_question', question: { question: 'Which year?' } },
+      },
+    );
+    expect(outcomeFromMessages([user, pending])).toMatchObject({
+      state: 'needs-input',
+      stage: 'question',
+    });
+  });
+
+  test('no saved messages give no outcome', () => {
+    expect(outcomeFromMessages([])).toBeNull();
   });
 });
