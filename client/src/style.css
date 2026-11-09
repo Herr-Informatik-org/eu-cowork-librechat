@@ -1615,6 +1615,25 @@ html {
   background-color: rgba(23, 23, 23, var(--tw-bg-opacity));
 }
 
+/*
+ * The canvas follows the app theme, not the OS. The pdf.js viewer stylesheet (Office
+ * document preview) declares `:root { color-scheme: light dark }`, so with the light theme
+ * on a dark OS every frame without painted layout showed a black canvas. `html.light` and
+ * `html.dark` outrank `:root`; the theme class is set before the first paint (index.html).
+ */
+html.light {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html.light,
+html.light body {
+  background-color: var(--presentation);
+}
+
 #__next,
 #root {
   height: 100%;

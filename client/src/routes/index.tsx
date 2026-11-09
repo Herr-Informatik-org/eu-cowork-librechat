@@ -121,6 +121,12 @@ export const router = createBrowserRouter(
         {
           path: '/',
           element: <Root />,
+          /**
+           * Errors below the signed-in shell must not reach AuthLayout's boundary: replacing
+           * AuthLayout remounts AuthContextProvider, which blanks the whole screen until the
+           * token refresh has bootstrapped authentication again.
+           */
+          errorElement: <RouteErrorBoundary />,
           children: [
             {
               index: true,
@@ -129,6 +135,8 @@ export const router = createBrowserRouter(
             {
               path: 'c/:conversationId?',
               element: <ChatRoute />,
+              /** A failing chat stays inside the main pane, next to the intact sidebar. */
+              errorElement: <RouteErrorBoundary />,
             },
             {
               path: 'mail',

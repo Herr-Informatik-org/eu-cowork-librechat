@@ -26,6 +26,7 @@ import Header from './Header';
 import Footer from './Footer';
 import ActivityBar from './Activity/ActivityBar';
 import SessionWidget from '~/components/SidePanel/Session/Widget';
+import Boundary from './Boundary';
 import { cn } from '~/utils';
 import store from '~/store';
 import './motion.css';
@@ -138,7 +139,12 @@ function ChatView({ index = 0, project }: { index?: number; project?: TChatProje
                     >
                       {isProjectLandingPage && project && <ProjectLandingChip project={project} />}
                       {isLandingPage && <ConversationStarters />}
-                      <ActivityBar />
+                      <Boundary
+                        name="ActivityBar"
+                        resetKeys={[conversationId, rootSubmission, isSubmitting]}
+                      >
+                        <ActivityBar />
+                      </Boundary>
                       <ChatForm index={index} placeholder={chatFormPlaceholder} />
                       {!isLandingPage && <Footer />}
                     </div>

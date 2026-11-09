@@ -28,31 +28,32 @@
       }
     </style>
     <script>
-      const theme = localStorage.getItem('color-theme');
-      const loadingContainerStyle = document.createElement('style');
-      let backgroundColor;
-
-      if (theme === 'dark') {
-        backgroundColor = '#0d0d0d';
-      } else if (theme === 'light') {
-        backgroundColor = '#ffffff';
-      } else if (theme === 'system') {
-        const prefersDarkScheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        backgroundColor = prefersDarkScheme ? '#0d0d0d' : '#ffffff';
-      } else {
-        backgroundColor = '#ffffff';
-      }
-
-      loadingContainerStyle.innerHTML = `
-        #loading-container {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          height: 100vh;
-          background-color: ${backgroundColor};
+      (function () {
+        var theme = null;
+        try {
+          theme = localStorage.getItem('color-theme');
+        } catch (e) {
+          /* Without storage the ThemeProvider falls back to the system theme too. */
         }
-      `;
-      document.head.appendChild(loadingContainerStyle);
+        var isDark =
+          theme === 'dark' ||
+          (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        /* Same class the ThemeProvider applies after mount; style.css pins the page canvas
+           to it, so no frame before or during startup shows the OS color instead. */
+        document.documentElement.classList.add(isDark ? 'dark' : 'light');
+
+        var loadingContainerStyle = document.createElement('style');
+        loadingContainerStyle.innerHTML = `
+          #loading-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: ${isDark ? '#0d0d0d' : '#ffffff'};
+          }
+        `;
+        document.head.appendChild(loadingContainerStyle);
+      })();
     </script>
     <script>
       (function () {
