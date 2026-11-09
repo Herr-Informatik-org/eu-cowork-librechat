@@ -4,6 +4,7 @@ import { ContentTypes } from 'librechat-data-provider';
 import type { MouseEvent, FocusEvent } from 'react';
 import { ThinkingContent, ThinkingButton, FloatingThinkingBar } from './Thinking';
 import { useLocalize, useExpandCollapse } from '~/hooks';
+import { latestThoughtHeading } from '../thoughts';
 import { showThinkingAtom } from '~/store/showThinking';
 import useSecondTick from '~/hooks/useSecondTick';
 import { formatElapsed } from '~/utils/elapsed';
@@ -41,6 +42,8 @@ function useThinkingTime(live: boolean) {
 type ReasoningProps = {
   reasoning: string;
   isLast: boolean;
+  /** What the model is working on right now, such as the running plan step. Shown while live. */
+  status?: string;
 };
 
 /**
@@ -60,12 +63,14 @@ type ReasoningProps = {
  * Key differences from legacy Thinking.tsx:
  * - Works with content parts array instead of plain text
  * - Strips `<think>` tags instead of `:::thinking:::` markers
- * - Each THINK part has its own independent toggle button
+ * - Consecutive THINK parts that only hidden parts separate (plan updates, blank
+ *   reservations) arrive merged as one text with one toggle and one duration
+ * - While live, the header names the running plan step or the newest summary heading
  * - Can be interleaved with other content types
  *
  * For legacy text-based messages, see Thinking.tsx component.
  */
-const Reasoning = memo(({ reasoning, isLast }: ReasoningProps) => {
+const Reasoning = memo(({ reasoning, isLast, status }: ReasoningProps) => {
   const contentId = useId();
   const localize = useLocalize();
   const showThinking = useAtomValue(showThinkingAtom);
@@ -122,6 +127,10 @@ const Reasoning = memo(({ reasoning, isLast }: ReasoningProps) => {
     return localize('com_ui_thoughts');
   }, [live, elapsedMs, measuredMs, localize]);
   const detail = live && elapsedMs >= SHOW_ELAPSED_AFTER_MS ? formatElapsed(elapsedMs) : undefined;
+  const liveStatus = useMemo(
+    () => (live ? (status ?? latestThoughtHeading(reasoningText)) : undefined),
+    [live, status, reasoningText],
+  );
 
   if (!reasoningText) {
     return null;
@@ -142,6 +151,7 @@ const Reasoning = memo(({ reasoning, isLast }: ReasoningProps) => {
             isExpanded={isExpanded}
             onClick={handleClick}
             label={label}
+            status={liveStatus}
             live={live}
             detail={detail}
             content={reasoningText}

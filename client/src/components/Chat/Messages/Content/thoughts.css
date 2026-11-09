@@ -1,0 +1,23 @@
+/* The live line of a reasoning block fades in when the work it names changes. Keep it on
+   an inline element around the shimmer span: truncation and the gloss need separate spans. */
+.kisuno-thought-status {
+  animation: kisuno-note-in var(--kisuno-fast, 110ms) var(--kisuno-ease-out, ease-out);
+}
+
+/* Response slot before the first token: same row metrics as the reasoning header that
+   usually replaces it, so the answer does not jump when thinking starts. */
+.kisuno-pending {
+  animation: kisuno-note-in var(--kisuno-base, 170ms) var(--kisuno-ease-out, ease-out);
+}
+.kisuno-pending .chat-activity-orbit {
+  width: 18px;
+  justify-content: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kisuno-thought-status,
+  .kisuno-pending,
+  .kisuno-pending .chat-activity-orbit span {
+    animation: none;
+  }
+}

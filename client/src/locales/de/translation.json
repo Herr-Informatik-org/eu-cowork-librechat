@@ -2150,6 +2150,7 @@
   "com_ui_thinking_long": "Denkt noch nach...",
   "com_ui_thoughts": "Gedanken",
   "com_ui_thought_for": "Nachgedacht · {{time}}",
+  "com_ui_response_preparing": "Wird vorbereitet",
   "com_ui_toggle_theme": "Design umschalten",
   "com_ui_token": "Token",
   "com_ui_token_exchange_method": "Token-Austauschmethode",

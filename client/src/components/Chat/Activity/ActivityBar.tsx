@@ -1,3 +1,4 @@
+import { useRecoilValue } from 'recoil';
 import { ArrowDown } from 'lucide-react';
 import type { ConversationActivity } from '~/store/activity';
 import type { TranslationKeys } from '~/hooks';
@@ -11,6 +12,7 @@ import { activityLabel } from './model';
 import { activityIcons } from './icons';
 import { useLocalize } from '~/hooks';
 import useHeld from './useHeld';
+import store from '~/store';
 import './activity.css';
 
 const LABEL_HOLD_MS = 650;
@@ -24,10 +26,15 @@ const FADING_STATES = new Set<ConversationActivity['state']>(['done', 'stopped']
 const isActive = (activity: ConversationActivity) =>
   activity.state === 'waiting' || activity.state === 'running';
 
-/** The stage label grows more patient over time instead of inventing progress. */
+/**
+ * The stage label grows more patient over time instead of inventing progress. Until the
+ * server has accepted the run (`accepted`), a waiting request is still being prepared and
+ * must not claim it was received.
+ */
 export function liveActivityLabel(
   activity: ConversationActivity,
   elapsedMs: number,
+  accepted = true,
 ): TranslationKeys {
   const key = activityLabel(activity);
   if (!isActive(activity) || (activity.stage !== 'thinking' && activity.stage !== 'waiting')) {
@@ -38,6 +45,9 @@ export function liveActivityLabel(
   }
   if (elapsedMs >= LONG_THINKING_MS) {
     return 'com_ui_activity_thinking_long';
+  }
+  if (activity.stage === 'waiting' && !accepted) {
+    return 'com_ui_response_preparing';
   }
   return key;
 }
@@ -51,6 +61,8 @@ export default function ActivityBar() {
 function ActivityRow({ activity }: { activity: ConversationActivity }) {
   const localize = useLocalize();
   const serverNames = useMCPServerNames();
+  const accepted =
+    useRecoilValue(store.activeGenerationCreatedAtByConvoId(activity.conversationId)) != null;
   const active = isActive(activity);
   const fading = FADING_STATES.has(activity.state);
   const now = Date.now();
@@ -59,7 +71,11 @@ function ActivityRow({ activity }: { activity: ConversationActivity }) {
   useSecondTick(active || recentlyFinished);
 
   const elapsedMs = Math.max(0, (active ? now : activity.updatedAt) - activity.startedAt);
-  const labelKey = useHeld(liveActivityLabel(activity, elapsedMs), LABEL_HOLD_MS, !active);
+  const labelKey = useHeld(
+    liveActivityLabel(activity, elapsedMs, accepted),
+    LABEL_HOLD_MS,
+    !active,
+  );
 
   if (fading && !recentlyFinished) {
     return null;

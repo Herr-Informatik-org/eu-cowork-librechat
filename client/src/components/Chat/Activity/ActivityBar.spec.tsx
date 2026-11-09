@@ -25,6 +25,14 @@ describe('liveActivityLabel', () => {
     );
   });
 
+  it('says the request is being prepared until the server has accepted it', () => {
+    const waiting = { ...base, stage: 'waiting', state: 'waiting' } as const;
+    expect(liveActivityLabel(waiting, 1_000, false)).toBe('com_ui_response_preparing');
+    expect(liveActivityLabel(waiting, 1_000, true)).toBe('com_ui_activity_waiting');
+    expect(liveActivityLabel(waiting, 20_000, false)).toBe('com_ui_activity_thinking_long');
+    expect(liveActivityLabel(base, 1_000, false)).toBe('com_ui_activity_thinking');
+  });
+
   it('keeps concrete stages and finished states unchanged', () => {
     expect(liveActivityLabel({ ...base, stage: 'writing' }, 60_000)).toBe(
       'com_ui_activity_writing',

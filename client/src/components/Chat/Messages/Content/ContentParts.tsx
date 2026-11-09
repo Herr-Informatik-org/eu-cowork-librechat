@@ -8,16 +8,19 @@ import type {
 } from 'librechat-data-provider';
 import type { ReactNode, ReactElement } from 'react';
 import type { ToolCallGroupExpansionState } from './ToolCallGroup';
+import type { ThoughtRun } from './thoughts';
 import { mapAttachments, filterAttachmentsForPart, groupSequentialToolCalls } from '~/utils';
 import { ParallelContentRenderer, type PartWithIndex } from './ParallelContent';
-import { EditTextPart, EmptyText, AgentUpdate } from './Parts';
+import { mergeThoughtRuns, runningPlanStep, tailThoughtIdx, lastShownIdx } from './thoughts';
 import { lastVisibleContentIdx } from '~/utils/activityLabels';
 import { MessageContext, SearchContext } from '~/Providers';
 import PendingSkillCall from './Parts/PendingSkillCall';
+import { EditTextPart, AgentUpdate } from './Parts';
 import ApprovalProvider from './ApprovalContext';
+import PendingResponse from './PendingResponse';
 import MemoryArtifacts from './MemoryArtifacts';
+import Reasoning from './Parts/Reasoning';
 import ToolCallGroup from './ToolCallGroup';
-import Container from './Container';
 import Part from './Part';
 
 const getToolCallId = (part: TMessageContentParts): string =>
@@ -121,6 +124,49 @@ const PartWithContext = memo(function PartWithContext({
         hideAttachments={hideAttachments}
         onToolExpand={onToolExpand}
       />
+    </MessageContext.Provider>
+  );
+});
+
+type ThoughtsWithContextProps = {
+  run: ThoughtRun;
+  messageId: string;
+  conversationId?: string | null;
+  nextType?: string;
+  isSubmitting: boolean;
+  isLatestMessage?: boolean;
+  isLast: boolean;
+  status?: string;
+};
+
+/** One reasoning block for a run of THINK parts, keyed by the run's first part. */
+const ThoughtsWithContext = memo(function ThoughtsWithContext({
+  run,
+  messageId,
+  conversationId,
+  nextType,
+  isSubmitting,
+  isLatestMessage,
+  isLast,
+  status,
+}: ThoughtsWithContextProps) {
+  const partIndex = run.parts[0]?.idx;
+  const contextValue = useMemo(
+    () => ({
+      messageId,
+      isExpanded: true as const,
+      conversationId,
+      partIndex,
+      nextType,
+      isSubmitting,
+      isLatestMessage,
+    }),
+    [messageId, conversationId, partIndex, nextType, isSubmitting, isLatestMessage],
+  );
+
+  return (
+    <MessageContext.Provider value={contextValue}>
+      <Reasoning reasoning={run.text} isLast={isLast} status={status} />
     </MessageContext.Provider>
   );
 });
@@ -373,19 +419,33 @@ const ContentParts = memo(function ContentParts({
 
   const groupedParts = useMemo(
     () =>
-      groupSequentialToolCalls(sequentialParts).map((group) => {
-        if (group.type === 'single') {
-          return group;
-        }
-        const groupId = getToolGroupId(group.parts, fallbackScope);
-        const groupAttachments = group.parts.flatMap(
-          ({ part }) =>
-            filterAttachmentsForPart(attachmentMap[getToolCallId(part)], getPartAgentId(part)) ??
-            [],
-        );
-        return { ...group, groupId, groupAttachments };
-      }),
+      mergeThoughtRuns(
+        groupSequentialToolCalls(sequentialParts).map((group) => {
+          if (group.type === 'single') {
+            return group;
+          }
+          const groupId = getToolGroupId(group.parts, fallbackScope);
+          const groupAttachments = group.parts.flatMap(
+            ({ part }) =>
+              filterAttachmentsForPart(attachmentMap[getToolCallId(part)], getPartAgentId(part)) ??
+              [],
+          );
+          return { ...group, groupId, groupAttachments };
+        }),
+      ),
     [sequentialParts, attachmentMap, fallbackScope],
+  );
+
+  /** Last part that renders anything. Plan updates and blank reservations do
+   *  not count, so reasoning they interrupt stays live until visible output. */
+  const shownTailIdx = useMemo(() => lastShownIdx(content), [content]);
+  const liveRunIdx = useMemo(
+    () => (effectiveIsSubmitting ? tailThoughtIdx(groupedParts) : -1),
+    [effectiveIsSubmitting, groupedParts],
+  );
+  const liveStatus = useMemo(
+    () => (liveRunIdx >= 0 ? runningPlanStep(content) : undefined),
+    [liveRunIdx, content],
   );
 
   /** The re-attribution node for a part resuming after a steer block, shared
@@ -451,7 +511,8 @@ const ContentParts = memo(function ContentParts({
   }
 
   const safeContent = content ?? [];
-  const showEmptyCursor = safeContent.length === 0 && effectiveIsSubmitting;
+  /** Nothing visible yet: a labeled status instead of a bare cursor dot. */
+  const showPending = effectiveIsSubmitting && shownTailIdx < 0;
   /** Skips trailing BLANK label reservations — they render nothing, and
    *  counting one as last would strip the streaming cursor from the last
    *  VISIBLE part until the next delta. */
@@ -484,47 +545,62 @@ const ContentParts = memo(function ContentParts({
       <SearchContext.Provider value={{ searchResults }}>
         <MemoryArtifacts attachments={attachments} />
         {renderPendingSkills()}
-        {showEmptyCursor && (
-          <Container>
-            <EmptyText />
-          </Container>
-        )}
-        {groupedParts.flatMap((group) => {
-          const firstIdx = group.type === 'single' ? group.part.idx : (group.parts[0]?.idx ?? -1);
-          const nodes: ReactElement[] = [];
-          const attribution = renderResumeAttribution(firstIdx);
-          if (attribution != null) {
-            nodes.push(attribution);
-          }
-          if (group.type === 'single') {
-            const { part, idx } = group.part;
-            nodes.push(renderPart(part, idx, idx === lastContentIdx));
+        {showPending && <PendingResponse conversationId={conversationId} />}
+        {!showPending &&
+          groupedParts.flatMap((group) => {
+            const firstIdx = group.type === 'single' ? group.part.idx : (group.parts[0]?.idx ?? -1);
+            const nodes: ReactElement[] = [];
+            const attribution = renderResumeAttribution(firstIdx);
+            if (attribution != null) {
+              nodes.push(attribution);
+            }
+            if (group.type === 'single') {
+              const { part, idx } = group.part;
+              nodes.push(renderPart(part, idx, idx === lastContentIdx));
+              return nodes;
+            }
+            if (group.type === 'thoughts') {
+              const lastIdx = group.parts[group.parts.length - 1]?.idx ?? firstIdx;
+              const isLive = liveRunIdx >= 0 && lastIdx === liveRunIdx;
+              nodes.push(
+                <ThoughtsWithContext
+                  key={`thoughts-${messageId}-${firstIdx}`}
+                  run={group}
+                  messageId={messageId}
+                  conversationId={conversationId}
+                  nextType={content?.[lastIdx + 1]?.type}
+                  isSubmitting={effectiveIsSubmitting}
+                  isLatestMessage={isLatestMessage}
+                  isLast={isLive}
+                  status={isLive ? liveStatus : undefined}
+                />,
+              );
+              return nodes;
+            }
+            const { groupId } = group;
+            nodes.push(
+              <ToolCallGroup
+                key={`tool-group-${groupId}`}
+                parts={group.parts}
+                isSubmitting={effectiveIsSubmitting}
+                /** The label part is CONSUMED into the header, not listed in
+                 *  `parts` — a filled label at the content tail must still
+                 *  mark its group as last or nothing holds the streaming
+                 *  cursor until the next delta. */
+                isLast={
+                  group.parts.some((p) => p.idx === lastContentIdx) ||
+                  group.labelPart?.idx === lastContentIdx
+                }
+                renderPart={renderGroupedPart}
+                lastContentIdx={lastContentIdx}
+                groupAttachments={group.groupAttachments}
+                initialExpansionState={toolGroupExpansionRef.current.get(groupId)}
+                onExpansionChange={(state) => handleGroupExpansionChange(groupId, state)}
+                labelPart={group.labelPart}
+              />,
+            );
             return nodes;
-          }
-          const { groupId } = group;
-          nodes.push(
-            <ToolCallGroup
-              key={`tool-group-${groupId}`}
-              parts={group.parts}
-              isSubmitting={effectiveIsSubmitting}
-              /** The label part is CONSUMED into the header, not listed in
-               *  `parts` — a filled label at the content tail must still
-               *  mark its group as last or nothing holds the streaming
-               *  cursor until the next delta. */
-              isLast={
-                group.parts.some((p) => p.idx === lastContentIdx) ||
-                group.labelPart?.idx === lastContentIdx
-              }
-              renderPart={renderGroupedPart}
-              lastContentIdx={lastContentIdx}
-              groupAttachments={group.groupAttachments}
-              initialExpansionState={toolGroupExpansionRef.current.get(groupId)}
-              onExpansionChange={(state) => handleGroupExpansionChange(groupId, state)}
-              labelPart={group.labelPart}
-            />,
-          );
-          return nodes;
-        })}
+          })}
       </SearchContext.Provider>
     </ApprovalProvider>
   );

@@ -4,6 +4,7 @@ import { getRemarkPlugins, getRehypePlugins, getMarkdownComponents } from './mar
 import MarkdownErrorBoundary from './MarkdownErrorBoundary';
 import MarkdownBlocks from './MarkdownBlocks';
 import { preprocessLaTeX } from '~/utils';
+import { normalizeTables } from './tables';
 import store from '~/store';
 
 type TContentProps = {
@@ -19,7 +20,8 @@ const Markdown = memo(function Markdown({ content = '', isLatestMessage }: TCont
     if (isInitializing) {
       return '';
     }
-    return LaTeXParsing ? preprocessLaTeX(content) : content;
+    const tables = normalizeTables(content);
+    return LaTeXParsing ? preprocessLaTeX(tables) : tables;
   }, [content, LaTeXParsing, isInitializing]);
 
   if (isInitializing) {

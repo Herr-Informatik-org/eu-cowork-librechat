@@ -7,6 +7,7 @@ import { useLocalize, useExpandCollapse } from '~/hooks';
 import { showThinkingAtom } from '~/store/showThinking';
 import { fontSizeAtom } from '~/store/fontSize';
 import { cn } from '~/utils';
+import '../thoughts.css';
 
 /**
  * ThinkingContent - Displays the actual thinking/reasoning content
@@ -39,6 +40,7 @@ export const ThinkingButton = memo(
     showCopyButton = true,
     live = false,
     detail,
+    status,
   }: {
     isExpanded: boolean;
     onClick: (e: MouseEvent<HTMLButtonElement>) => void;
@@ -50,6 +52,8 @@ export const ThinkingButton = memo(
     live?: boolean;
     /** Secondary text after the label, such as elapsed time. Hidden from screen readers. */
     detail?: string;
+    /** One line about the current work, shown in place of the label and truncated to fit. */
+    status?: string;
   }) => {
     const localize = useLocalize();
     const fontSize = useAtomValue(fontSizeAtom);
@@ -76,11 +80,11 @@ export const ThinkingButton = memo(
           aria-expanded={isExpanded}
           aria-controls={contentId}
           className={cn(
-            'group/button flex flex-1 items-center justify-start rounded-lg leading-[18px]',
+            'group/button flex min-w-0 flex-1 items-center justify-start rounded-lg leading-[18px]',
             fontSize,
           )}
         >
-          <span className="relative mr-1.5 inline-flex h-[18px] w-[18px] items-center justify-center">
+          <span className="relative mr-1.5 inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center">
             <Lightbulb
               className="icon-sm absolute text-text-secondary opacity-100 transition-opacity group-hover/button:opacity-0"
               aria-hidden="true"
@@ -93,9 +97,18 @@ export const ThinkingButton = memo(
               aria-hidden="true"
             />
           </span>
-          <span className={live ? 'kisuno-shimmer' : undefined}>{label}</span>
+          {status ? (
+            <span className="min-w-0 truncate text-left" title={status}>
+              <span className="sr-only">{`${label}: `}</span>
+              <span key={status} className="kisuno-thought-status">
+                <span className={live ? 'kisuno-shimmer' : undefined}>{status}</span>
+              </span>
+            </span>
+          ) : (
+            <span className={live ? 'kisuno-shimmer' : undefined}>{label}</span>
+          )}
           {detail && (
-            <span className="kisuno-elapsed ml-1.5 text-text-secondary" aria-hidden="true">
+            <span className="kisuno-elapsed ml-1.5 shrink-0 text-text-secondary" aria-hidden="true">
               {detail}
             </span>
           )}
