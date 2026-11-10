@@ -1574,6 +1574,7 @@ export type StartupConfigContext = 'share';
 export type TStartupConfig = {
   /** Browser-local, read-only folder tools; exposed only after authentication. */
   localFoldersEnabled?: boolean;
+  privacyTextEndpoints?: string[];
   appTitle: string;
   socialLogins?: string[];
   langfuseFanoutEnabled?: boolean;

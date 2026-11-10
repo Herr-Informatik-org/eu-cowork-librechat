@@ -1,4 +1,9 @@
 {
+  "com_ui_privacy_text_route": "Text masking for this model",
+  "com_ui_privacy_mark_confidential": "Mark selection as confidential",
+  "com_ui_privacy_unprotected_selection": "Select a protected model and wait for the current run to finish before sending confidential text.",
+  "com_ui_release_available": "A new version of Kisuno is available.",
+  "com_ui_release_wait_for_jobs": "A new version is available. You can reload once your current work has finished.",
   "com_ui_brain_learning_title": "Lernen aus Chats",
   "com_ui_brain_learning_idle": "Für diesen Bereich liegt noch kein Lernabschluss vor.",
   "com_ui_brain_learning_running": "Brain prüft den Chat auf dauerhaft hilfreiches Wissen.",

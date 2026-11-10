@@ -1,5 +1,13 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-10 — Versionshinweis und vertrauliche Textauswahl vorbereiten
+
+- Verwaltete Chat-Seiten melden die eigene Generation. Der Versionshinweis
+  prüft den Eingang, lädt freiwillig neu und wartet auf laufende Aufträge.
+- Bei dafür konfigurierten Modellrouten lässt sich ausgewählter Text als
+  vertraulich markieren. Der Editor sperrt markierte Nachrichten beim
+  Wechsel zu einer ungeschützten Route oder während einer laufenden Antwort.
+
 ## 2026-11-09 — Laufende Arbeit bei vorbereiteten Tagesupdates erhalten
 
 - Ein ausdrücklich aktivierter Betriebsmodus führt API-Generationen von Bereitschaft

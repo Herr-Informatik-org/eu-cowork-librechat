@@ -216,6 +216,13 @@ const startServer = async () => {
 
   const indexPath = path.join(appConfig.paths.dist, 'index.html');
   let indexHTML = fs.readFileSync(indexPath, 'utf8');
+  const pageRelease = process.env.KISUNO_RELEASE_ID;
+  if (releaseLifecycle.enabled && /^[a-z0-9][a-z0-9-]{0,62}$/.test(pageRelease ?? '')) {
+    indexHTML = indexHTML.replace(
+      '</head>',
+      `<meta name="kisuno-release" content="${pageRelease}" />\n</head>`,
+    );
+  }
 
   // In order to provide support to serving the application in a sub-directory
   // We need to update the base href if the DOMAIN_CLIENT is specified and not the root path

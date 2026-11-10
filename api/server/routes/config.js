@@ -250,6 +250,21 @@ router.get('/', async function (req, res) {
 
     const appConfig = await getAppConfig(getAppConfigOptionsFromUser(req.user));
 
+    const customEndpoints = appConfig?.endpoints?.custom;
+    const privacyTextEndpoints =
+      process.env.PRIVACY_REQUIRED === 'true' &&
+      process.env.PRIVACY_ROUTE_TOKEN &&
+      Array.isArray(customEndpoints)
+        ? customEndpoints
+            .filter(
+              (endpoint) =>
+                typeof endpoint?.name === 'string' &&
+                /^http:\/\/privacy-proxy:3040\/r\/[a-z0-9-]{1,48}\/v1\/?$/.test(endpoint.baseURL) &&
+                endpoint.headers?.['X-EUCowork-Privacy-Key'] === '${PRIVACY_ROUTE_TOKEN}',
+            )
+            .map((endpoint) => endpoint.name)
+        : [];
+
     const balanceConfig = getBalanceConfig(appConfig);
     const cloudFront = buildCloudFrontStartupConfig();
     const langfuseFanoutEnabled = isLangfuseFanoutEnabled();
@@ -309,6 +324,7 @@ router.get('/', async function (req, res) {
       ...(rum ? { rum } : {}),
       fileUploadSseEnabled: isEnabled(process.env.FILE_UPLOAD_SSE_ENABLED),
       localFoldersEnabled: isLocalFoldersEnabled(),
+      privacyTextEndpoints,
     };
 
     const webSearch = buildWebSearchConfig(appConfig);

@@ -1,4 +1,9 @@
 {
+  "com_ui_privacy_text_route": "Textmaskierung für dieses Modell",
+  "com_ui_privacy_mark_confidential": "Auswahl als vertraulich markieren",
+  "com_ui_privacy_unprotected_selection": "Wähle ein geschütztes Modell und warte auf das Ende des laufenden Auftrags, bevor du vertraulichen Text sendest.",
+  "com_ui_release_available": "Eine neue Kisuno-Version ist verfügbar.",
+  "com_ui_release_wait_for_jobs": "Eine neue Version ist verfügbar. Du kannst die Seite neu laden, sobald deine laufende Arbeit beendet ist.",
   "com_ui_brain_source_context_count": "{{count}} weitere Nachrichten als Kontext berücksichtigt",
   "com_ui_brain_source_context_explanation": "Umliegende Nachrichten halfen, die Belege samt Rückfragen und Korrekturen zu verstehen. Diese Bezüge werden mitgeführt, damit beim Löschen des Gesprächs auch davon abhängiges Wissen entfernt wird.",
   "com_ui_brain_rebuild_activated": "Die neue Version deines Brains ist jetzt aktiv.",

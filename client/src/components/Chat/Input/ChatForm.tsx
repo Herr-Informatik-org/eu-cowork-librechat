@@ -70,6 +70,11 @@ interface ChatFormProps {
   stopGenerating: () => void;
 }
 
+const confidentialOpen = '<kisuno-confidential>';
+const confidentialClose = '</kisuno-confidential>';
+const hasConfidentialMarkup = (text: string) =>
+  text.includes(confidentialOpen) || text.includes(confidentialClose);
+
 const ChatForm = memo(function ChatForm({
   index,
   placeholder,
@@ -117,6 +122,11 @@ const ChatForm = memo(function ChatForm({
   } = useAddedChatContext();
   const assistantMap = useAssistantsMapContext();
   const { data: startupConfig } = useGetStartupConfig();
+  const [privacyError, setPrivacyError] = useState(false);
+  const [markableSelection, setMarkableSelection] = useState(false);
+  const privacyRoute =
+    !addedConvo &&
+    startupConfig?.privacyTextEndpoints?.includes(conversation?.endpoint ?? '') === true;
 
   const endpoint = useMemo(
     () => conversation?.endpointType ?? conversation?.endpoint,
@@ -482,6 +492,14 @@ const ChatForm = memo(function ChatForm({
   return (
     <form
       onSubmit={methods.handleSubmit((data) => {
+        if (
+          hasConfidentialMarkup(data.text) &&
+          (!privacyRoute || answerMode.active || steering.duringRunActive)
+        ) {
+          setPrivacyError(true);
+          return;
+        }
+        setPrivacyError(false);
         // Answer mode: composer text answers the paused run instead of
         // starting a new turn (submitText resets the composer itself).
         // Dismissing the popover restores normal sends.
@@ -562,6 +580,47 @@ const ChatForm = memo(function ChatForm({
               )}
             >
               <TextareaHeader addedConvo={addedConvo} setAddedConvo={setAddedConvo} />
+              {privacyRoute && (
+                <div className="flex flex-wrap items-center gap-2 px-4 pt-2 text-xs text-text-secondary">
+                  <span>{localize('com_ui_privacy_text_route')}</span>
+                  <button
+                    type="button"
+                    className="rounded-md border border-border-light px-2 py-1 disabled:opacity-50"
+                    disabled={!markableSelection || isSubmitting || answerMode.active}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      const input = textAreaRef.current;
+                      if (!input) return;
+                      const { selectionStart: start, selectionEnd: end, value } = input;
+                      const selection = value.slice(start, end);
+                      if (
+                        !selection.trim() ||
+                        selection.length > 512 ||
+                        hasConfidentialMarkup(selection)
+                      )
+                        return;
+                      methods.setValue(
+                        'text',
+                        value.slice(0, start) +
+                          confidentialOpen +
+                          selection +
+                          confidentialClose +
+                          value.slice(end),
+                        { shouldDirty: true },
+                      );
+                      setMarkableSelection(false);
+                      setPrivacyError(false);
+                    }}
+                  >
+                    {localize('com_ui_privacy_mark_confidential')}
+                  </button>
+                </div>
+              )}
+              {privacyError && (
+                <p role="alert" className="px-4 pt-2 text-sm text-red-600">
+                  {localize('com_ui_privacy_unprotected_selection')}
+                </p>
+              )}
               <PendingManualSkillsChips conversationId={conversationId} />
               {quotesEnabled && <PendingQuoteChips conversationId={conversationId} />}
               {steering.enabled && (
@@ -609,6 +668,19 @@ const ChatForm = memo(function ChatForm({
                       }}
                       disabled={disableInputs || isNotAppendable}
                       onPaste={handlePaste}
+                      onSelect={(e) => {
+                        if (!privacyRoute) return;
+                        const input = e.currentTarget;
+                        const selection = input.value.slice(
+                          input.selectionStart,
+                          input.selectionEnd,
+                        );
+                        setMarkableSelection(
+                          !!selection.trim() &&
+                            selection.length <= 512 &&
+                            !hasConfidentialMarkup(selection),
+                        );
+                      }}
                       onKeyDown={(e) => {
                         // Answer mode consumes option-navigation keys from the
                         // empty composer; everything else follows the normal path.
