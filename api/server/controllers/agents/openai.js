@@ -1,4 +1,5 @@
 const { nanoid } = require('nanoid');
+const releaseLifecycle = require('~/server/services/daytimeRelease');
 const { logger } = require('@librechat/data-schemas');
 const { Callback, ToolEndHandler, formatAgentMessages } = require('@librechat/agents');
 const {
@@ -797,26 +798,33 @@ const executeOpenAIChatCompletion = async (envelope, { req, res }) => {
     // Record token usage against balance
     const balanceConfig = getBalanceConfig(appConfig);
     const transactionsConfig = getTransactionsConfig(appConfig);
-    recordCollectedUsage(
-      {
-        spendTokens: db.spendTokens,
-        spendStructuredTokens: db.spendStructuredTokens,
-        pricing: { getMultiplier: db.getMultiplier, getCacheMultiplier: db.getCacheMultiplier },
-        bulkWriteOps: { insertMany: db.bulkInsertTransactions, updateBalance: db.updateBalance },
-      },
-      {
-        user: userId,
-        conversationId,
-        collectedUsage,
-        context: 'message',
-        messageId: responseId,
-        balance: balanceConfig,
-        transactions: transactionsConfig,
-        model: primaryConfig.model || agent.model_parameters?.model,
-      },
-    ).catch((err) => {
-      logger.error('[OpenAI API] Error recording usage:', err);
-    });
+    releaseLifecycle
+      .runTask('remote-agent-usage', () =>
+        recordCollectedUsage(
+          {
+            spendTokens: db.spendTokens,
+            spendStructuredTokens: db.spendStructuredTokens,
+            pricing: { getMultiplier: db.getMultiplier, getCacheMultiplier: db.getCacheMultiplier },
+            bulkWriteOps: {
+              insertMany: db.bulkInsertTransactions,
+              updateBalance: db.updateBalance,
+            },
+          },
+          {
+            user: userId,
+            conversationId,
+            collectedUsage,
+            context: 'message',
+            messageId: responseId,
+            balance: balanceConfig,
+            transactions: transactionsConfig,
+            model: primaryConfig.model || agent.model_parameters?.model,
+          },
+        ),
+      )
+      .catch((err) => {
+        logger.error('[OpenAI API] Error recording usage:', err);
+      });
 
     // Finalize response
     const duration = Date.now() - requestStartTime;
@@ -827,9 +835,11 @@ const executeOpenAIChatCompletion = async (envelope, { req, res }) => {
 
       // Wait for artifact processing after response ends (non-blocking)
       if (artifactPromises.length > 0) {
-        Promise.all(artifactPromises).catch((artifactError) => {
-          logger.warn('[OpenAI API] Error processing artifacts:', artifactError);
-        });
+        releaseLifecycle
+          .runTask('remote-agent-artifacts', () => Promise.all(artifactPromises))
+          .catch((artifactError) => {
+            logger.warn('[OpenAI API] Error processing artifacts:', artifactError);
+          });
       }
     } else {
       // For non-streaming, wait for artifacts before sending response
@@ -1043,7 +1053,8 @@ const GetModelController = async (req, res) => {
 };
 
 module.exports = {
-  OpenAIChatCompletionController,
+  OpenAIChatCompletionController: (...args) =>
+    releaseLifecycle.runTask('remote-agent', () => OpenAIChatCompletionController(...args)),
   ListModelsController,
   GetModelController,
 };

@@ -860,3 +860,42 @@ describe('LazyMongoSaver checkpoint size guard (mongodb-memory-server integratio
     expect(channels).toContain(NO_WRITES); // flushed, not dropped
   });
 });
+
+describe('managed release checkpoint schema gate', () => {
+  it('validates existing indexes without calling the schema-writing setup method', async () => {
+    await getAgentCheckpointer(MONGO_CFG);
+    __resetCheckpointerForTests();
+    const previous = process.env.KISUNO_RELEASE_ID;
+    process.env.KISUNO_RELEASE_ID = 'managed-checkpoint-test';
+    const setup = jest.spyOn(MongoDBSaver.prototype, 'setup');
+    try {
+      await expect(getAgentCheckpointer(MONGO_CFG)).resolves.toBeDefined();
+      expect(setup).not.toHaveBeenCalled();
+    } finally {
+      setup.mockRestore();
+      if (previous === undefined) delete process.env.KISUNO_RELEASE_ID;
+      else process.env.KISUNO_RELEASE_ID = previous;
+      __resetCheckpointerForTests();
+    }
+  });
+
+  it('rejects missing indexes without creating collections and rejects changed retention', async () => {
+    const previous = process.env.KISUNO_RELEASE_ID;
+    process.env.KISUNO_RELEASE_ID = 'managed-checkpoint-test';
+    try {
+      await expect(getAgentCheckpointer(MONGO_CFG)).rejects.toThrow();
+      expect(await mongoose.connection.db!.listCollections().toArray()).toHaveLength(0);
+      delete process.env.KISUNO_RELEASE_ID;
+      await getAgentCheckpointer(MONGO_CFG);
+      __resetCheckpointerForTests();
+      process.env.KISUNO_RELEASE_ID = 'managed-checkpoint-test';
+      await expect(getAgentCheckpointer({ ...MONGO_CFG, ttl: 7200 })).rejects.toThrow(
+        'Checkpoint-Indizes',
+      );
+    } finally {
+      if (previous === undefined) delete process.env.KISUNO_RELEASE_ID;
+      else process.env.KISUNO_RELEASE_ID = previous;
+      __resetCheckpointerForTests();
+    }
+  });
+});

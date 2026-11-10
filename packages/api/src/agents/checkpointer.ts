@@ -595,9 +595,14 @@ export async function getAgentCheckpointer(
 ): Promise<MongoDBSaver | undefined> {
   const resolved = resolveCheckpointerConfig(cfg);
   if (resolved.type === 'memory') {
+    if (process.env.KISUNO_RELEASE_ID) {
+      throw new Error('Release-Wechsel erlaubt keine flüchtigen Freigabe-Checkpoints.');
+    }
     return undefined;
   }
   if (mongoose.connection.readyState !== 1) {
+    if (process.env.KISUNO_RELEASE_ID)
+      throw new Error('Dauerhafter Freigabe-Speicher ist nicht bereit.');
     logger.warn(
       '[checkpointer] Mongoose not connected; HITL runs will use an in-process checkpointer this turn (paused runs will not survive a restart or resolve on another replica).',
     );
@@ -610,6 +615,36 @@ export async function getAgentCheckpointer(
     saverPromise = buildMongoSaver(resolved);
   }
   return saverPromise;
+}
+
+async function verifyCheckpointIndexes(resolved: ResolvedCheckpointerConfig): Promise<void> {
+  const db = mongoose.connection.getClient().db();
+  const requirements = [
+    {
+      collection: resolved.checkpointCollectionName,
+      key: { thread_id: 1, checkpoint_ns: 1, checkpoint_id: -1 },
+    },
+    {
+      collection: resolved.checkpointWritesCollectionName,
+      key: { thread_id: 1, checkpoint_ns: 1, checkpoint_id: 1, task_id: 1, idx: 1 },
+    },
+  ];
+  await Promise.all(
+    requirements.map(async ({ collection, key }) => {
+      const indexes = await db.collection(collection).listIndexes().toArray();
+      const complete = indexes.filter(
+        (index) => !index.sparse && !index.partialFilterExpression && !index.hidden,
+      );
+      const hasLookup = complete.some((index) => JSON.stringify(index.key) === JSON.stringify(key));
+      const hasExpiry = complete.some(
+        (index) =>
+          JSON.stringify(index.key) === JSON.stringify({ upserted_at: 1 }) &&
+          index.expireAfterSeconds === resolved.ttlSeconds,
+      );
+      if (!hasLookup || !hasExpiry)
+        throw new Error('Checkpoint-Indizes müssen vor dem Release-Wechsel vorbereitet werden.');
+    }),
+  );
 }
 
 async function buildMongoSaver(
@@ -629,8 +664,14 @@ async function buildMongoSaver(
       // approval window, so a forgotten approval can never leak checkpoints forever.
       ttl: resolved.ttlSeconds,
     });
+    if (process.env.KISUNO_RELEASE_ID) {
+      await verifyCheckpointIndexes(resolved);
+      return saver;
+    }
     const errors = await saver.setup();
     if (errors.length > 0) {
+      if (process.env.KISUNO_RELEASE_ID)
+        throw new Error('Freigabe-Speicher ist nicht vollständig bereit.');
       logger.warn(
         '[checkpointer] MongoDBSaver.setup() reported errors (checkpoint indexes may be incomplete):',
         errors,
@@ -642,6 +683,7 @@ async function buildMongoSaver(
     // Reset so a later run can retry rather than being stuck on a failed build.
     saverPromise = undefined;
     cachedKey = undefined;
+    if (process.env.KISUNO_RELEASE_ID) throw err;
     logger.error(
       '[checkpointer] Failed to initialize Mongo checkpointer; falling back to in-process checkpointer:',
       err,

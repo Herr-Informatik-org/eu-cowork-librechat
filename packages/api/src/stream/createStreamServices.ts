@@ -69,10 +69,14 @@ export interface StreamServices {
  * ```
  */
 export function createStreamServices(config: StreamServicesConfig = {}): StreamServices {
+  const managedRelease = Boolean(process.env.KISUNO_RELEASE_ID);
   // Use provided config or fall back to cache config (USE_REDIS_STREAMS for stream-specific override)
   const useRedis = config.useRedis ?? cacheConfig.USE_REDIS_STREAMS;
   const redisClient = config.redisClient ?? ioredisClient;
   const { redisSubscriber, inMemoryOptions } = config;
+  if (managedRelease && (!useRedis || !redisClient)) {
+    throw new Error('Release-Wechsel benötigt Redis für Sitzungen und Streams.');
+  }
 
   // Check if we should and can use Redis
   if (useRedis && redisClient) {
@@ -87,6 +91,7 @@ export function createStreamServices(config: StreamServicesConfig = {}): StreamS
       }
 
       if (!subscriber) {
+        if (managedRelease) throw new Error('Redis-Stream-Abonnent für Release-Wechsel fehlt.');
         logger.warn('[StreamServices] No subscriber client available, falling back to in-memory');
         return createInMemoryServices(inMemoryOptions);
       }
@@ -102,6 +107,7 @@ export function createStreamServices(config: StreamServicesConfig = {}): StreamS
         isRedis: true,
       };
     } catch (err) {
+      if (managedRelease) throw err;
       logger.error(
         '[StreamServices] Failed to create Redis services, falling back to in-memory:',
         err,

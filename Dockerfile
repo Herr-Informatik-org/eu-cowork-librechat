@@ -58,6 +58,7 @@ COPY --chown=node:node . .
 ARG EUCOWORK_APP_TITLE=
 ARG EUCOWORK_SHORT_NAME=
 ARG EUCOWORK_THEME_COLOR=
+ARG VITE_KISUNO_RELEASE_MANAGED=false
 
 # Optional icon overrides must precede the client build, whose post-build step
 # copies these public assets into the served distribution directory.

@@ -40,13 +40,14 @@ const backendURL = backendHost
 const buildSourceMap = process.env.NODE_ENV === 'development';
 
 /**
- * EU-Cowork: PWA-/App-Branding zur Build-Zeit (durchgereicht als Docker-Build-Args).
- * Sind die Variablen nicht gesetzt, entsteht ein unverändertes Upstream-Bundle.
+ * Build-time branding is passed through Docker build arguments.
+ * Unset variables preserve the upstream branding.
  */
 const brandTitle = process.env.EUCOWORK_APP_TITLE?.trim();
 const pwaName = brandTitle || 'LibreChat';
 const pwaShortName = process.env.EUCOWORK_SHORT_NAME?.trim() || pwaName;
 const pwaThemeColor = process.env.EUCOWORK_THEME_COLOR?.trim() || '#009688';
+const managedRelease = process.env.VITE_KISUNO_RELEASE_MANAGED === 'true';
 const escapeHtml = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -93,6 +94,19 @@ export default defineConfig(({ command }) => ({
       name: 'emit-sw-heal',
       apply: 'build',
       generateBundle() {
+        if (managedRelease) {
+          this.emitFile({
+            type: 'asset',
+            fileName: 'release-contract.json',
+            source: JSON.stringify({
+              schemaVersion: 1,
+              managed: true,
+              pwaEnabled: false,
+              autoReload: false,
+            }),
+          });
+          return;
+        }
         this.emitFile({
           type: 'asset',
           fileName: 'sw-heal.js',
@@ -101,7 +115,8 @@ export default defineConfig(({ command }) => ({
       },
     },
     VitePWA({
-      injectRegister: 'auto', // 'auto' | 'manual' | 'disabled'
+      disable: managedRelease,
+      injectRegister: 'auto', // Managed releases disable both generation and registration.
       registerType: 'autoUpdate', // 'prompt' | 'autoUpdate'
       devOptions: {
         enabled: false, // disable service worker registration in development mode

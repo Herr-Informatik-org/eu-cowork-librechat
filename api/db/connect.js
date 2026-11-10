@@ -4,6 +4,14 @@ const { logger } = require('@librechat/data-schemas');
 
 const mongoose = require('mongoose');
 const MONGO_URI = process.env.MONGO_URI;
+if (
+  process.env.KISUNO_RELEASE_ID &&
+  (process.env.MONGO_AUTO_INDEX !== 'false' || process.env.MONGO_AUTO_CREATE !== 'false')
+) {
+  throw new Error(
+    'Release-Wechsel benötigt vorbereitete Mongo-Collections und deaktivierte automatische Indexänderungen.',
+  );
+}
 
 instrumentMongooseQueryMetrics(mongoose);
 

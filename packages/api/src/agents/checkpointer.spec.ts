@@ -89,3 +89,20 @@ describe('deleteAgentCheckpoint', () => {
     });
   });
 });
+
+describe('managed release checkpoint requirements', () => {
+  const previous = process.env.KISUNO_RELEASE_ID;
+  beforeEach(() => {
+    process.env.KISUNO_RELEASE_ID = 'unit-release';
+  });
+  afterEach(() => {
+    if (previous === undefined) delete process.env.KISUNO_RELEASE_ID;
+    else process.env.KISUNO_RELEASE_ID = previous;
+  });
+  test('rejects memory fallback even if explicitly selected', async () => {
+    await expect(getAgentCheckpointer({ type: 'memory' })).rejects.toThrow('flüchtigen');
+  });
+  test('rejects an unavailable durable store', async () => {
+    await expect(getAgentCheckpointer(undefined)).rejects.toThrow('nicht bereit');
+  });
+});

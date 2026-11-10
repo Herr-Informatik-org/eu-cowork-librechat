@@ -9,3 +9,5 @@ export * from './shutdown';
 export * from './server';
 export { resolveBuildInfo } from './build';
 export type { BuildInfo } from './build';
+
+export { createReleaseLifecycle, releaseLifecycle } from './daytimeRelease';

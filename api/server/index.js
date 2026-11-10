@@ -12,12 +12,16 @@ const mongoSanitize = require('express-mongo-sanitize');
 const { logger, runAsSystem } = require('@librechat/data-schemas');
 const {
   isEnabled,
+  cacheConfig,
+  ioredisClient,
+  releaseLifecycle,
   usageCreditMiddleware,
   apiNotFound,
   createMetrics,
   ErrorController,
   memoryDiagnostics,
   performStartupChecks,
+  getAgentCheckpointer,
   handleJsonParseError,
   GenerationJobManager,
   QUERY_DEVTOOLS_HEADER,
@@ -45,7 +49,10 @@ const initializeOAuthReconnectManager = require('./services/initializeOAuthRecon
 const { capabilityContextMiddleware } = require('./middleware/roles/capabilities');
 const createValidateImageRequest = require('./middleware/validateImageRequest');
 const { startExpiredFileSweep } = require('./services/Files/process');
-const { initializeGitHubSkillSync } = require('./services/Skills/sync');
+const {
+  initializeGitHubSkillSync,
+  stopGitHubSkillSyncScheduler,
+} = require('./services/Skills/sync');
 const { jwtLogin, ldapLogin, passportLogin } = require('~/strategies');
 const { checkMigrations } = require('./services/start/migration');
 const optionalJwtAuth = require('./middleware/optionalJwtAuth');
@@ -65,6 +72,7 @@ const host = HOST || 'localhost';
 const trusted_proxy = Number(TRUST_PROXY) || 1; /* trust first proxy by default */
 
 const app = express();
+app.use(releaseLifecycle.middleware);
 let serverReady = false;
 
 const SERVER_NOT_READY_CODE = 'SERVER_NOT_READY';
@@ -88,7 +96,34 @@ const configureGenerationStreams = () => {
     ...streamServices,
     cleanupOnComplete: !isEnabled(process.env.STREAM_KEEP_COMPLETED_JOBS),
   });
-  GenerationJobManager.initialize();
+  if (releaseLifecycle.enabled) {
+    releaseLifecycle.registerWorker('generation-cleanup', {
+      start: () => GenerationJobManager.initialize(),
+      stop: () => GenerationJobManager.pauseReleaseMaintenance(),
+    });
+    if (
+      !cacheConfig.USE_REDIS ||
+      !cacheConfig.USE_REDIS_STREAMS ||
+      !ioredisClient ||
+      !cacheConfig.REDIS_KEY_PREFIX ||
+      cacheConfig.REDIS_ENABLE_OFFLINE_QUEUE ||
+      cacheConfig.FORCED_IN_MEMORY_CACHE_NAMESPACES.some(
+        (name) => !['APP_CONFIG', 'CONFIG_STORE'].includes(name),
+      )
+    ) {
+      throw new Error(
+        'Release-Wechsel benötigt getrenntes Redis ohne flüchtige Sitzungen oder Offline-Warteschlange.',
+      );
+    }
+    releaseLifecycle.configure({
+      redis: ioredisClient,
+      checkRedis: async () =>
+        GenerationJobManager.isReleaseReady && (await ioredisClient.ping()) === 'PONG',
+      generationSnapshot: () => GenerationJobManager.getReleaseDrainSnapshot(),
+    });
+  } else {
+    GenerationJobManager.initialize();
+  }
   // Stop active generations and close their SSE streams while the HTTP server drains.
   registerShutdownTask(
     'generation job manager prepare',
@@ -116,9 +151,10 @@ const startServer = async () => {
   await connectDb();
 
   logger.info('Connected to MongoDB');
-  indexSync().catch((err) => {
-    logger.error('[indexSync] Background sync failed:', err);
-  });
+  if (!releaseLifecycle.enabled)
+    indexSync().catch((err) => {
+      logger.error('[indexSync] Background sync failed:', err);
+    });
 
   app.disable('x-powered-by');
   app.set('trust proxy', trusted_proxy);
@@ -130,19 +166,38 @@ const startServer = async () => {
     );
   }
 
-  await runAsSystem(seedDatabase);
+  if (!releaseLifecycle.enabled) await runAsSystem(seedDatabase);
   /* Recover stuck `status: 'pending'` records from a crash mid-render.
    * `runAsSystem` is required — `File` is tenant-isolated and strict
    * mode rejects unscoped queries. Lazy sweep in the preview endpoint
    * covers anything younger than the boot cutoff. */
-  runAsSystem(sweepOrphanedPreviews).catch((err) => {
-    logger.error('[sweepOrphanedPreviews] Background sweep failed:', err);
-  });
+  if (!releaseLifecycle.enabled)
+    runAsSystem(sweepOrphanedPreviews).catch((err) => {
+      logger.error('[sweepOrphanedPreviews] Background sweep failed:', err);
+    });
   const appConfig = await getAppConfig({ baseOnly: true });
+  releaseLifecycle.verifyBuild(appConfig.paths.dist);
+  if (releaseLifecycle.enabled)
+    await getAgentCheckpointer(appConfig?.endpoints?.agents?.checkpointer);
   initializeFileStorage(appConfig);
   await initializeDeploymentSkills({ projectRoot: path.resolve(__dirname, '../..') });
-  initializeGitHubSkillSync(appConfig);
-  startExpiredFileSweep({ appConfig, loadAppConfig: getAppConfig });
+  if (releaseLifecycle.enabled) {
+    let fileSweep;
+    releaseLifecycle.registerWorker('maintenance', {
+      start: () => {
+        initializeGitHubSkillSync(appConfig);
+        fileSweep = startExpiredFileSweep({ appConfig, loadAppConfig: getAppConfig });
+      },
+      stop: () => {
+        stopGitHubSkillSyncScheduler();
+        if (fileSweep) clearInterval(fileSweep);
+        fileSweep = undefined;
+      },
+    });
+  } else {
+    initializeGitHubSkillSync(appConfig);
+    startExpiredFileSweep({ appConfig, loadAppConfig: getAppConfig });
+  }
   // Register any programmatic tool-approval policy hooks declared in
   // `endpoints.agents.toolApproval.hooks`. Honor the `enabled` kill switch: when tool
   // approval is off we pass no hooks, so a disabled endpoint imports/runs nothing (and any
@@ -155,7 +210,8 @@ const startServer = async () => {
   });
   await runAsSystem(async () => {
     await performStartupChecks(appConfig);
-    await updateInterfacePermissions({ appConfig, getRoleByName, updateAccessPermissions });
+    if (!releaseLifecycle.enabled)
+      await updateInterfacePermissions({ appConfig, getRoleByName, updateAccessPermissions });
   });
 
   const indexPath = path.join(appConfig.paths.dist, 'index.html');
@@ -194,7 +250,10 @@ const startServer = async () => {
   app.get('/health', (_req, res) => res.status(200).send('OK'));
   app.get('/livez', (_req, res) => res.status(200).send('OK'));
   app.get('/readyz', (_req, res) => {
-    if (!serverReady) {
+    if (
+      !serverReady ||
+      (releaseLifecycle.enabled && ['draining', 'sealed'].includes(releaseLifecycle.state))
+    ) {
       return res.status(503).send('NOT_READY');
     }
     return res.status(200).send('OK');
@@ -360,11 +419,17 @@ const startServer = async () => {
         await initializeMCPs();
         await initializeOAuthReconnectManager();
       });
-      await checkMigrations();
+      if (!releaseLifecycle.enabled) await checkMigrations();
 
       const inspectFlags = process.execArgv.some((arg) => arg.startsWith('--inspect'));
       if (inspectFlags || isEnabled(process.env.MEM_DIAG)) {
         memoryDiagnostics.start();
+      }
+      releaseLifecycle.markReady();
+      if (releaseLifecycle.enabled) {
+        const status = await releaseLifecycle.snapshot();
+        if (!status.ready) throw new Error('Release-Laufzeit ist nicht bereit.');
+        await releaseLifecycle.startControl();
       }
       serverReady = true;
       logger.info('Server readiness checks passing.');

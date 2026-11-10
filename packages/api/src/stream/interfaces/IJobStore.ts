@@ -1189,6 +1189,9 @@ export interface IJobStoreV2 extends IJobStore {
  * Implementations can use EventEmitter, Redis Pub/Sub, etc.
  */
 export interface IEventTransport {
+  /** Both Redis transport connections must be ready before a managed release accepts traffic. */
+  isReleaseReady?(): boolean;
+
   /**
    * Subscribe to events for a stream. `ready` resolves once the transport can receive messages.
    *

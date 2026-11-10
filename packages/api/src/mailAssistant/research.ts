@@ -1,6 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { Collection } from 'mongodb';
+import { createHash, randomUUID } from 'node:crypto';
+import { MAIL_RESEARCH_CONSENT_VERSION } from 'librechat-data-provider';
 import type {
   MailResearchJob,
   MailResearchSkill,
@@ -10,12 +10,13 @@ import type {
   MailResearchRunRequest,
   MailResearchEvidence,
 } from 'librechat-data-provider';
-import { MAIL_RESEARCH_CONSENT_VERSION } from 'librechat-data-provider';
-import type { MailCodec } from './privateData';
+import type { Collection } from 'mongodb';
 import type { MailMessage, MailRuntimeAdapter, MailStore } from './types';
-import { MAIL_CONSENT_VERSION } from './types';
-import { MailAssistantError, resultRevision } from './engine';
 import type { createMailResearchMcp } from './researchMcp';
+import type { MailCodec } from './privateData';
+import { MailAssistantError, resultRevision } from './engine';
+import { releaseLifecycle } from '~/app/daytimeRelease';
+import { MAIL_CONSENT_VERSION } from './types';
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const revision = z.string().regex(/^[a-f0-9]{64}$/);
@@ -426,7 +427,10 @@ export function createMailResearch(deps: Dependencies): MailResearchService {
     }
   };
   const wake = (owner: string) => {
-    void execute(owner).catch(() => undefined);
+    if (releaseLifecycle.enabled && !releaseLifecycle.workersActive) return;
+    void releaseLifecycle
+      .runTask('mail-research', () => execute(owner), { worker: true })
+      .catch(() => undefined);
   };
   return {
     async settings(owner: string): Promise<MailResearchSettings> {
@@ -626,10 +630,14 @@ export function createMailResearch(deps: Dependencies): MailResearchService {
     start() {
       if (!timer) {
         timer = setInterval(() => {
-          void tick().catch(() => undefined);
+          void releaseLifecycle
+            .runTask('mail-research-tick', tick, { worker: true })
+            .catch(() => undefined);
         }, 15000);
         timer.unref();
-        void tick().catch(() => undefined);
+        void releaseLifecycle
+          .runTask('mail-research-tick', tick, { worker: true })
+          .catch(() => undefined);
       }
     },
     stop() {

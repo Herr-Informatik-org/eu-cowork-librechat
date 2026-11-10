@@ -283,6 +283,10 @@ export class RedisEventTransport implements IEventTransport {
     });
   }
 
+  isReleaseReady(): boolean {
+    return this.publisher.status === 'ready' && this.subscriber.status === 'ready';
+  }
+
   /** Minimum safety-net TTL in seconds; publishing and pause transitions may only extend it. */
   private static readonly SEQUENCE_TTL_SECONDS = 86400;
 

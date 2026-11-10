@@ -51,6 +51,7 @@ import {
 } from '~/app/metrics';
 import { isRecoveredSteerPayload, RecoveredSteerPayloadMismatchError } from './SteerRecovery';
 import { assertJobStoreV2 } from './jobStoreCapabilities';
+import { releaseLifecycle } from '~/app/daytimeRelease';
 
 /**
  * Tombstone budget per generation. Twice the queue depth so a full queue's
@@ -594,6 +595,9 @@ class GenerationJobManagerClass {
   /** Jobs actively owned by this process, pinned to their durable creation epoch. */
   private ownedJobs = new Map<string, number>();
 
+  /** Locally owned epochs retained across human-review pauses for safe release draining. */
+  private releaseGenerations = new Map<string, number>();
+
   /** Serializes replay-event read/modify/write updates per stream. */
   private replayEventWriteQueues = new Map<string, Promise<void>>();
 
@@ -645,10 +649,14 @@ class GenerationJobManagerClass {
       return;
     }
 
-    this.jobStore.initialize();
+    if (!releaseLifecycle.enabled) this.jobStore.initialize();
 
     this.cleanupInterval = setInterval(() => {
-      this.cleanup();
+      void releaseLifecycle
+        .runTask('generation-cleanup', () => this.cleanup(), { worker: true })
+        .catch((error) => {
+          logger.error('[GenerationJobManager] Cleanup unavailable:', error);
+        });
     }, 60000);
 
     if (this.cleanupInterval.unref) {
@@ -656,6 +664,11 @@ class GenerationJobManagerClass {
     }
 
     logger.debug('[GenerationJobManager] Initialized');
+  }
+
+  pauseReleaseMaintenance(): void {
+    if (this.cleanupInterval) clearInterval(this.cleanupInterval);
+    this.cleanupInterval = null;
   }
 
   /**
@@ -718,6 +731,7 @@ class GenerationJobManagerClass {
     }
 
     this.ownedJobs.clear();
+    this.releaseGenerations.clear();
     setGenerationJobsInFlight(previousStore, 0);
 
     this.jobStore = services.jobStore;
@@ -741,6 +755,43 @@ class GenerationJobManagerClass {
     return this._isRedis;
   }
 
+  get isReleaseReady(): boolean {
+    return this._isRedis && this.eventTransport.isReleaseReady?.() === true;
+  }
+
+  /** Conservative local ownership/persistence view for an explicit release drain.
+   * Paused jobs remain blockers until their durable state changes; a zero
+   * running-job metric alone does not prove that a process is disposable.
+   */
+  async getReleaseDrainSnapshot(): Promise<{ jobs: number; pending: number; paused: number }> {
+    if (!this._isRedis)
+      throw new Error('Release-Wechsel benötigt einen gemeinsamen Stream-Speicher.');
+    let paused = 0;
+    let pending = 0;
+    for (const [streamId, createdAt] of this.releaseGenerations) {
+      const job = await this.jobStore.getJob(streamId);
+      if (job?.createdAt === createdAt) {
+        if (job.status === 'requires_action') paused++;
+        if (job.terminalPersistencePending) pending++;
+      }
+      if (
+        job?.createdAt !== createdAt ||
+        (job.status !== 'requires_action' &&
+          !job.terminalPersistencePending &&
+          this.ownedJobs.get(streamId) !== createdAt)
+      ) {
+        this.releaseGenerations.delete(streamId);
+      }
+    }
+    pending +=
+      this.replayEventWriteQueues.size +
+      this.tokenUsageWriteQueues.size +
+      this.subscriberCleanupPromises.size;
+    for (const runtime of this.runtimeState.values())
+      pending += runtime.inFlightSnapshotEmissions.size;
+    return { jobs: this.ownedJobs.size, pending, paused };
+  }
+
   private get storeLabel(): GenerationJobStore {
     return this._isRedis ? 'redis' : 'memory';
   }
@@ -751,7 +802,7 @@ class GenerationJobManagerClass {
 
   private createApprovalLifecycle(store: IJobStoreV2): ApprovalLifecycle {
     return new ApprovalLifecycle(store, {
-      onPaused: (streamId, createdAt) => this.releaseJobOwnership(streamId, createdAt),
+      onPaused: (streamId, createdAt) => this.releaseJobOwnership(streamId, createdAt, true),
       onResumed: (streamId, createdAt) => this.acquireResumedJobOwnership(streamId, createdAt),
       onExpired: (streamId, createdAt) => this.releaseJobOwnership(streamId, createdAt),
       onPausePersistenceFailed: (streamId, createdAt, error, drainedSteers) =>
@@ -811,6 +862,7 @@ class GenerationJobManagerClass {
 
   private acquireJobOwnership(streamId: string, createdAt: number): void {
     this.ownedJobs.set(streamId, createdAt);
+    this.releaseGenerations.set(streamId, createdAt);
     this.syncRunningJobMetrics();
   }
 
@@ -822,7 +874,33 @@ class GenerationJobManagerClass {
     this.acquireJobOwnership(streamId, createdAt);
   }
 
-  private releaseJobOwnership(streamId: string, expectedCreatedAt?: number): boolean {
+  private releaseJobOwnership(
+    streamId: string,
+    expectedCreatedAt?: number,
+    preserveReview = false,
+  ): boolean {
+    const releaseEpoch = this.releaseGenerations.get(streamId);
+    if (
+      !preserveReview &&
+      releaseEpoch != null &&
+      (expectedCreatedAt == null || releaseEpoch === expectedCreatedAt)
+    ) {
+      void releaseLifecycle
+        .runTask('generation-retirement-check', async () => {
+          const job = await this.jobStore.getJob(streamId);
+          if (
+            this.releaseGenerations.get(streamId) === releaseEpoch &&
+            this.ownedJobs.get(streamId) !== releaseEpoch &&
+            (job?.createdAt !== releaseEpoch ||
+              (job.status !== 'requires_action' && !job.terminalPersistencePending))
+          ) {
+            this.releaseGenerations.delete(streamId);
+          }
+        })
+        .catch((error) =>
+          logger.warn('[GenerationJobManager] Release-Abschlussprüfung fehlgeschlagen:', error),
+        );
+    }
     if (expectedCreatedAt != null && this.ownedJobs.get(streamId) !== expectedCreatedAt) {
       return false;
     }
@@ -889,7 +967,7 @@ class GenerationJobManagerClass {
         return;
       }
       if (currentJob.status === 'requires_action') {
-        this.releaseJobOwnership(streamId, createdAt);
+        this.releaseJobOwnership(streamId, createdAt, true);
         return;
       }
     }
@@ -4921,6 +4999,21 @@ class GenerationJobManagerClass {
       deliveredSteer?: SteerQueueItem;
     },
   ): Promise<void> {
+    await releaseLifecycle.runTask('generation-event', () =>
+      this.emitChunkTracked(streamId, event, options),
+    );
+  }
+
+  private async emitChunkTracked(
+    streamId: string,
+    event: t.ServerSentEvent,
+    options?: {
+      durable?: boolean;
+      expectedCreatedAt?: number;
+      /** Atomically settles a claimed steer with its durable applied event. */
+      deliveredSteer?: SteerQueueItem;
+    },
+  ): Promise<void> {
     const runtime = this.runtimeState.get(streamId);
     if (
       !runtime ||
@@ -5614,7 +5707,9 @@ class GenerationJobManagerClass {
     expectedCreatedAt?: number,
   ): Promise<void> {
     const generationId = expectedCreatedAt ?? this.runtimeState.get(streamId)?.createdAt;
-    await this.jobStore.updateJob(streamId, sanitizeJobMetadata(metadata), generationId);
+    await releaseLifecycle.runTask('generation-metadata', () =>
+      this.jobStore.updateJob(streamId, sanitizeJobMetadata(metadata), generationId),
+    );
   }
 
   /**
@@ -6622,6 +6717,7 @@ class GenerationJobManagerClass {
     this.eventTransport.destroy();
     this.runtimeState.clear();
     this.ownedJobs.clear();
+    this.releaseGenerations.clear();
     this.syncRunningJobMetrics();
     this.runStepBuffers?.clear();
     this.replayEventWriteQueues.clear();

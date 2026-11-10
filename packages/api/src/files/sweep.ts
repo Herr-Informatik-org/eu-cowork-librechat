@@ -5,6 +5,7 @@ import {
   defaultAssistantsVersion,
 } from 'librechat-data-provider';
 import type { AppConfig } from '@librechat/data-schemas';
+import { releaseLifecycle } from '~/app/daytimeRelease';
 
 const DEFAULT_FILE_RETENTION_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -267,20 +268,29 @@ export function startExpiredFileSweep(
   }
 
   let isSweeping = false;
-  const runSweep = async () => {
-    if (isSweeping) {
-      return;
-    }
+  const runSweep = () =>
+    releaseLifecycle
+      .runTask(
+        'file-sweep',
+        async () => {
+          if (isSweeping) {
+            return;
+          }
 
-    isSweeping = true;
-    try {
-      await runAsSystem(() => sweepExpiredFiles(options));
-    } catch (error) {
-      logger.error('[sweepExpiredFiles] Background sweep failed:', error);
-    } finally {
-      isSweeping = false;
-    }
-  };
+          isSweeping = true;
+          try {
+            await runAsSystem(() => sweepExpiredFiles(options));
+          } catch (error) {
+            logger.error('[sweepExpiredFiles] Background sweep failed:', error);
+          } finally {
+            isSweeping = false;
+          }
+        },
+        { worker: true },
+      )
+      .catch((error) => {
+        logger.error('[sweepExpiredFiles] Release worker is unavailable:', error);
+      });
 
   runSweep();
   const interval = setInterval(runSweep, intervalMs);

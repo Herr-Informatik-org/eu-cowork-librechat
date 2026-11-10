@@ -1,4 +1,5 @@
 const { isEnabled } = require('@librechat/api');
+const releaseLifecycle = require('~/server/services/daytimeRelease');
 const { logger } = require('@librechat/data-schemas');
 const { CacheKeys } = require('librechat-data-provider');
 const getLogStores = require('~/cache/getLogStores');
@@ -90,12 +91,14 @@ const addTitle = async (
     }
     if (client && typeof client.titleConvo === 'function') {
       titlePromise = Promise.race([
-        client
-          .titleConvo({
-            text,
-            abortController,
-            immediate,
-          })
+        releaseLifecycle
+          .runTask('title-provider', () =>
+            client.titleConvo({
+              text,
+              abortController,
+              immediate,
+            }),
+          )
           .catch((error) => {
             logger.error('Client title error:', error);
           }),
@@ -169,4 +172,4 @@ const addTitle = async (
   }
 };
 
-module.exports = addTitle;
+module.exports = (...args) => releaseLifecycle.runTask('generation-title', () => addTitle(...args));

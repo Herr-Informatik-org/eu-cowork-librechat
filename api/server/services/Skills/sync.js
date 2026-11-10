@@ -1,3 +1,4 @@
+const releaseLifecycle = require('~/server/services/daytimeRelease');
 const { FileContext } = require('librechat-data-provider');
 const {
   getStorageMetadata,
@@ -159,9 +160,13 @@ function createRunner({ getConfig, loadAppConfig, allowServerCredentials = true 
     },
     allowServerCredentials,
   });
+  if (!releaseLifecycle.enabled) return createdRunner;
   return {
     getStatus: createdRunner.getStatus,
-    runOnce: createdRunner.runOnce,
+    runOnce: (...args) =>
+      releaseLifecycle.runTask('skill-sync', () => createdRunner.runOnce(...args), {
+        worker: true,
+      }),
   };
 }
 
