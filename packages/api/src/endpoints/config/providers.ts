@@ -10,6 +10,7 @@ import { initializeCustom } from '../custom/initialize';
 import { initializeGoogle } from '../google/initialize';
 import { initializeOpenAI } from '../openai/initialize';
 import { getCustomEndpointConfig } from '~/app/config';
+import { requirePrivacyModelEndpoint } from './privacy';
 
 /**
  * Type for initialize functions
@@ -211,6 +212,7 @@ export function getProviderConfig({
     overrideProvider = Providers.ANTHROPIC;
   }
 
+  requirePrivacyModelEndpoint(customEndpointConfig);
   return {
     getOptions,
     overrideProvider,

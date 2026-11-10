@@ -5,6 +5,11 @@ import type { Dispatcher } from 'undici';
 import type * as t from '~/types';
 import { getGoogleConfig, stripGeminiFlashBlockedParams } from '~/endpoints/google/llm';
 import { getLLMConfig as getAnthropicLLMConfig } from '~/endpoints/anthropic/llm';
+import {
+  createPrivacyModelFetch,
+  isPrivacyRequired,
+  PrivacyRouteError,
+} from '~/endpoints/config/privacy';
 import { createSSRFSafeAgents, createSSRFSafeUndiciConnect } from '~/auth';
 import { getOpenAILLMConfig, extractDefaultParams } from './llm';
 import { transformToOpenAIConfig } from './transform';
@@ -105,6 +110,10 @@ export function getOpenAIConfig(
     modelOptions = {},
     reverseProxyUrl: baseURL,
   } = options;
+  const protectedFetch = isPrivacyRequired() ? createPrivacyModelFetch(baseURL) : undefined;
+  if (protectedFetch && (options.baseURLIsUserProvided || directEndpoint || options.azure)) {
+    throw new PrivacyRouteError();
+  }
   const shouldProtectUserBaseURL = options.baseURLIsUserProvided === true && !!baseURL;
   const ssrfAgents = shouldProtectUserBaseURL
     ? createSSRFSafeAgents(options.allowedAddresses)
@@ -259,7 +268,7 @@ export function getOpenAIConfig(
     });
   }
 
-  const proxyDispatcher = getProxyDispatcher(proxy);
+  const proxyDispatcher = protectedFetch ? undefined : getProxyDispatcher(proxy);
   if (proxyDispatcher && !shouldProtectUserBaseURL) {
     mergeFetchOptions(configOptions, { dispatcher: proxyDispatcher });
   }
@@ -301,6 +310,10 @@ export function getOpenAIConfig(
       ssrfAgents,
       redirect: shouldProtectUserBaseURL ? 'error' : undefined,
     }) as unknown as Fetch;
+  }
+  if (protectedFetch) {
+    configOptions.fetch = protectedFetch;
+    llmConfig.useResponsesApi = false;
   }
 
   const result: t.OpenAIConfigResult = {

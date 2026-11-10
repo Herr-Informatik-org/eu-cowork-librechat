@@ -58,6 +58,11 @@ import { isSteeringSupported, isSteerPreemptSupported } from '~/agents/steering/
 import { getLLMConfig as getAnthropicLLMConfig } from '~/endpoints/anthropic/llm';
 import { CREATE_FILE_TOOL_NAME, EDIT_FILE_TOOL_NAME } from '~/agents/tools';
 import { getProviderConfig } from '~/endpoints/config/providers';
+import {
+  createPrivacyModelFetch,
+  isPrivacyRequired,
+  PrivacyRouteError,
+} from '~/endpoints/config/privacy';
 import { extractDefaultParams } from '~/endpoints/openai/llm';
 import { resolveHeaders, createSafeUser } from '~/utils/env';
 import { getAgentCheckpointer } from '~/agents/checkpointer';
@@ -649,6 +654,7 @@ function shapeSummarizationConfig(
   headerContext: { user?: IUser; requestBody?: t.RequestBody },
 ) {
   const rawProvider = config?.provider ?? fallbackProvider;
+  const requirePrivacy = isPrivacyRequired();
   /**
    * When the summarization provider resolves to the same custom endpoint as
    * the main agent, skip client-option overrides. The SDK's self-summarize
@@ -660,10 +666,12 @@ function shapeSummarizationConfig(
     agentEndpoint != null &&
     isNonEmptyString(rawProvider) &&
     normalizeEndpointName(rawProvider) === normalizeEndpointName(agentEndpoint);
+  const reuseAgent = isSameEndpointAsAgent || (requirePrivacy && !config?.provider);
 
-  const { provider, clientOverrides } = isSameEndpointAsAgent
-    ? { provider: fallbackProvider, clientOverrides: undefined }
-    : resolveSummarizationProvider(rawProvider, appConfig, headerContext);
+  const { provider, clientOverrides } =
+    reuseAgent || requirePrivacy
+      ? { provider: fallbackProvider, clientOverrides: undefined }
+      : resolveSummarizationProvider(rawProvider, appConfig, headerContext);
 
   const model = config?.model ?? fallbackModel;
   const trigger =
@@ -685,13 +693,18 @@ function shapeSummarizationConfig(
    * adding e.g. `configuration.defaultQuery` keeps the resolved `baseURL`
    * and `defaultHeaders` rather than replacing the whole object.
    */
-  const parameters =
-    clientOverrides != null
+  const parameters = requirePrivacy
+    ? undefined
+    : clientOverrides != null
       ? mergeParameters(clientOverrides, config?.parameters)
       : config?.parameters;
 
   return {
-    enabled: config?.enabled !== false && isNonEmptyString(provider) && isNonEmptyString(model),
+    enabled:
+      (!requirePrivacy || reuseAgent) &&
+      config?.enabled !== false &&
+      isNonEmptyString(provider) &&
+      isNonEmptyString(model),
     config: {
       trigger,
       provider,
@@ -1342,6 +1355,18 @@ export async function createRun({
       user: createSafeUser(user),
       body: requestBody,
     });
+
+    if (isPrivacyRequired()) {
+      if (provider !== Providers.OPENAI && provider !== Providers.OPENROUTER) {
+        throw new PrivacyRouteError();
+      }
+      llmConfig.configuration = {
+        ...llmConfig.configuration,
+        fetch: createPrivacyModelFetch(llmConfig.configuration?.baseURL),
+        fetchOptions: undefined,
+      };
+      llmConfig.useResponsesApi = false;
+    }
 
     /** Resolves issues with new OpenAI usage field */
     if (

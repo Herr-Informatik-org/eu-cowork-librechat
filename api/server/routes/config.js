@@ -12,6 +12,8 @@ const {
   excludeHiddenModelSpecs,
   isFileSnapshotEnabled,
   isLocalFoldersEnabled,
+  isPrivacyRequired,
+  isProtectedModelEndpoint,
 } = require('@librechat/api');
 const { EModelEndpoint, defaultSocialLogins } = require('librechat-data-provider');
 const { logger, getTenantId, SystemCapabilities } = require('@librechat/data-schemas');
@@ -252,15 +254,11 @@ router.get('/', async function (req, res) {
 
     const customEndpoints = appConfig?.endpoints?.custom;
     const privacyTextEndpoints =
-      process.env.PRIVACY_REQUIRED === 'true' &&
-      process.env.PRIVACY_ROUTE_TOKEN &&
-      Array.isArray(customEndpoints)
+      isPrivacyRequired() && Array.isArray(customEndpoints)
         ? customEndpoints
             .filter(
               (endpoint) =>
-                typeof endpoint?.name === 'string' &&
-                /^http:\/\/privacy-proxy:3040\/r\/[a-z0-9-]{1,48}\/v1\/?$/.test(endpoint.baseURL) &&
-                endpoint.headers?.['X-EUCowork-Privacy-Key'] === '${PRIVACY_ROUTE_TOKEN}',
+                typeof endpoint?.name === 'string' && isProtectedModelEndpoint(endpoint),
             )
             .map((endpoint) => endpoint.name)
         : [];

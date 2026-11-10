@@ -1,4 +1,5 @@
 const express = require('express');
+const { isPrivacyRequired } = require('@librechat/api');
 const { uaParser, checkBan, requireJwtAuth, configMiddleware } = require('~/server/middleware');
 const router = express.Router();
 
@@ -9,6 +10,14 @@ const chatV2 = require('./chatV2');
 
 router.use(requireJwtAuth);
 router.use(checkBan);
+router.use((req, res, next) => {
+  if (isPrivacyRequired()) {
+    return res
+      .status(403)
+      .json({ message: 'Externe Assistenten sind bei aktivem Datenschutz gesperrt.' });
+  }
+  return next();
+});
 router.use(uaParser);
 router.use(configMiddleware);
 router.use('/v1/', v1);

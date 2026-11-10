@@ -15,6 +15,7 @@ import type {
   AnthropicModelOptions,
 } from '~/types';
 import { getLLMConfig as getAnthropicLLMConfig } from '~/endpoints/anthropic/llm';
+import { requirePrivacyModelEndpoint, isPrivacyRequired } from '~/endpoints/config/privacy';
 import { extractDefaultParams } from '~/endpoints/openai/llm';
 import { isUserProvided, checkUserKeyExpiry } from '~/utils';
 import { getOpenAIConfig } from '~/endpoints/openai/config';
@@ -190,6 +191,7 @@ export async function initializeCustom({
   if (!endpointConfig) {
     throw new Error(`Config not found for the ${endpoint} custom endpoint.`);
   }
+  requirePrivacyModelEndpoint(endpointConfig);
 
   const CUSTOM_API_KEY = extractEnvVariable(endpointConfig.apiKey ?? '');
   const CUSTOM_BASE_URL = extractEnvVariable(endpointConfig.baseURL ?? '');
@@ -273,6 +275,7 @@ export async function initializeCustom({
   }
 
   if (
+    !isPrivacyRequired() &&
     FetchTokenConfig[endpoint.toLowerCase() as keyof typeof FetchTokenConfig] &&
     endpointConfig &&
     endpointConfig.models?.fetch &&
