@@ -180,6 +180,11 @@ export function mailAssistantConfigurationStatus(env: NodeJS.ProcessEnv = proces
   }
 }
 const directGateway = 'http://mcp-gateway:3020/router/v1/direct';
+const protectedRoutes = new Map([
+  ['http://privacy-proxy:3040/r/openrouter-direct/v1', directGateway],
+  ['http://privacy-proxy:3040/r/eurouter/v1', 'https://api.eurouter.ai/api/v1'],
+  ['http://privacy-proxy:3040/r/tensorx/v1', 'https://api.tensorx.ai/v1'],
+]);
 const knownRoutes: Record<string, string> = {
   'https://api.eurouter.ai/api/v1': 'EU-Inferenz laut Anbieter',
   'https://api.tensorx.ai/v1': 'EU-Inferenz laut Anbieter',
@@ -350,11 +355,15 @@ export function createMailAssistantRuntime(
     const endpoint = matches.length === 1 ? resolveCustomEndpointSecrets(matches[0]) : undefined;
     const baseURL = resolveConfigSecret(endpoint?.baseURL)?.replace(/\/$/, '');
     const key = resolveConfigSecret(endpoint?.apiKey);
-    const gateway = baseURL === directGateway;
+    const protectedUpstream = baseURL ? protectedRoutes.get(baseURL) : undefined;
+    const modelRoute = protectedUpstream ?? baseURL;
+    const privacyRouteToken = protectedUpstream ? env.PRIVACY_ROUTE_TOKEN : undefined;
+    const gateway = modelRoute === directGateway;
     if (
       !endpoint ||
       !baseURL ||
-      (!gateway && !Object.prototype.hasOwnProperty.call(knownRoutes, baseURL)) ||
+      !modelRoute ||
+      (!gateway && !Object.prototype.hasOwnProperty.call(knownRoutes, modelRoute)) ||
       !key ||
       key === 'user_provided' ||
       key.includes('${')
@@ -362,7 +371,14 @@ export function createMailAssistantRuntime(
       throw new MailModelConfigurationError(
         'Die Verbindung des Standardmodells ist nicht freigegeben oder nicht verfügbar.',
       );
-    let upstreamURL = baseURL;
+    if (
+      (env.PRIVACY_REQUIRED === 'true' && !protectedUpstream) ||
+      (protectedUpstream && !privacyRouteToken?.trim())
+    )
+      throw new MailModelConfigurationError(
+        'Für den Mail-Assistenten fehlt die geprüfte Datenschutzroute.',
+      );
+    let upstreamURL = modelRoute;
     let gatewayFingerprint: string | undefined;
     if (gateway) {
       const response = await request(
@@ -424,9 +440,18 @@ export function createMailAssistantRuntime(
       throw new MailModelConfigurationError(
         'Die Datenschutzvorgaben dieser Modellroute können nicht sicher übernommen werden.',
       );
-    const modelLabel = `${provider} · ${model}${gateway ? ' · über MCP-Gateway' : ''} · ${knownRoutes[upstreamURL]}`;
+    const modelLabel = `${provider} · ${model}${gateway ? ' · über MCP-Gateway' : ''}${protectedUpstream ? ' · mit Datenschutz-Proxy' : ''} · ${knownRoutes[upstreamURL]}`;
     const modelFingerprint = createHash('sha256')
-      .update(JSON.stringify({ provider, baseURL, model, routing, gatewayFingerprint }))
+      .update(
+        JSON.stringify({
+          provider,
+          baseURL,
+          model,
+          routing,
+          gatewayFingerprint,
+          protectedUpstream,
+        }),
+      )
       .digest('hex');
     const prices: EndpointTokenConfig = {};
     for (const [name, rates] of Object.entries(endpoint.tokenConfig ?? {}))
@@ -458,6 +483,8 @@ export function createMailAssistantRuntime(
       modelLabel,
       modelFingerprint,
       gatewayFingerprint,
+      protectedUpstream,
+      privacyRouteToken,
       contextTokens,
     };
   };
@@ -471,7 +498,16 @@ export function createMailAssistantRuntime(
     researchContext?: ResearchModelContext,
   ): Promise<MailAnalysis> => {
     const selected = await resolveModel(ownerId);
-    const { req, key, prices, provider, model, baseURL, routing, gatewayFingerprint } = selected;
+    const {
+      req,
+      prices,
+      provider,
+      model,
+      baseURL,
+      routing,
+      gatewayFingerprint,
+      protectedUpstream,
+    } = selected;
     const requestId = `mail-assistant:${randomUUID()}`;
     const emails = messages.map(({ subject, sender, receivedAt, sentAt, body, bodyTruncated }) => ({
       subject,
@@ -597,20 +633,31 @@ export function createMailAssistantRuntime(
         'Die Brain-Freigabe wurde geändert. Bitte die Mail erneut prüfen.',
       );
     await beforeRequest();
-    const response = await request(`${baseURL}/chat/completions`, {
+    const completionsURL = `${baseURL}/chat/completions${protectedUpstream ? '/strict' : ''}`;
+    const response = await request(completionsURL, {
       method: 'POST',
       redirect: 'error',
       signal: AbortSignal.timeout(60000),
       headers: {
-        Authorization: `Bearer ${key}`,
+        Authorization: `Bearer ${currentSelection.key}`,
         'Content-Type': 'application/json',
+        ...(gatewayFingerprint || protectedUpstream
+          ? {
+              'X-EUCowork-User-Id': ownerId,
+              'X-EUCowork-Conversation-Id': requestId,
+            }
+          : {}),
         ...(gatewayFingerprint
           ? {
               'X-EUCowork-Mail-Assistant': 'true',
               'X-EUCowork-Route-Fingerprint': gatewayFingerprint,
-              'X-EUCowork-User-Id': ownerId,
-              'X-EUCowork-User-Email': req.user!.email!,
-              'X-EUCowork-Conversation-Id': requestId,
+              'X-EUCowork-User-Email': currentSelection.req.user!.email!,
+            }
+          : {}),
+        ...(protectedUpstream
+          ? {
+              'X-EUCowork-Privacy-Key': currentSelection.privacyRouteToken!,
+              'X-EUCowork-Privacy-Expected-Upstream': protectedUpstream,
             }
           : {}),
       },

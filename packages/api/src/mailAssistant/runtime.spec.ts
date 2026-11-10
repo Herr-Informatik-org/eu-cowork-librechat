@@ -1040,6 +1040,71 @@ describe('Mail assistant runtime boundaries', () => {
     upstream = 'https://unknown-provider.example/api/v1';
     expect((await runtime.adapter.availability(owner)).available).toBe(false);
   });
+  it('requires the dedicated strict privacy endpoint and preserves the verified model route', async () => {
+    const f = fixture();
+    const proxyRoute = 'http://privacy-proxy:3040/r/eurouter/v1';
+    f.setRoute(proxyRoute);
+    f.deps.env!.PRIVACY_REQUIRED = 'true';
+    const fetch = jest.fn<
+      ReturnType<NonNullable<typeof f.deps.fetch>>,
+      Parameters<NonNullable<typeof f.deps.fetch>>
+    >(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    priority: 'normal',
+                    action: 'review',
+                    summary: 'Test',
+                    reason: 'Test',
+                    questions: [],
+                    draft: '',
+                  }),
+                },
+                finish_reason: 'stop',
+              },
+            ],
+            usage: { prompt_tokens: 100, completion_tokens: 30 },
+          }),
+        ),
+    );
+    f.deps.fetch = fetch;
+    const runtime = createMailAssistantRuntime(f.deps)!;
+    expect((await runtime.adapter.availability(owner)).available).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+
+    f.deps.env!.PRIVACY_ROUTE_TOKEN = 'fixture-privacy-token';
+    expect((await runtime.adapter.availability(owner)).modelLabel).toContain(
+      'mit Datenschutz-Proxy',
+    );
+    await runtime.adapter.analyze(owner, [], async () => undefined);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(
+      proxyRoute + '/chat/completions/strict',
+      expect.objectContaining({
+        redirect: 'error',
+        headers: expect.objectContaining({
+          'X-EUCowork-Privacy-Key': 'fixture-privacy-token',
+          'X-EUCowork-Privacy-Expected-Upstream': 'https://api.eurouter.ai/api/v1',
+          'X-EUCowork-User-Id': owner,
+          'X-EUCowork-Conversation-Id': expect.stringMatching(/^mail-assistant:/),
+        }),
+      }),
+    );
+    expect(fetch.mock.calls[0][1]?.headers).not.toHaveProperty('X-EUCowork-User-Email');
+
+    fetch.mockClear();
+    f.setRoute('https://api.eurouter.ai/api/v1');
+    expect((await runtime.adapter.availability(owner)).available).toBe(false);
+    await expect(runtime.adapter.analyze(owner, [], async () => undefined)).rejects.toThrow(
+      'Datenschutzroute',
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('does not send mail content when paused during the final gateway diagnostics request', async () => {
     const f = fixture();
     f.setRoute('http://mcp-gateway:3020/router/v1/direct');

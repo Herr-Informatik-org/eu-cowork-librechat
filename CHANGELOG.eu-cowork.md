@@ -1,5 +1,12 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-10 — Mailmodell über die strikte Datenschutzroute anbinden
+
+- Mailanalyse, Entwürfe und interne Recherche verwenden bei geschützten
+  Modellkarten den Tenant-Proxy. Modell und Ziel werden vor dem Versand
+  erneut geprüft. Mit aktivierter Datenschutzpflicht wird eine direkte
+  Modellverbindung abgewiesen.
+
 ## 2026-11-10 — Versionshinweis und vertrauliche Textauswahl vorbereiten
 
 - Verwaltete Chat-Seiten melden die eigene Generation. Der Versionshinweis
