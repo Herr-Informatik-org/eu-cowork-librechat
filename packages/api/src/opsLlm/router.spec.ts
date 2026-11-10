@@ -101,6 +101,32 @@ function setup(overrides: Partial<OpsRouterDependencies> = {}) {
 }
 beforeEach(() => jest.resetAllMocks());
 describe('OPS HTTP boundary', () => {
+  test('reports an explicitly unsupported temperature without exposing provider metadata', async () => {
+    const fetcher = fetchMock(async (url) =>
+      String(url).endsWith('/models')
+        ? Response.json({
+            data: [
+              {
+                id: 'test/model',
+                supported_parameters: [],
+                default_parameters: { temperature: 1 },
+                private: 'not returned',
+              },
+            ],
+          })
+        : providerResponse(),
+    );
+    const { app } = setup({ fetch: fetcher });
+    const result = await request(app)
+      .post('/v1/chat/completions')
+      .set('X-Kisuno-Modul', 'mail')
+      .send({ ...payload, temperature: 0.2 });
+    expect(result.status).toBe(200);
+    expect(result.body.ignored_parameters).toEqual(['temperature']);
+    expect(result.body.choices[0].message.content).toBe('private result');
+    expect(JSON.stringify(result.body)).not.toContain('not returned');
+    expect(JSON.parse(fetcher.mock.calls[1][1]!.body as string).temperature).toBeUndefined();
+  });
   test('strict body and supported paths only; no content metering', async () => {
     const { app, fetcher, release } = setup();
     const result = await request(app)

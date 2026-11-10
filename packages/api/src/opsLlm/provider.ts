@@ -37,6 +37,7 @@ export interface OpsCompletion {
   text: string;
   finishReason: 'stop' | 'length';
   usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  ignoredParameters?: 'temperature'[];
 }
 export interface OpsProvider {
   resolve(config: OpsConfig, signal: AbortSignal): Promise<OpsModel>;
@@ -44,6 +45,13 @@ export interface OpsProvider {
 }
 const gatewayURL = 'http://mcp-gateway:3020/router/v1/direct';
 const openrouterURL = 'https://openrouter.ai/api/v1';
+const modelCatalogSchema = z.object({
+  data: z.array(z.object({ id: z.string().min(1).max(200) }).passthrough()).max(10000),
+});
+const supportedParametersSchema = z
+  .array(z.string().regex(/^[a-z][a-z0-9_]{0,99}$/))
+  .max(128)
+  .refine((parameters) => new Set(parameters).size === parameters.length);
 const routingSchema = z
   .object({
     only: z
@@ -115,7 +123,11 @@ const responseSchema = z.object({
     total_tokens: z.number().int().nonnegative().max(2000000),
   }),
 });
-export async function boundedJSON(response: Response, maximum = 1048576): Promise<unknown> {
+export async function boundedJSON(
+  response: Response,
+  maximum = 1048576,
+  signal?: AbortSignal,
+): Promise<unknown> {
   if (!response.body)
     throw new OpsLlmError(
       502,
@@ -125,9 +137,15 @@ export async function boundedJSON(response: Response, maximum = 1048576): Promis
   const reader = response.body.getReader();
   let length = 0;
   const parts: Uint8Array[] = [];
+  const abort = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal?.addEventListener('abort', abort, { once: true });
   try {
+    signal?.throwIfAborted();
     for (;;) {
       const chunk = await reader.read();
+      signal?.throwIfAborted();
       if (chunk.done) break;
       length += chunk.value.byteLength;
       if (length > maximum)
@@ -136,6 +154,7 @@ export async function boundedJSON(response: Response, maximum = 1048576): Promis
     }
     return JSON.parse(Buffer.concat(parts).toString('utf8'));
   } finally {
+    signal?.removeEventListener('abort', abort);
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
@@ -145,6 +164,40 @@ export function createOpsProvider(
   now: () => number = Date.now,
 ): OpsProvider {
   const request = deps.fetch ?? fetch;
+  async function supportsTemperature(selected: OpsModel, signal: AbortSignal): Promise<boolean> {
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), 10000);
+    const combined = AbortSignal.any([signal, timeout.signal]);
+    try {
+      combined.throwIfAborted();
+      const response = await request(`${selected.baseURL}/models`, {
+        method: 'GET',
+        redirect: 'error',
+        signal: combined,
+        headers: { Authorization: `Bearer ${selected.key}`, Accept: 'application/json' },
+      });
+      if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error('invalid_model_catalog');
+      }
+      const catalog = modelCatalogSchema.parse(
+        await boundedJSON(response, 8 * 1024 * 1024, combined),
+      );
+      const matches = catalog.data.filter((model) => model.id === selected.model);
+      if (matches.length !== 1) throw new Error('ambiguous_model_capabilities');
+      const parameters = supportedParametersSchema.parse(matches[0].supported_parameters);
+      return parameters.includes('temperature');
+    } catch {
+      signal.throwIfAborted();
+      throw new OpsLlmError(
+        503,
+        'model_capabilities_unavailable',
+        'Die unterstützten Parameter des Standardmodells sind derzeit nicht verlässlich prüfbar.',
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   async function resolve(config: OpsConfig, signal: AbortSignal) {
     const policy = config.policy;
     if (
@@ -319,6 +372,11 @@ export function createOpsProvider(
           'json_not_supported',
           'JSON-Ausgaben sind für das Standardmodell nicht bestätigt.',
         );
+      const ignoreTemperature =
+        input.temperature !== undefined &&
+        selected.upstream === openrouterURL &&
+        !(await supportsTemperature(selected, signal));
+      signal.throwIfAborted();
       const response = await request(`${selected.baseURL}/chat/completions`, {
         method: 'POST',
         redirect: 'error',
@@ -339,7 +397,9 @@ export function createOpsProvider(
           stream: false,
           store: false,
           max_completion_tokens: output,
-          ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
+          ...(input.temperature !== undefined && !ignoreTemperature
+            ? { temperature: input.temperature }
+            : {}),
           ...(input.response_format ? { response_format: input.response_format } : {}),
           ...(selected.upstream === openrouterURL
             ? {
@@ -412,6 +472,7 @@ export function createOpsProvider(
         text: data.choices[0].message.content,
         finishReason: data.choices[0].finish_reason,
         usage: data.usage,
+        ...(ignoreTemperature ? { ignoredParameters: ['temperature' as const] } : {}),
       };
     },
   };

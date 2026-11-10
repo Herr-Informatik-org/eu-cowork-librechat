@@ -78,6 +78,220 @@ const make = (
   ),
 });
 describe('OPS strict text provider', () => {
+  describe('optional temperature follows explicit OpenRouter model capabilities', () => {
+    const gateway = 'http://mcp-gateway:3020/router/v1/direct';
+    const catalogResponse = (data: object, status = 200) =>
+      new Response(JSON.stringify(data), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      });
+    const diagnostic = {
+      profile: 'direct',
+      models: { default: 'openai/test' },
+      policyFingerprint: 'a'.repeat(64),
+      hasUpstreamKey: true,
+      upstream: { baseURL: policy.baseURL, openrouterBody: true },
+      opsText: {
+        version: 1,
+        noRetention: true,
+        jsonObject: true,
+        noContentLogging: true,
+        credentialFingerprint: policy.credentialFingerprint,
+        policyFingerprint: 'b'.repeat(64),
+      },
+    };
+    test.each([
+      [policy.baseURL, [], false],
+      [policy.baseURL, ['max_completion_tokens', 'response_format'], false],
+      [policy.baseURL, ['temperature', 'response_format'], true],
+      [gateway, ['max_completion_tokens', 'response_format'], false],
+      [gateway, ['temperature'], true],
+    ] as const)('uses explicit capabilities at %s (%j)', async (baseURL, parameters, supported) => {
+      const value = app();
+      value.endpoints!.custom![0].baseURL = baseURL;
+      value.endpoints!.custom![0].addParams = { provider: { only: ['approved'] } };
+      const request = fetchMock(async (url) => {
+        if (String(url).includes('/diagnostics')) return catalogResponse(diagnostic);
+        if (String(url).endsWith('/models'))
+          return catalogResponse({
+            data: [
+              {
+                id: 'openai/test',
+                supported_parameters: parameters,
+                default_parameters: { temperature: 1 },
+              },
+            ],
+          });
+        return catalogResponse(answer());
+      });
+      const result = await make(request, value).provider.complete(
+        automaticConfig(),
+        {
+          ...input(),
+          temperature: 0,
+          response_format: { type: 'json_object' },
+        },
+        new AbortController().signal,
+      );
+      expect(result.ignoredParameters).toEqual(supported ? undefined : ['temperature']);
+      const catalogCall = request.mock.calls.find(([url]) => String(url).endsWith('/models'))!;
+      expect(catalogCall[0]).toBe(`${baseURL}/models`);
+      expect(catalogCall[1]).toMatchObject({
+        method: 'GET',
+        redirect: 'error',
+        headers: { Authorization: 'Bearer test-provider-not-a-secret' },
+      });
+      expect(catalogCall[1]?.body).toBeUndefined();
+      const [url, options] = request.mock.calls[request.mock.calls.length - 1];
+      expect(url).toBe(`${baseURL}/chat/completions`);
+      const body = JSON.parse(options!.body as string);
+      expect(body).toEqual({
+        model: 'openai/test',
+        messages: input().messages,
+        stream: false,
+        store: false,
+        max_completion_tokens: 1500,
+        response_format: { type: 'json_object' },
+        ...(supported ? { temperature: 0 } : {}),
+        provider: {
+          only: ['approved'],
+          zdr: true,
+          data_collection: 'deny',
+          allow_fallbacks: false,
+          require_parameters: true,
+        },
+      });
+      if (baseURL === gateway)
+        expect(options!.headers).toMatchObject({
+          'X-EUCowork-OPS-Text': 'true',
+          'X-EUCowork-Route-Fingerprint': 'b'.repeat(64),
+        });
+    });
+    test.each([
+      { data: [] },
+      { data: [{ id: 'different/model', supported_parameters: ['temperature'] }] },
+      { data: [{ id: 'openai/test' }] },
+      { data: [{ id: 'openai/test', supported_parameters: null }] },
+      { data: [{ id: 'openai/test', supported_parameters: 'temperature' }] },
+      { data: [{ id: 'openai/test', supported_parameters: ['temperature', 'temperature'] }] },
+      { data: [{ id: 'openai/test', supported_parameters: ['bad\nparameter'] }] },
+      { data: [{ id: 'openai/test', supported_parameters: ['x'.repeat(101)] }] },
+      {
+        data: [
+          {
+            id: 'openai/test',
+            supported_parameters: Array.from({ length: 129 }, (_, i) => `p${i}`),
+          },
+        ],
+      },
+      {
+        data: [
+          { id: 'openai/test', supported_parameters: [] },
+          { id: 'openai/test', supported_parameters: [] },
+        ],
+      },
+    ])(
+      'rejects missing, ambiguous or malformed capability metadata without inference (%j)',
+      async (catalog) => {
+        const request = fetchMock(async () => catalogResponse(catalog));
+        await expect(
+          make(request).provider.complete(
+            automaticConfig(),
+            { ...input(), temperature: 0.2 },
+            new AbortController().signal,
+          ),
+        ).rejects.toMatchObject({ status: 503, code: 'model_capabilities_unavailable' });
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(String(request.mock.calls[0][0]).endsWith('/models')).toBe(true);
+      },
+    );
+    test.each(['oversized', 'non_json', 'bad_json', 'http_failure'])(
+      'rejects %s catalog without inference or disclosure',
+      async (kind) => {
+        const request = fetchMock(async () => {
+          if (kind === 'oversized')
+            return new Response('x'.repeat(8 * 1024 * 1024 + 1), {
+              headers: { 'content-type': 'application/json' },
+            });
+          if (kind === 'non_json') return new Response('private catalog content');
+          if (kind === 'bad_json')
+            return new Response('private catalog content', {
+              headers: { 'content-type': 'application/json' },
+            });
+          return catalogResponse({ private: 'private catalog content' }, 503);
+        });
+        const failure = await make(request)
+          .provider.complete(
+            automaticConfig(),
+            { ...input(), temperature: 0.2 },
+            new AbortController().signal,
+          )
+          .catch((error: Error) => error);
+        expect(failure).toMatchObject({ status: 503, code: 'model_capabilities_unavailable' });
+        expect(JSON.stringify(failure)).not.toContain('private catalog');
+        expect(request).toHaveBeenCalledTimes(1);
+      },
+    );
+    test('bounds a stalled catalog body and propagates caller cancellation', async () => {
+      jest.useFakeTimers();
+      try {
+        for (const abortCaller of [false, true]) {
+          let cancelled = false;
+          const controller = new AbortController();
+          const request = fetchMock(
+            async () =>
+              new Response(
+                new ReadableStream({
+                  cancel() {
+                    cancelled = true;
+                  },
+                }),
+                { headers: { 'content-type': 'application/json' } },
+              ),
+          );
+          const outcome = make(request)
+            .provider.complete(
+              automaticConfig(),
+              { ...input(), temperature: 0.2 },
+              controller.signal,
+            )
+            .catch((error: Error) => error);
+          await jest.advanceTimersByTimeAsync(1);
+          if (abortCaller) controller.abort();
+          else await jest.advanceTimersByTimeAsync(10000);
+          expect(await outcome).toMatchObject(
+            abortCaller
+              ? { name: 'AbortError' }
+              : { status: 503, code: 'model_capabilities_unavailable' },
+          );
+          expect(cancelled).toBe(true);
+          expect(request).toHaveBeenCalledTimes(1);
+        }
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+    test('does not query capabilities when temperature is omitted', async () => {
+      const { provider, request } = make();
+      await provider.complete(automaticConfig(), input(), new AbortController().signal);
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(String(request.mock.calls[0][0]).endsWith('/chat/completions')).toBe(true);
+    });
+    test('retains existing temperature semantics for another explicitly approved upstream', async () => {
+      const value = app();
+      const baseURL = 'https://api.eurouter.ai/api/v1';
+      value.endpoints!.custom![0].baseURL = baseURL;
+      const { provider, request } = make(undefined, value);
+      const result = await provider.complete(
+        { ...config(), policy: { ...config().policy!, baseURL } },
+        { ...input(), temperature: 0.2 },
+        new AbortController().signal,
+      );
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(request.mock.calls[0][1]!.body as string).temperature).toBe(0.2);
+      expect(result.ignoredParameters).toBeUndefined();
+    });
+  });
   test.each([{}, { KISUNO_OPS_INTERNAL_ENABLED: 'true', KISUNO_OPS_TENANT_ID: 'cwv02' }])(
     'fails closed outside CWV01',
     (env) => expect(() => assertEnabled(readOpsConfig(env))).toThrow(),

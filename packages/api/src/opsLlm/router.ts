@@ -269,6 +269,7 @@ export function createOpsLlmRouters(deps: OpsRouterDependencies): {
           },
         ],
         usage: answer.usage,
+        ...(answer.ignoredParameters ? { ignored_parameters: answer.ignoredParameters } : {}),
       });
     }),
   );
