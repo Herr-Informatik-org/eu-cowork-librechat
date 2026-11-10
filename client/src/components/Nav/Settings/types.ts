@@ -36,6 +36,7 @@ export type SectionId =
   | 'about';
 
 export interface SettingsContextValue {
+  opsPersonalEnabled?: boolean;
   balanceEnabled: boolean;
   hasAnyPersonalizationFeature: boolean;
   hasMemoryOptOut: boolean;

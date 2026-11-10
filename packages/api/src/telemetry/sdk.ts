@@ -1,4 +1,7 @@
 import { IncomingMessage } from 'node:http';
+import { context } from '@opentelemetry/api';
+import { suppressTracing } from '@opentelemetry/core';
+import type { RequestHandler } from 'express';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
@@ -53,8 +56,23 @@ function isBunRuntime(): boolean {
 }
 
 function shouldIgnoreIncomingRequest(request: IncomingMessage, healthPath: string): boolean {
-  return request.url === healthPath || request.url?.startsWith(`${healthPath}?`) === true;
+  const path = getIncomingUrlInfo(request).pathname.toLowerCase();
+  return (
+    request.url === healthPath ||
+    request.url?.startsWith(`${healthPath}?`) === true ||
+    [
+      '/api/ops-llm',
+      '/api/ops-personal',
+      '/ops-connect',
+      '/.well-known/oauth-authorization-server',
+    ].some((root) => path === root || path.startsWith(`${root}/`))
+  );
 }
+
+/** Suppress outgoing HTTP, database and child spans throughout an OPS request's async context. */
+export const suppressOpsTracingMiddleware: RequestHandler = (_req, _res, next) => {
+  context.with(suppressTracing(context.active()), next);
+};
 
 function getIncomingUrlInfo(request: IncomingMessage): { hasQuery: boolean; pathname: string } {
   const rawUrl = request.url ?? '/';

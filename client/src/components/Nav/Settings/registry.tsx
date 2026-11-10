@@ -1,3 +1,4 @@
+import OpsPersonalSettings from '~/components/OpsPersonal/Settings';
 import { SettingsTabValues } from 'librechat-data-provider';
 import type { SettingEntry } from './types';
 import {
@@ -497,6 +498,15 @@ export const registry: SettingEntry[] = [
     section: 'data',
     labelKey: 'com_ui_settings_label_shared_links',
     Component: SharedLinks,
+  },
+  {
+    id: 'opsPersonal',
+    tab: DATA,
+    section: 'data',
+    labelKey: 'com_ui_ops_personal_title',
+    keywords: ['ops', 'skills', 'brain'],
+    show: (ctx) => ctx.opsPersonalEnabled === true,
+    Component: OpsPersonalSettings,
   },
   // Data controls · API keys
   {

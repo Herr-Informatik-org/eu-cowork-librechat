@@ -7,9 +7,12 @@ import usePersonalizationAccess from '~/hooks/usePersonalizationAccess';
 import { useHasAccess, useAuthContext } from '~/hooks';
 import { useGetStartupConfig } from '~/data-provider';
 import store from '~/store';
+import { useOpsPersonal } from '~/data-provider/OpsPersonal';
 
 export function useSettingsContext(): SettingsContextValue {
   const { user } = useAuthContext();
+  const { grants: opsGrants } = useOpsPersonal(null);
+  const opsPersonalEnabled = opsGrants.isSuccess;
   const { data: startupConfig } = useGetStartupConfig();
   const { hasAnyPersonalizationFeature, hasMemoryOptOut } = usePersonalizationAccess();
 
@@ -40,6 +43,7 @@ export function useSettingsContext(): SettingsContextValue {
 
   return useMemo(
     () => ({
+      opsPersonalEnabled,
       balanceEnabled,
       hasAnyPersonalizationFeature,
       hasMemoryOptOut,
@@ -55,6 +59,7 @@ export function useSettingsContext(): SettingsContextValue {
       langfuseConnectionAccess,
     }),
     [
+      opsPersonalEnabled,
       balanceEnabled,
       hasAnyPersonalizationFeature,
       hasMemoryOptOut,

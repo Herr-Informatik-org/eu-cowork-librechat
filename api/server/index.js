@@ -10,6 +10,7 @@ const compression = require('compression');
 const cookieParser = require('cookie-parser');
 const mongoSanitize = require('express-mongo-sanitize');
 const { logger, runAsSystem } = require('@librechat/data-schemas');
+const { suppressOpsTracingMiddleware } = require('@librechat/api/telemetry');
 const {
   isEnabled,
   usageCreditMiddleware,
@@ -22,6 +23,7 @@ const {
   GenerationJobManager,
   QUERY_DEVTOOLS_HEADER,
   createStreamServices,
+  createOpsPersonalDiscoveryRouter,
   agentStartupIngressMiddleware,
   agentStartupTelemetryMiddleware,
   initializeFileStorage,
@@ -49,6 +51,7 @@ const { initializeGitHubSkillSync } = require('./services/Skills/sync');
 const { jwtLogin, ldapLogin, passportLogin } = require('~/strategies');
 const { checkMigrations } = require('./services/start/migration');
 const optionalJwtAuth = require('./middleware/optionalJwtAuth');
+const requireJwtAuth = require('./middleware/requireJwtAuth');
 const initializeMCPs = require('./services/initializeMCPs');
 const configureSocialLogins = require('./socialLogins');
 const createSpaFallback = require('./utils/fallback');
@@ -205,6 +208,11 @@ const startServer = async () => {
   app.use('/api/agents/office/chat', agentStartupIngressMiddleware);
   app.use(metricsMiddleware);
   app.use(noIndex);
+  app.use(['/api/ops-llm', '/api/ops-personal', '/ops-connect', '/.well-known/oauth-authorization-server'], suppressOpsTracingMiddleware);
+  app.use('/.well-known/oauth-authorization-server', createOpsPersonalDiscoveryRouter());
+  app.use('/api/ops-llm/v1', routes.opsLlm.publicRouter);
+  app.use('/api/ops-personal/completions', routes.opsLlm.personalRouter);
+  app.use('/api/ops-personal', cookieParser(), passport.initialize(), routes.opsPersonal, (_req, res) => res.status(404).json({ error: 'not_found', error_description: 'Diese Funktion wird nicht unterstützt.' }));
   app.use(express.json({ limit: '3mb' }));
   app.use(express.urlencoded({ extended: true, limit: '3mb' }));
   app.use(handleJsonParseError);
@@ -273,6 +281,7 @@ const startServer = async () => {
   app.use('/api/auth', preAuthTenantMiddleware, routes.auth);
   app.use('/api/admin', routes.adminAuth);
   app.use('/api/admin/config', routes.adminConfig);
+  app.use('/api/ops-llm/admin', requireJwtAuth, routes.opsLlm.adminRouter);
   app.use('/api/admin/mail-security', routes.adminMailSecurity);
   app.use('/api/admin/langfuse', routes.adminLangfuse);
   app.use('/api/admin/grants', routes.adminGrants);

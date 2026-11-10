@@ -1,10 +1,15 @@
 import { Socket } from 'node:net';
 import { IncomingMessage } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
+import { context } from '@opentelemetry/api';
+import { isTracingSuppressed } from '@opentelemetry/core';
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
+import type { Request, Response } from 'express';
 import type { RequestOptions } from 'node:http';
 import type { Span } from '@opentelemetry/api';
 
 interface HttpInstrumentationOptions {
+  ignoreIncomingRequestHook?: (request: IncomingMessage) => boolean;
   requestHook?: (span: Span, request: object) => void;
   startIncomingSpanHook?: (request: IncomingMessage) => Record<string, string>;
   startOutgoingSpanHook?: (request: RequestOptions) => Record<string, string>;
@@ -193,6 +198,52 @@ describe('telemetry SDK lifecycle', () => {
     expect(mockMongooseInstrumentation).toHaveBeenCalledTimes(1);
     expect(mockIORedisInstrumentation).not.toHaveBeenCalled();
     expect(mockUndiciInstrumentation).toHaveBeenCalledTimes(1);
+  });
+
+  it('excludes exactly OPS request surfaces from automatic HTTP spans', () => {
+    initializeTelemetry({ OTEL_TRACING_ENABLED: 'true' });
+    const ignore = mockHttpInstrumentation.mock.calls[0]?.[0]?.ignoreIncomingRequestHook;
+    expect(ignore).toBeDefined();
+    for (const url of [
+      '/api/ops-personal/token',
+      '/API/OPS-PERSONAL/token?private=synthetic',
+      '/api/ops-llm/v1/chat/completions',
+      '/api/ops-llm/admin/keys',
+      '/ops-connect?state=synthetic',
+      '/.well-known/oauth-authorization-server',
+      '/api/ops-personal',
+    ]) {
+      const request = new IncomingMessage(new Socket());
+      request.url = url;
+      expect(ignore!(request)).toBe(true);
+    }
+    for (const url of ['/api/agents/chat', '/api/ops-personality', '/ops-connect-other']) {
+      const request = new IncomingMessage(new Socket());
+      request.url = url;
+      expect(ignore!(request)).toBe(false);
+    }
+  });
+
+  it('suppresses child spans across await without affecting unrelated requests', async () => {
+    const { suppressOpsTracingMiddleware } = await import('./sdk');
+    const manager = new AsyncLocalStorageContextManager().enable();
+    context.disable();
+    context.setGlobalContextManager(manager);
+    try {
+      let continuation: Promise<void> = Promise.resolve();
+      suppressOpsTracingMiddleware({} as Request, {} as Response, () => {
+        continuation = (async () => {
+          expect(isTracingSuppressed(context.active())).toBe(true);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(isTracingSuppressed(context.active())).toBe(true);
+        })();
+      });
+      await continuation;
+      expect(isTracingSuppressed(context.active())).toBe(false);
+    } finally {
+      context.disable();
+      manager.disable();
+    }
   });
 
   it('enables ioredis instrumentation when explicitly configured', () => {

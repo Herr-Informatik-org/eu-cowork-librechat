@@ -1,3 +1,5 @@
+const opsPersonal = require('./opsPersonal');
+const opsLlm = require('./opsLlm');
 const accessPermissions = require('./accessPermissions');
 const assistants = require('./assistants');
 const categories = require('./categories');
@@ -42,6 +44,8 @@ const mcp = require('./mcp');
 const rum = require('./rum');
 
 module.exports = {
+  opsPersonal,
+  opsLlm,
   rum,
   mcp,
   auth,

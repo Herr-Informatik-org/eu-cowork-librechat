@@ -1,3 +1,4 @@
+import type { OpsAuthorization, OpsPersonalConsentInfo, OpsPersonalGrantSummary, OpsPersonalScope } from './opsPersonal';
 import type {
   MailResearchSettings,
   MailResearchSkill,
@@ -1717,3 +1718,12 @@ export const getMailResearchJob = (id: string, signal?: AbortSignal): Promise<Ma
   request.get(endpoints.mailWorkspace(`/research/jobs/${encodeURIComponent(id)}`), { signal });
 export const cancelMailResearchJob = (id: string): Promise<MailResearchJob> =>
   request.post(endpoints.mailWorkspace(`/research/jobs/${encodeURIComponent(id)}/cancel`), {});
+
+export const getOpsPersonalConsent = (input: OpsAuthorization, signal?: AbortSignal): Promise<OpsPersonalConsentInfo> =>
+  request.get(endpoints.opsPersonal(`/authorize?${new URLSearchParams(Object.entries(input).filter((pair): pair is [string, string] => typeof pair[1] === 'string')).toString()}`), { signal });
+export const approveOpsPersonal = (authorization: OpsAuthorization, scopes: OpsPersonalScope[]): Promise<{ redirect_uri: string }> =>
+  request.post(endpoints.opsPersonal('/authorize'), { authorization, scopes });
+export const getOpsPersonalGrants = (signal?: AbortSignal): Promise<{ grants: OpsPersonalGrantSummary[] }> =>
+  request.get(endpoints.opsPersonal('/grants'), { signal });
+export const revokeOpsPersonalGrant = (id: string): Promise<{ revoked: boolean }> =>
+  request.delete(endpoints.opsPersonal(`/grants/${encodeURIComponent(id)}`));

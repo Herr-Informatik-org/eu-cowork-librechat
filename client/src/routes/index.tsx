@@ -1,3 +1,4 @@
+import OpsPersonalConnect from '~/components/OpsPersonal/Connect';
 import { createBrowserRouter, Navigate, Outlet } from 'react-router-dom';
 import {
   Login,
@@ -117,6 +118,7 @@ export const router = createBrowserRouter(
             },
           ],
         },
+        { path: 'ops-connect', element: <OpsPersonalConnect /> },
         dashboardRoutes,
         {
           path: '/',

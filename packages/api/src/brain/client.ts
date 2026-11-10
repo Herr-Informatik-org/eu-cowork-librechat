@@ -214,6 +214,7 @@ export async function requestBrain<T>(
   path: string,
   payload?: object,
   timeoutMs = 5000,
+  signal?: AbortSignal,
 ): Promise<T> {
   const baseUrl = process.env.BRAIN_API_URL;
   const secret = process.env.BRAIN_SHARED_SECRET;
@@ -226,7 +227,9 @@ export async function requestBrain<T>(
       method,
       headers: signBrainRequest({ method, path, userId, body, secret }),
       body: body || undefined,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs),
       redirect: 'error',
     });
     if (!response.ok) {

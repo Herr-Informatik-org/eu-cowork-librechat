@@ -66,3 +66,5 @@ export * from './codeEnvRef';
 /* agent work plan */
 export * from './plan';
 export * from './mailResearch';
+
+export * from './opsPersonal';

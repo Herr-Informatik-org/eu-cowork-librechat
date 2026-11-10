@@ -175,3 +175,50 @@ it('accepts cleared validity dates from the service JSON through the mail analys
     }).success,
   ).toBe(true);
 });
+
+it('forwards cancellation with a five second deadline and never learns from OPS input', async () => {
+  fetchBrain.mockResolvedValue({ nodes: [] });
+  const controller = new AbortController();
+  await readPersonalMailContext(req(), roles, {
+    query: 'Synthetic mail',
+    sender: undefined,
+    signal: controller.signal,
+  });
+  expect(fetchBrain).toHaveBeenCalledWith(
+    'owner',
+    'POST',
+    '/v1/recall',
+    expect.objectContaining({ recordTrace: false }),
+    5000,
+    controller.signal,
+  );
+  fetchBrain.mockClear();
+  controller.abort();
+  expect(
+    (
+      await readPersonalMailContext(req(), roles, {
+        query: 'Synthetic mail',
+        sender: undefined,
+        signal: controller.signal,
+      })
+    ).status,
+  ).toBe('unavailable');
+  expect(fetchBrain).not.toHaveBeenCalled();
+});
+
+it('missing sender reads general mail preferences and excludes every contact scope', async () => {
+  fetchBrain.mockResolvedValue({
+    nodes: [
+      node('mail', 'Mail'),
+      node('contact', 'Mail: a@example.com'),
+      node('other', 'Mail: b@example.com'),
+      node('general', null),
+    ],
+  });
+  const result = await readPersonalMailContext(req(), roles, { query: 'Synthetic mail' });
+  expect(fetchBrain.mock.calls[0][3]).toMatchObject({
+    applicableScopes: ['Mail'],
+    recordTrace: false,
+  });
+  expect(result.items?.map((item) => item.id)).toEqual(['mail', 'general']);
+});

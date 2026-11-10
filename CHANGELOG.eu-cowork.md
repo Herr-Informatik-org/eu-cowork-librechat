@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-10 — Interne OPS-Verbindungen mit getrennten Berechtigungen
+
+- Eine eigene Text-API verwendet ausschliesslich das zentrale Standardmodell,
+  widerrufbare Dienstschlüssel und begrenzte Aufrufe ohne Inhaltsaufbewahrung.
+- Persönliche OAuth-Verbindungen mit PKCE erlauben ausdrücklich ausgewählte Skills
+  und optional eigenes Brain für Mailentwürfe und freigegebene Vorprüfungen.
+  Konto-, Rollen-, Skill- und Consentrechte werden vor und nach dem Aufruf geprüft.
+- Die Erweiterung bleibt ohne interne CWV01-Konfiguration ausgeschaltet. Ohne
+  gültige Datenschutzfreigabe für Anbieter und Modell bleiben Modellaufrufe gesperrt.
+  Mailversand, Lernen, Skill-Änderungen und allgemeine MCP-Ausführung sind ausgeschlossen.
+
 ## 2026-10-30 — Geschützte Supportanalyse für OPS vorbereiten
 
 - Die eigene Supportroute verwendet ein festes EuRouter-Profil ohne Werkzeuge,

@@ -42,15 +42,16 @@ export async function isPersonalMailMemoryAllowed(
 export async function readPersonalMailContext(
   req: ServerRequest,
   getRoleByName: Roles,
-  input: { query: string; sender: string; contextBudgetTokens?: number },
+  input: { query: string; sender?: string; contextBudgetTokens?: number; signal?: AbortSignal },
 ): Promise<PersonalMailContext> {
   if (!(await isPersonalMailMemoryAllowed(req, getRoleByName)))
     return { context: '', status: 'disabled', count: 0 };
   try {
-    const scope = personalMailScope(input.sender);
+    input.signal?.throwIfAborted();
+    const scope = input.sender === undefined ? null : personalMailScope(input.sender);
     const budget = Math.max(0, Math.floor(input.contextBudgetTokens ?? 2800));
     if (budget < 128) return { context: '', status: 'empty', count: 0 };
-    const query = `${input.sender}\n${buildBrainRecallQuery({ text: input.query })}`;
+    const query = `${input.sender ?? ''}\n${buildBrainRecallQuery({ text: input.query })}`;
     const result = await requestBrain<{ nodes: BrainNode[] }>(
       String(req.user!.id),
       'POST',
@@ -58,15 +59,18 @@ export async function readPersonalMailContext(
       {
         query,
         purpose: 'mail',
-        applicableScopes: [scope, 'Mail'],
+        applicableScopes: scope ? [scope, 'Mail'] : ['Mail'],
         contextBudgetTokens: Math.min(1_000_000, budget),
         recordTrace: false,
       },
+      5000,
+      input.signal,
     );
     const selected = new Set<string>();
     const lines: string[] = [];
     const items: BrainUsageItem[] = [];
     for (const node of result.nodes) {
+      input.signal?.throwIfAborted();
       if (selected.has(node.id) || (node.scope?.startsWith('Mail: ') && node.scope !== scope))
         continue;
       const line = JSON.stringify({

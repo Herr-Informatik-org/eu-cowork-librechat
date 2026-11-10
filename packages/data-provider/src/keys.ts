@@ -1,4 +1,5 @@
 export enum QueryKeys {
+  opsPersonal = 'opsPersonal',
   messages = 'messages',
   sharedMessages = 'sharedMessages',
   sharedStartupConfig = 'sharedStartupConfig',
@@ -96,6 +97,8 @@ export const DynamicQueryKeys = {
 } as const;
 
 export enum MutationKeys {
+  opsPersonalConsent = 'opsPersonalConsent',
+  opsPersonalRevoke = 'opsPersonalRevoke',
   updateLangfuseConnection = 'updateLangfuseConnection',
   testLangfuseConnection = 'testLangfuseConnection',
   createAgentApiKey = 'createAgentApiKey',
