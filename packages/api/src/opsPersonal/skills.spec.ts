@@ -111,7 +111,7 @@ test('expired ACLs and foreign owners are denied without waiting for TTL cleanup
     .collection('AclEntry')
     .updateOne({ resourceId: id }, { $set: { expiredAt: new Date(0) } });
   expect(await access().ids(user)).toEqual([deployment]);
-  await expect(access().ids({ ...user, tenantId: 'foreign' })).rejects.toMatchObject({
+  await expect(access().ids({ ...user, tenantId: 'foreign' } as IUser)).rejects.toMatchObject({
     code: 'skills_forbidden',
   });
 });

@@ -43,6 +43,7 @@ export interface OpsProvider {
   complete(config: OpsConfig, input: CompletionInput, signal: AbortSignal): Promise<OpsCompletion>;
 }
 const gatewayURL = 'http://mcp-gateway:3020/router/v1/direct';
+const openrouterURL = 'https://openrouter.ai/api/v1';
 const routingSchema = z
   .object({
     only: z
@@ -147,15 +148,15 @@ export function createOpsProvider(
   async function resolve(config: OpsConfig, signal: AbortSignal) {
     const policy = config.policy;
     if (
-      !policy ||
-      Date.parse(policy.reviewedAt) > now() ||
-      Date.parse(policy.expiresAt) <= now() ||
-      Date.parse(policy.expiresAt) <= Date.parse(policy.reviewedAt)
+      policy &&
+      (Date.parse(policy.reviewedAt) > now() ||
+        Date.parse(policy.expiresAt) <= now() ||
+        Date.parse(policy.expiresAt) <= Date.parse(policy.reviewedAt))
     )
       throw new OpsLlmError(
         503,
         'provider_not_verified',
-        'Für das Standardmodell fehlt eine gültige bestätigte Datenschutzfreigabe.',
+        'Die zusätzlich konfigurierte Modellvorgabe ist nicht mehr gültig.',
       );
     const app = await deps.getCentralConfig();
     const specs = app.modelSpecs?.list ?? [];
@@ -185,8 +186,9 @@ export function createOpsProvider(
       if (typeof preset?.model === 'string') model = preset.model;
     }
     if (
-      !model ||
-      model !== policy.model ||
+      typeof model !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(model) ||
+      (policy && model !== policy.model) ||
       /^(?:auto|eu-auto|openrouter\/auto|openrouter\/free)$/i.test(model) ||
       /:online$/i.test(model)
     )
@@ -199,13 +201,16 @@ export function createOpsProvider(
     const endpoint = matches.length === 1 ? resolveCustomEndpointSecrets(matches[0]) : undefined;
     const baseURL = resolveConfigSecret(endpoint?.baseURL)?.replace(/\/$/, '');
     const key = resolveConfigSecret(endpoint?.apiKey);
+    // Automatic routing uses only the upstream whose request-level privacy controls we enforce.
+    // An explicit operator policy may further restrict it or retain another supported upstream.
+    const upstream = policy?.baseURL ?? openrouterURL;
     if (
       !endpoint ||
       !baseURL ||
       !key ||
       key === 'user_provided' ||
       key.includes('${') ||
-      (baseURL !== gatewayURL && baseURL !== policy.baseURL)
+      (baseURL !== gatewayURL && baseURL !== upstream)
     )
       throw new OpsLlmError(
         503,
@@ -221,6 +226,7 @@ export function createOpsProvider(
         'Die zentrale Route enthält zusätzliche nicht freigegebene Parameter.',
       );
     if (
+      policy &&
       baseURL !== gatewayURL &&
       createHash('sha256').update(key).digest('hex') !== policy.credentialFingerprint
     )
@@ -230,10 +236,7 @@ export function createOpsProvider(
         'Der aktuelle Anbieterzugang wurde noch nicht für diese Schnittstelle bestätigt.',
       );
     const routing = routingSchema.safeParse(endpoint.addParams?.provider ?? {});
-    if (
-      !routing.success ||
-      (policy.baseURL !== 'https://openrouter.ai/api/v1' && Object.keys(routing.data).length)
-    )
+    if (!routing.success || (upstream !== openrouterURL && Object.keys(routing.data).length))
       throw new OpsLlmError(
         503,
         'unsupported_model_parameters',
@@ -267,9 +270,9 @@ export function createOpsProvider(
       if (
         !parsed.success ||
         parsed.data.models.default !== model ||
-        parsed.data.upstream.baseURL !== policy.baseURL ||
-        parsed.data.opsText.credentialFingerprint !== policy.credentialFingerprint ||
-        parsed.data.upstream.openrouterBody !== (policy.baseURL === 'https://openrouter.ai/api/v1')
+        parsed.data.upstream.baseURL !== upstream ||
+        (policy && parsed.data.opsText.credentialFingerprint !== policy.credentialFingerprint) ||
+        parsed.data.upstream.openrouterBody !== (upstream === openrouterURL)
       )
         throw new OpsLlmError(
           503,
@@ -284,8 +287,8 @@ export function createOpsProvider(
       baseURL,
       key,
       fingerprint,
-      jsonObject: policy.jsonObject,
-      upstream: policy.baseURL,
+      jsonObject: policy?.jsonObject ?? true,
+      upstream,
       routing: routing.data,
     };
   }
@@ -338,7 +341,7 @@ export function createOpsProvider(
           max_completion_tokens: output,
           ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
           ...(input.response_format ? { response_format: input.response_format } : {}),
-          ...(selected.upstream === 'https://openrouter.ai/api/v1'
+          ...(selected.upstream === openrouterURL
             ? {
                 provider: {
                   ...selected.routing,

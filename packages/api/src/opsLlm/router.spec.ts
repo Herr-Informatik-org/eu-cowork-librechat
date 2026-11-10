@@ -15,26 +15,15 @@ const mockStore = {
 jest.mock('./store', () => ({ createOpsStore: () => mockStore }));
 import express from 'express';
 import request from 'supertest';
-import type { AppConfig } from '@librechat/data-schemas';
+import type { AppConfig, IUser } from '@librechat/data-schemas';
 import type { OpsRouterDependencies } from './router';
 import { createOpsLlmRouters } from './router';
 import { OpsLlmError } from './config';
-import { createHash } from 'node:crypto';
 import { OpsPersonalError } from '../opsPersonal/service';
 import type { OpsPersonalContext } from '../opsPersonal/types';
 const env = {
   KISUNO_OPS_TENANT_ID: 'cwv01',
   KISUNO_OPS_INTERNAL_ENABLED: 'true',
-  KISUNO_OPS_PROVIDER_POLICY_JSON: JSON.stringify({
-    baseURL: 'https://openrouter.ai/api/v1',
-    model: 'test/model',
-    noRetention: true,
-    credentialFingerprint: createHash('sha256').update('test-key-not-real').digest('hex'),
-    jsonObject: true,
-    reviewedAt: '2020-01-01T00:00:00Z',
-    expiresAt: '2090-01-01T00:00:00Z',
-    reference: 'Test contract',
-  }),
 };
 const personalMail = { sender: 'sender@example.test', subject: 'Subject', text: 'Untrusted mail' };
 const payload = {
@@ -51,8 +40,32 @@ const providerResponse = () =>
       usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
     }),
   );
+type FetchCall = (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>;
+function fetchMock(implementation: FetchCall) {
+  return Object.assign(
+    jest.fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>(implementation),
+    {
+      preconnect: jest.fn<ReturnType<typeof fetch.preconnect>, Parameters<typeof fetch.preconnect>>(
+        () => undefined,
+      ),
+    },
+  );
+}
+function personalContextFixture(overrides: Partial<OpsPersonalContext> = {}): OpsPersonalContext {
+  return {
+    contextText: '',
+    ownerId: 'owner',
+    grantId: 'grant1',
+    subject: 'owner',
+    user: { id: 'owner' } as IUser,
+    config: {} as AppConfig,
+    sourcesUsed: { skills: [], brain: false },
+    assertActive: async () => undefined,
+    ...overrides,
+  };
+}
 function setup(overrides: Partial<OpsRouterDependencies> = {}) {
-  const fetcher = jest.fn(async () => providerResponse());
+  const fetcher = fetchMock(async () => providerResponse());
   const release = jest.fn(async () => undefined);
   const dependencies: OpsRouterDependencies = {
     env,
@@ -180,7 +193,7 @@ describe('OPS HTTP boundary', () => {
     expect(mockStore.create).not.toHaveBeenCalled();
   });
   test('deadline abort reaches upstream and quota is released', async () => {
-    const fetcher = jest.fn(
+    const fetcher = fetchMock(
       (_url: string | URL | Request, options?: RequestInit) =>
         new Promise<Response>((_resolve, reject) =>
           options!.signal!.addEventListener(
@@ -210,14 +223,14 @@ describe('OPS HTTP boundary', () => {
   });
   test('personal input is owner-scoped context only and returns source metadata', async () => {
     const active = jest.fn(async () => undefined);
-    const context = {
+    const context = personalContextFixture({
       contextText: 'private owned context',
       ownerId: 'owner',
       grantId: 'grant1',
       subject: 'owner',
       sourcesUsed: { skills: [{ id: 's1', name: 'Style', version: '1' }], brain: true },
       assertActive: active,
-    } as OpsPersonalContext;
+    });
     const resolve = jest.fn(async () => context);
     const { app, fetcher } = setup({ personalContext: resolve });
     const result = await request(app)
@@ -246,14 +259,14 @@ describe('OPS HTTP boundary', () => {
   });
   test('personal context bound covers Skill and Brain; revocation blocks publication', async () => {
     const active = jest.fn(async () => undefined);
-    const context = {
+    const context = personalContextFixture({
       contextText: 'x'.repeat(33000),
       ownerId: 'owner',
       grantId: 'grant1',
       subject: 'owner',
       sourcesUsed: { skills: [], brain: true },
       assertActive: active,
-    } as OpsPersonalContext;
+    });
     const { app, fetcher } = setup({ personalContext: async () => context });
     expect(
       (
@@ -323,13 +336,13 @@ describe('OPS HTTP boundary', () => {
     },
     { content: '{"summary":"ok","open_questions":[],"next_step":"review"}', finish: 'length' },
   ])('review response is complete and strictly structured: %j', async ({ content, finish }) => {
-    const context = {
+    const context = personalContextFixture({
       contextText: '',
       ownerId: 'owner',
       sourcesUsed: { skills: [], brain: false },
       assertActive: async () => undefined,
-    } as OpsPersonalContext;
-    const fetcher = jest.fn(
+    });
+    const fetcher = fetchMock(
       async () =>
         new Response(
           JSON.stringify({
@@ -364,12 +377,14 @@ describe('OPS HTTP boundary', () => {
     expect(response.status).toBe(504);
     expect(response.body.error.code).toBe('request_timeout');
     expect(fetcher).not.toHaveBeenCalled();
-    resolveContext({
-      contextText: '',
-      ownerId: 'owner',
-      sourcesUsed: { skills: [], brain: false },
-      assertActive: async () => undefined,
-    } as OpsPersonalContext);
+    resolveContext(
+      personalContextFixture({
+        contextText: '',
+        ownerId: 'owner',
+        sourcesUsed: { skills: [], brain: false },
+        assertActive: async () => undefined,
+      }),
+    );
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(fetcher).not.toHaveBeenCalled();
     expect(release).toHaveBeenCalledTimes(1);

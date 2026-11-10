@@ -110,8 +110,11 @@ async function grant(scopes = BASE) {
     exchange: () => service.exchange(code, verifier, input.redirect_uri, OPS),
   };
 }
-const req = (access: string, ops = OPS) =>
-  ({ headers: { authorization: `Bearer ${access}`, 'x-ops-user-id': ops } }) as Request;
+const req = (access: string, ops = OPS): Request => {
+  const value = Object.create(express.request) as Request;
+  value.headers = { authorization: `Bearer ${access}`, 'x-ops-user-id': ops };
+  return value;
+};
 const context = (access: string, options = {}) =>
   service.context(req(access), {
     input: 'Draft a synthetic reply.',
@@ -477,11 +480,11 @@ test('fixed browser origin and cross-site mutation protection are enforced', asy
 test('unverified email, foreign tenant and invalid expiry fail closed', async () => {
   const t = await (await grant()).exchange();
   const original = current!;
-  current = { ...original, emailVerified: false };
+  current = { ...original, emailVerified: false } as IUser;
   await expect(context(t.access_token)).rejects.toMatchObject({ code: 'inactive_user' });
-  current = { ...original, tenantId: 'other' };
+  current = { ...original, tenantId: 'other' } as IUser;
   await expect(context(t.access_token)).rejects.toMatchObject({ code: 'inactive_user' });
-  current = { ...original, expiresAt: new Date('invalid') };
+  current = { ...original, expiresAt: new Date('invalid') } as IUser;
   await expect(context(t.access_token)).rejects.toMatchObject({ code: 'inactive_user' });
 });
 

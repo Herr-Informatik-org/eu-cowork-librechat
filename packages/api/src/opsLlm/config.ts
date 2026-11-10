@@ -35,6 +35,7 @@ export interface KeyInput {
   name: string;
   modules: string[];
 }
+/** Optional operator restrictions; runtime routing never synthesizes this attestation. */
 export interface ProviderPolicy {
   baseURL:
     | 'https://api.eurouter.ai/api/v1'
@@ -192,7 +193,7 @@ export function readOpsConfig(env: NodeJS.ProcessEnv = process.env): OpsConfig {
       throw new OpsLlmError(
         503,
         'configuration_error',
-        'Die bestätigte Datenschutzfreigabe ist ungültig.',
+        'Die zusätzlich konfigurierte Modellvorgabe ist ungültig.',
       );
     }
   }
