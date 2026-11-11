@@ -9,6 +9,7 @@ const mockResetPasswordController = jest.fn((req, res) => res.status(204).end())
 jest.mock('@librechat/api', () => ({
   createSetBalanceConfig: jest.fn(() => (req, res, next) => next()),
   forceRefreshCloudFrontAuthCookies: jest.fn(),
+  invitationDetailsController: jest.fn((req, res) => res.json({ email: 'invited@example.com' })),
 }));
 
 jest.mock('~/server/controllers/AuthController', () => ({
@@ -70,6 +71,30 @@ jest.mock('~/server/middleware', () => {
 });
 
 const authRouter = require('./auth');
+
+describe('invitation detail lookup', () => {
+  it('uses a separate quota and disables caching, without consuming registration or reset attempts', async () => {
+    const app = express();
+    app.use(express.json());
+    app.use('/api/auth', authRouter);
+    mockCheckBan.mockClear();
+    mockResetPasswordSubmissionLimiter.mockClear();
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const response = await request(app)
+        .post('/api/auth/invite/details')
+        .send({ token: 'synthetic' })
+        .expect(200);
+      expect(response.headers['cache-control']).toBe('no-store');
+    }
+    const limited = await request(app)
+      .post('/api/auth/invite/details')
+      .send({ token: 'synthetic' })
+      .expect(429);
+    expect(limited.headers['cache-control']).toBe('no-store');
+    expect(mockCheckBan).toHaveBeenCalledTimes(30);
+    expect(mockResetPasswordSubmissionLimiter).not.toHaveBeenCalled();
+  });
+});
 
 describe('POST /api/auth/resetPassword rate limiting', () => {
   let app;

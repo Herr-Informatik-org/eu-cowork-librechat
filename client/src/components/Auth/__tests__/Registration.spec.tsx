@@ -12,6 +12,10 @@ import AuthLayout from '~/components/Auth/AuthLayout';
 
 jest.mock('librechat-data-provider/react-query');
 
+beforeEach(() => {
+  global.fetch = Object.assign(jest.fn(), { preconnect: jest.fn() });
+});
+
 const mockStartupConfig = {
   isFetching: false,
   isLoading: false,
@@ -35,6 +39,7 @@ const mockStartupConfig = {
 };
 
 const setup = ({
+  search = '',
   useGetUserQueryReturnValue = {
     isLoading: false,
     isError: false,
@@ -64,6 +69,13 @@ const setup = ({
   },
   useGetStartupConfigReturnValue = mockStartupConfig,
 } = {}) => {
+  jest.spyOn(reactRouter, 'useLocation').mockReturnValue({
+    pathname: '/register',
+    search,
+    hash: '',
+    state: null,
+    key: 'register',
+  });
   const mockUseRegisterUserMutation = jest
     .spyOn(mockDataProvider, 'useRegisterUserMutation')
     //@ts-ignore - we don't need all parameters of the QueryObserverSuccessResult
@@ -155,6 +167,76 @@ test('renders registration form', () => {
     'href',
     'mock-server/oauth/saml',
   );
+});
+
+test('prefills validated invitation details and submits the original token', async () => {
+  const fetch = jest.spyOn(global, 'fetch').mockResolvedValue({
+    ok: true,
+    json: async () => ({ email: 'invited@example.com', name: 'Invited Person' }),
+  } as Response);
+  const mutate = jest.fn();
+  const { getByTestId, getByRole } = setup({
+    search: '?token=synthetic-invitation',
+    useRegisterUserMutationReturnValue: {
+      isLoading: false,
+      isError: false,
+      mutate,
+      data: {},
+      isSuccess: false,
+      error: null,
+    },
+  });
+  await waitFor(() => expect(getByTestId('email')).toHaveValue('invited@example.com'));
+  expect(getByTestId('email')).toHaveAttribute('readonly');
+  expect(getByTestId('name')).toHaveValue('Invited Person');
+  expect(getByTestId('password')).toHaveValue('');
+  expect(fetch).toHaveBeenCalledWith(
+    expect.any(URL),
+    expect.objectContaining({
+      method: 'POST',
+      cache: 'no-store',
+      body: JSON.stringify({ token: 'synthetic-invitation' }),
+    }),
+  );
+  await userEvent.type(getByTestId('password'), 'synthetic-password');
+  await userEvent.type(getByTestId('confirm_password'), 'synthetic-password');
+  await userEvent.click(getByRole('button', { name: /Submit registration/i }));
+  await waitFor(() =>
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'invited@example.com',
+        name: 'Invited Person',
+        token: 'synthetic-invitation',
+      }),
+    ),
+  );
+});
+
+test('keeps a name entered before the invitation response arrives', async () => {
+  let finish: (response: Response) => void = () => {};
+  jest.spyOn(global, 'fetch').mockReturnValue(
+    new Promise<Response>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const { getByTestId } = setup({ search: '?token=synthetic-invitation' });
+  await userEvent.type(getByTestId('name'), 'Chosen Name');
+  finish({
+    ok: true,
+    json: async () => ({ email: 'invited@example.com', name: 'Old Name' }),
+  } as Response);
+  await waitFor(() => expect(getByTestId('email')).toHaveValue('invited@example.com'));
+  expect(getByTestId('name')).toHaveValue('Chosen Name');
+});
+
+test('does not fill details from an invalid invitation or untrusted URL fields', async () => {
+  jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false } as Response);
+  const { getByTestId, getByRole, findByText } = setup({
+    search: '?token=invalid&email=wrong@example.com',
+  });
+  await findByText(/Die Einladung ist ungültig/);
+  expect(getByTestId('email')).toHaveValue('');
+  expect(getByRole('button', { name: /Submit registration/i })).toBeDisabled();
 });
 
 // test('calls registerUser.mutate on registration', async () => {

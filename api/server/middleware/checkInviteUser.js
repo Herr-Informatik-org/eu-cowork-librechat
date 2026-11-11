@@ -1,5 +1,5 @@
 const { getInvite: getInviteFn } = require('@librechat/api');
-const { createToken, findToken, deleteTokens } = require('~/models');
+const { createToken, findToken } = require('~/models');
 
 const getInvite = (encodedToken, email) =>
   getInviteFn(encodedToken, email, { createToken, findToken });
@@ -19,7 +19,6 @@ async function checkInviteUser(req, res, next) {
       return res.status(400).json({ message: 'Invalid invite token' });
     }
 
-    await deleteTokens({ token: invite.token });
     req.invite = invite;
     next();
   } catch (error) {

@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-11 — Einladungsdaten bei der Registrierung übernehmen
+
+- Gültige Einladungslinks füllen die bekannte E-Mail-Adresse und einen
+  hinterlegten Namen aus. Der Name bleibt bearbeitbar; die E-Mail-Adresse
+  bleibt an die Einladung gebunden. Passwörter werden selbst gewählt.
+- Der begrenzte Abruf verbraucht den Einladungsschlüssel nicht und gibt bei
+  abgelaufenen, zurückgezogenen oder bereits verwendeten Einladungen keine
+  Personendaten zurück. Antworten werden nicht zwischengespeichert.
+- Fehlgeschlagene Registrierungen erhalten die Einladung für einen neuen
+  Versuch; erst eine erfolgreiche Registrierung verbraucht den Schlüssel.
+
 ## 2026-11-10 — Mailmodell über die strikte Datenschutzroute anbinden
 
 - Mailanalyse, Entwürfe und interne Recherche verwenden bei geschützten

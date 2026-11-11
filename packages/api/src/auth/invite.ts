@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import { logger, hashToken, getRandomValues } from '@librechat/data-schemas';
+import { isRegistrationInvitation } from './invitation';
 
 export interface InviteDeps {
   createToken: (data: {
@@ -49,7 +50,7 @@ export async function getInvite(
     const hash = await hashToken(token);
     const invite = await deps.findToken({ token: hash, email });
 
-    if (!invite) {
+    if (!isRegistrationInvitation(invite)) {
       throw new Error('Invite not found or email does not match');
     }
 

@@ -20,6 +20,7 @@ jest.mock('~/models', () => ({
   findSession: jest.fn(),
   updateUser: jest.fn(),
   findUser: jest.fn(),
+  deleteTokens: jest.fn(),
 }));
 jest.mock('@librechat/api', () => ({
   math: jest.fn((value, fallback) => fallback),
@@ -42,7 +43,11 @@ const openIdClient = require('openid-client');
 const jwt = require('jsonwebtoken');
 const { logger } = require('@librechat/data-schemas');
 const { isEnabled, findOpenIDUser, buildOpenIDRefreshParams } = require('@librechat/api');
-const { graphTokenController, refreshController } = require('./AuthController');
+const {
+  graphTokenController,
+  refreshController,
+  registrationController,
+} = require('./AuthController');
 const { getGraphApiToken } = require('~/server/services/GraphTokenService');
 const {
   setOpenIDAuthTokens,
@@ -50,7 +55,34 @@ const {
   setAuthTokens,
 } = require('~/server/services/AuthService');
 const { getOpenIdConfig, getOpenIdEmail } = require('~/strategies');
-const { getUserById, findSession, updateUser } = require('~/models');
+const { getUserById, findSession, updateUser, deleteTokens } = require('~/models');
+const { registerUser } = require('~/server/services/AuthService');
+
+describe('invited registration', () => {
+  const response = () => {
+    const res = { status: jest.fn(), send: jest.fn(), json: jest.fn() };
+    res.status.mockReturnValue(res);
+    return res;
+  };
+  beforeEach(() => jest.clearAllMocks());
+  it('retains the invitation when registration fails', async () => {
+    registerUser.mockResolvedValue({ status: 403, message: 'Domain nicht zugelassen.' });
+    const res = response();
+    await registrationController({ body: {}, invite: { token: 'synthetic-digest' } }, res);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(deleteTokens).not.toHaveBeenCalled();
+  });
+  it('consumes only this invitation after successful registration', async () => {
+    registerUser.mockResolvedValue({ status: 200, message: 'Registriert.' });
+    const res = response();
+    await registrationController({ body: {}, invite: { token: 'synthetic-digest' } }, res);
+    expect(deleteTokens).toHaveBeenCalledWith({ token: 'synthetic-digest' });
+    expect(registerUser.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteTokens.mock.invocationCallOrder[0],
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+});
 
 const ORIGINAL_OPENID_SCOPE = process.env.OPENID_SCOPE;
 const ORIGINAL_OPENID_REFRESH_AUDIENCE = process.env.OPENID_REFRESH_AUDIENCE;

@@ -23,6 +23,7 @@ const {
   findSession,
   updateUser,
   findUser,
+  deleteTokens,
 } = require('~/models');
 const { getGraphApiToken } = require('~/server/services/GraphTokenService');
 const { getOpenIdConfig, getOpenIdEmail } = require('~/strategies');
@@ -46,6 +47,9 @@ const registrationController = async (req, res) => {
   try {
     const response = await registerUser(req.body);
     const { status, message } = response;
+    if (req.invite && status === 200) {
+      await deleteTokens({ token: req.invite.token });
+    }
     res.status(status).send({ message });
   } catch (err) {
     logger.error('[registrationController]', err);

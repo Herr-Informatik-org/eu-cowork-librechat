@@ -1,5 +1,5 @@
 import { useForm } from 'react-hook-form';
-import React, { useContext, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { Turnstile } from '@marsidev/react-turnstile';
 import { ThemeContext, SecretInput, Spinner, Button, isDark } from '@librechat/client';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
@@ -20,6 +20,9 @@ const Registration: React.FC = () => {
     watch,
     register,
     handleSubmit,
+    setValue,
+    getFieldState,
+    getValues,
     formState: { errors },
   } = useForm<TRegisterUser>({ mode: 'onChange' });
   const password = watch('password');
@@ -32,9 +35,62 @@ const Registration: React.FC = () => {
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const token = queryParams.get('token');
+  const [invitationReady, setInvitationReady] = useState(false);
   const validTheme = isDark(theme) ? 'dark' : 'light';
 
-  // only require captcha if we have a siteKey
+  useEffect(() => {
+    setInvitationReady(false);
+    if (!token) return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setErrorMessage(
+        'Die Einladung konnte nicht geladen werden. Bitte öffnen Sie den Einladungslink erneut.',
+      );
+      controller.abort();
+    }, 15_000);
+    setErrorMessage('');
+    async function loadInvitation() {
+      try {
+        const endpoint = new URL('api/auth/invite/details', document.baseURI);
+        if (endpoint.origin !== window.location.origin) throw new Error();
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error();
+        const details = (await response.json()) as { email?: unknown; name?: unknown };
+        if (controller.signal.aborted || typeof details.email !== 'string') return;
+        setValue('email', details.email, { shouldValidate: true });
+        if (
+          typeof details.name === 'string' &&
+          !getFieldState('name').isDirty &&
+          !getValues('name')
+        ) {
+          setValue('name', details.name, { shouldValidate: true });
+        }
+        setInvitationReady(true);
+      } catch {
+        if (!controller.signal.aborted) {
+          setErrorMessage(
+            'Die Einladung ist ungültig, abgelaufen oder vorübergehend nicht erreichbar. Bitte öffnen Sie den Einladungslink erneut oder wenden Sie sich an Ihren Administrator.',
+          );
+        }
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+    void loadInvitation();
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [token, setValue, getFieldState, getValues]);
+
+  // Only require CAPTCHA when the server provides a site key.
   const requireCaptcha = Boolean(startupConfig?.turnstile?.siteKey);
   const authInputClassName =
     'webkit-dark-styles transition-color peer w-full rounded-2xl border border-border-light bg-surface-primary px-3.5 pb-2.5 pt-3 text-text-primary duration-200 hover:border-border-light focus:border-green-500 focus:outline-none focus-visible:border-green-500';
@@ -108,6 +164,7 @@ const Registration: React.FC = () => {
                 className={authInputClassName}
                 placeholder=" "
                 data-testid={id}
+                readOnly={id === 'email' && Boolean(token)}
               />
               <label htmlFor={id} className={authLabelClassName}>
                 {fieldLabel}
@@ -227,6 +284,7 @@ const Registration: React.FC = () => {
                 disabled={
                   Object.keys(errors).length > 0 ||
                   isSubmitting ||
+                  (Boolean(token) && !invitationReady) ||
                   (requireCaptcha && !turnstileToken)
                 }
                 type="submit"

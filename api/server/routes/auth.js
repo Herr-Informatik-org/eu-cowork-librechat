@@ -1,5 +1,10 @@
 const express = require('express');
-const { createSetBalanceConfig, forceRefreshCloudFrontAuthCookies } = require('@librechat/api');
+const { rateLimit } = require('express-rate-limit');
+const {
+  createSetBalanceConfig,
+  forceRefreshCloudFrontAuthCookies,
+  invitationDetailsController,
+} = require('@librechat/api');
 const {
   resetPasswordRequestController,
   resetPasswordController,
@@ -17,7 +22,7 @@ const {
 const { verify2FAWithTempToken } = require('~/server/controllers/auth/TwoFactorAuthController');
 const { logoutController } = require('~/server/controllers/auth/LogoutController');
 const { loginController } = require('~/server/controllers/auth/LoginController');
-const { findBalanceByUser, upsertBalanceFields } = require('~/models');
+const { findBalanceByUser, upsertBalanceFields, findToken, findUser } = require('~/models');
 const { getAppConfig } = require('~/server/services/Config');
 const middleware = require('~/server/middleware');
 
@@ -28,6 +33,23 @@ const setBalanceConfig = createSetBalanceConfig({
 });
 
 const router = express.Router();
+const invitationDetailsLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Zu viele Anfragen. Bitte versuchen Sie es in einer Minute erneut.' },
+});
+router.post(
+  '/invite/details',
+  (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  },
+  invitationDetailsLimiter,
+  middleware.checkBan,
+  (req, res) => invitationDetailsController(req, res, { findToken, findUser }),
+);
 const getCloudFrontAuthCookieRefreshResult = (req, res) => {
   const warmedResult = req.cloudFrontAuthCookieRefreshResult;
   if (warmedResult && (warmedResult.attempted || !warmedResult.enabled)) {
