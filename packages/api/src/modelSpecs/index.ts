@@ -221,7 +221,9 @@ export function sanitizeModelSpecs<T extends Partial<TSpecsConfig> | null | unde
 
       const preset = modelSpec?.preset;
       const sanitizedModelSpec = { ...modelSpec };
-      delete (sanitizedModelSpec as { skills?: unknown }).skills;
+      if (typeof sanitizedModelSpec.skills !== 'boolean') {
+        delete (sanitizedModelSpec as { skills?: unknown }).skills;
+      }
       const subagents = sanitizedModelSpec.subagents;
       if (subagents && typeof subagents === 'object') {
         const sanitizedSubagents: TModelSpec['subagents'] = {};

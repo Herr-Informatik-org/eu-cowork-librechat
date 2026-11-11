@@ -1,5 +1,11 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-11 — Skill-Vorgaben auf Modellkarten sichtbar übernehmen
+
+- Der öffentliche Modellkatalog erhält den booleschen Skill-Schalter.
+  Private Skill-Listen und Promptfelder bleiben verborgen. Neue Chats
+  übernehmen den Schalter; bestehende Chats behalten ihre eigene Auswahl.
+
 ## 2026-11-11 — Einladungsdaten bei der Registrierung übernehmen
 
 - Gültige Einladungslinks füllen die bekannte E-Mail-Adresse und einen

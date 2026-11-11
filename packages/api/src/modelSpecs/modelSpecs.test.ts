@@ -9,6 +9,13 @@ import {
 } from './index';
 
 describe('modelSpecs helpers', () => {
+  it.each([true, false])(
+    'preserves the public skill switch %s without exposing skill identities',
+    (enabled) => {
+      const result = sanitizeModelSpecs({ list: [{ name: 'skill-default', skills: enabled }] });
+      expect(result.list[0].skills).toBe(enabled);
+    },
+  );
   it('should strip private prompt fields from model spec presets', () => {
     const modelSpecs = {
       enforce: false,

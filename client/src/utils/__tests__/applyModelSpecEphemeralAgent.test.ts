@@ -43,6 +43,16 @@ describe('applyModelSpecEphemeralAgent', () => {
 
   // ─── New Conversations ─────────────────────────────────────────────
 
+  it('applies the skill default to a new chat and retains an existing chat preference', () => {
+    const modelSpec = createModelSpec({ skills: true });
+    applyModelSpecEphemeralAgent({ convoId: null, modelSpec, updateEphemeralAgent });
+    expect(updateEphemeralAgent.mock.calls[0][1]?.skills).toBe(true);
+    updateEphemeralAgent.mockClear();
+    writeToolToggle(LocalStorageKeys.LAST_SKILLS_TOGGLE_, 'existing-chat', false);
+    applyModelSpecEphemeralAgent({ convoId: 'existing-chat', modelSpec, updateEphemeralAgent });
+    expect(updateEphemeralAgent.mock.calls[0][1]?.skills).toBe(false);
+  });
+
   describe('new conversations always get fresh admin spec config', () => {
     it('should apply exactly the admin-configured tools and MCP servers', () => {
       const modelSpec = createModelSpec({
