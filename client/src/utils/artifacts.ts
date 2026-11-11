@@ -700,13 +700,17 @@ const OFFICE_HTML_BUCKETS: ReadonlySet<ToolArtifactType> = new Set([
 ]);
 
 export function detectArtifactTypeFromFile(
-  attachment: Partial<Pick<TFile, 'filename' | 'type' | 'text' | 'textFormat'>>,
+  attachment: Partial<Pick<TFile, 'file_id' | 'filename' | 'type' | 'text' | 'textFormat'>>,
 ): ToolArtifactType | null {
   /* Compute the basename once and reuse it across the extension AND
    * bare-name lookups. Both `extensionOf(filename)` and
    * `bareNameOf(filename)` would otherwise split path separators
    * twice on the same input. */
   const base = attachment.filename ? basenameOf(attachment.filename) : '';
+  // PDF previews fetch the authorized original; extracted text is never rendered as HTML.
+  if (extensionFromBasename(base) === 'pdf') {
+    return attachment.file_id ? TOOL_ARTIFACT_TYPES.DOCX : null;
+  }
   /* Bare-name fallback for extensionless build files (`Dockerfile`,
    * `Makefile`, `Gemfile`, `Rakefile`, `Vagrantfile`, `Brewfile`). Only
    * fires when the extension lookup missed AND the basename is in the
@@ -848,6 +852,10 @@ export function fileToArtifact(
   >,
   options?: FileToArtifactOptions,
 ): Artifact | null {
+  const originalPdf = extensionFromBasename(basenameOf(attachment.filename ?? '')) === 'pdf';
+  if (originalPdf && !attachment.file_id) {
+    return null;
+  }
   const type = options?.preClassifiedType ?? detectArtifactTypeFromFile(attachment);
   if (!isToolArtifactType(type)) {
     return null;
@@ -858,6 +866,7 @@ export function fileToArtifact(
   // their viewers would error on. Plain-text and markdown are still
   // tolerated empty — the markdown viewer renders empty cleanly.
   if (
+    !originalPdf &&
     !attachment.text &&
     type !== TOOL_ARTIFACT_TYPES.PLAIN_TEXT &&
     type !== TOOL_ARTIFACT_TYPES.MARKDOWN &&
@@ -892,7 +901,9 @@ export function fileToArtifact(
     // panel rather than be replaced by the deferred-extraction
     // placeholder. Only `null`/`undefined` fall through to the
     // placeholder, matching "no extraction has run yet."
-    content: attachment.text ?? options?.placeholder ?? '',
+    content: originalPdf
+      ? '<meta name="librechat-office-source" content="original">'
+      : (attachment.text ?? options?.placeholder ?? ''),
     language,
     messageId: attachment.messageId ?? undefined,
     lastUpdateTime: toLastUpdate(attachment),

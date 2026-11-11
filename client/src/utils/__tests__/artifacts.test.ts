@@ -278,8 +278,7 @@ describe('detectArtifactTypeFromFile', () => {
   });
 
   it('returns null for unsupported types', () => {
-    /* PDFs have no rich preview path on the client (the artifact panel
-     * doesn't host a PDF viewer); they fall back to the download UI. */
+    // Missing file identifiers cannot use the authenticated original preview.
     expect(
       detectArtifactTypeFromFile({ filename: 'doc.pdf', type: 'application/pdf', text: 'x' }),
     ).toBeNull();
@@ -564,6 +563,21 @@ describe('languageForFilename', () => {
 });
 
 describe('fileToArtifact', () => {
+  it.each([undefined, '', '<script>untrusted extracted text</script>'])(
+    'opens PDF originals without injecting extracted content (%s)',
+    (text) => {
+      const artifact = fileToArtifact({
+        file_id: 'pdf-original',
+        filename: 'report.PDF',
+        type: 'application/pdf',
+        text,
+      });
+      expect(artifact?.type).toBe(TOOL_ARTIFACT_TYPES.DOCX);
+      expect(artifact?.content).toBe('<meta name="librechat-office-source" content="original">');
+      expect(artifact?.download?.file_id).toBe('pdf-original');
+    },
+  );
+
   const baseFile = {
     file_id: 'fid-1',
     filename: 'index.html',
@@ -587,7 +601,12 @@ describe('fileToArtifact', () => {
   it('returns null for unsupported types so callers can fall through', () => {
     expect(fileToArtifact({ ...baseFile, filename: 'photo.jpg', type: 'image/jpeg' })).toBeNull();
     expect(
-      fileToArtifact({ ...baseFile, filename: 'doc.pdf', type: 'application/pdf' }),
+      fileToArtifact({
+        ...baseFile,
+        file_id: undefined,
+        filename: 'doc.pdf',
+        type: 'application/pdf',
+      }),
     ).toBeNull();
   });
 

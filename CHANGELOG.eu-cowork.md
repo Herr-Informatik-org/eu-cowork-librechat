@@ -1,5 +1,12 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-11 — PDF-Dateien im rechten Vorschaufenster öffnen
+
+- Erzeugte PDFs öffnen denselben Seitenbereich wie Word-Dateien, mit
+  Seitenwahl, Zoom und Download des Originals. Der bestehende private
+  Dateizugriff prüft die Berechtigung; extrahierter Text wird nicht als HTML
+  übernommen. Ohne Datei-ID bleibt der bisherige Downloadweg erhalten.
+
 ## 2026-11-11 — Skill-Vorgaben auf Modellkarten sichtbar übernehmen
 
 - Der öffentliche Modellkatalog erhält den booleschen Skill-Schalter.

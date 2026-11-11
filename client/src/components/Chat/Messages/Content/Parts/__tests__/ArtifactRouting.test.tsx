@@ -145,6 +145,21 @@ describe('Attachment routing for tool artifacts', () => {
     ).toBeInTheDocument();
   });
 
+  it('opens a PDF in the side panel without waiting for text extraction', () => {
+    const pdf = baseAttachment({
+      file_id: 'pdf-original',
+      filename: 'report.pdf',
+      type: 'application/pdf',
+      text: undefined,
+    } as Partial<TAttachment>);
+    renderWith(<Attachment attachment={pdf} />);
+    expect(screen.getByText('report.pdf')).toBeInTheDocument();
+    expect(screen.getByRole('button', { pressed: true })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /com_ui_download.*report\.pdf/i }),
+    ).toBeInTheDocument();
+  });
+
   it('renders a JSX artifact card', () => {
     const jsx = baseAttachment({
       filename: 'App.tsx',
