@@ -149,9 +149,8 @@ describe('Attachment routing for tool artifacts', () => {
     const pdf = baseAttachment({
       file_id: 'pdf-original',
       filename: 'report.pdf',
-      type: 'application/pdf',
       text: undefined,
-    } as Partial<TAttachment>);
+    });
     renderWith(<Attachment attachment={pdf} />);
     expect(screen.getByText('report.pdf')).toBeInTheDocument();
     expect(screen.getByRole('button', { pressed: true })).toBeInTheDocument();
