@@ -607,6 +607,8 @@ describe('verifyEmail public response handling', () => {
 describe('requestPasswordReset', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    checkEmailConfig.mockReturnValue(true);
+    isSupportServiceIdentity.mockReturnValue(false);
     isEmailDomainAllowed.mockReturnValue(true);
     getAppConfig.mockResolvedValue({
       registration: { allowedDomains: ['example.com'] },
@@ -614,6 +616,51 @@ describe('requestPasswordReset', () => {
     resolveAppConfigForUser.mockResolvedValue({
       registration: { allowedDomains: ['example.com'] },
     });
+  });
+
+  it.each(['USER', 'ADMIN'])(
+    'does not disclose or issue a reset token for %s when email delivery is unavailable',
+    async (role) => {
+      checkEmailConfig.mockReturnValue(false);
+      findUser.mockResolvedValue({
+        _id: 'user-without-email-delivery',
+        email: 'user@example.com',
+        role,
+      });
+      const req = { body: { email: 'user@example.com' }, ip: '127.0.0.1' };
+
+      const result = await requestPasswordReset(req);
+      findUser.mockResolvedValue(null);
+      const unknownAccountResult = await requestPasswordReset(req);
+
+      expect(result).toEqual(unknownAccountResult);
+      expect(result.message).toContain('If an account with that email exists');
+      expect(result).not.toHaveProperty('link');
+      expect(createToken).not.toHaveBeenCalled();
+      expect(deleteTokens).not.toHaveBeenCalled();
+      expect(updateUser).not.toHaveBeenCalled();
+      expect(sendEmail).not.toHaveBeenCalled();
+    },
+  );
+
+  it('sends the reset link only by email and returns the generic response', async () => {
+    findUser.mockResolvedValue({ _id: 'user-reset', email: 'user@example.com' });
+
+    const result = await requestPasswordReset({
+      body: { email: 'user@example.com' },
+      ip: '127.0.0.1',
+    });
+
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'user@example.com',
+        payload: expect.objectContaining({
+          link: expect.stringContaining('/reset-password?token='),
+        }),
+      }),
+    );
+    expect(result.message).toContain('If an account with that email exists');
+    expect(result).not.toHaveProperty('link');
   });
 
   it('should fast-fail with base config before DB lookup for blocked domains', async () => {

@@ -1,5 +1,15 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-12 — Kisuno-Anmeldung und sichere Wiederherstellung
+
+- Einheitliche Anmeldeseite mit Kisuno-Logo, Blauverlauf, hellem und dunklem
+  Erscheinungsbild sowie kompakter Darstellung auf Mobilgeräten.
+- Die Betreiberkonsole erreicht nach dem Passwort wieder die erstmalige
+  MFA-Einrichtung. Ein JavaScript-Abbruch bei der Linkentfernung ist behoben.
+- Ohne eingerichteten Mailversand gibt die Passwort-Wiederherstellung keinen
+  Reset-Link an anonyme Aufrufer zurück und erzeugt keine Reset-Tokens.
+
+
 ## 2026-11-12 — Verbindlicher Anmeldeschutz und E-Mail-Übernahme
 
 - Lokale Konten richten vor dem ersten Zugriff Authenticator oder einen Passkey/FIDO2

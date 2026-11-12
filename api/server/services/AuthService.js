@@ -473,6 +473,13 @@ const requestPasswordReset = async (req) => {
     };
   }
 
+  if (!emailEnabled) {
+    logger.warn('[requestPasswordReset] Passwort-Reset ohne konfigurierten Mailversand gesperrt.');
+    return {
+      message: 'If an account with that email exists, a password reset link has been sent to it.',
+    };
+  }
+
   await Promise.all([
     deleteTokens({ userId: user._id, type: AuthTokenTypes.PASSWORD_RESET }),
     deleteTokens({ userId: user._id, email: null, identifier: null, type: null }),
@@ -490,27 +497,20 @@ const requestPasswordReset = async (req) => {
 
   const link = `${domains.client}/reset-password?token=${resetToken}&userId=${user._id}`;
 
-  if (emailEnabled) {
-    await sendEmail({
-      email: user.email,
-      subject: 'Password Reset Request',
-      payload: {
-        appName: process.env.APP_TITLE || 'LibreChat',
-        name: user.name || user.username || user.email,
-        link: link,
-        year: new Date().getFullYear(),
-      },
-      template: 'requestPasswordReset.handlebars',
-    });
-    logger.info(
-      `[requestPasswordReset] Link emailed. [Email: ${email}] [ID: ${user._id}] [IP: ${req.ip}]`,
-    );
-  } else {
-    logger.info(
-      `[requestPasswordReset] Link issued. [Email: ${email}] [ID: ${user._id}] [IP: ${req.ip}]`,
-    );
-    return { link };
-  }
+  await sendEmail({
+    email: user.email,
+    subject: 'Password Reset Request',
+    payload: {
+      appName: process.env.APP_TITLE || 'LibreChat',
+      name: user.name || user.username || user.email,
+      link: link,
+      year: new Date().getFullYear(),
+    },
+    template: 'requestPasswordReset.handlebars',
+  });
+  logger.info(
+    `[requestPasswordReset] Link emailed. [Email: ${email}] [ID: ${user._id}] [IP: ${req.ip}]`,
+  );
 
   return {
     message: 'If an account with that email exists, a password reset link has been sent to it.',
@@ -675,7 +675,10 @@ const setAuthTokens = async (userId, res, _session = null, req = null) => {
       refreshTokenExpires = session.expiration.getTime();
       refreshToken = await generateRefreshToken(session);
     } else {
-      const result = await createSession(userId, { expiresIn, ...(req?.securityAssurance ? { securityAssurance: req.securityAssurance } : {}) });
+      const result = await createSession(userId, {
+        expiresIn,
+        ...(req?.securityAssurance ? { securityAssurance: req.securityAssurance } : {}),
+      });
       session = result.session;
       refreshToken = result.refreshToken;
       refreshTokenExpires = session.expiration.getTime();
