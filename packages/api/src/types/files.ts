@@ -163,6 +163,7 @@ export interface ProcessedFile {
   file: IMongoFile;
   content: string;
   metadata: {
+    metadata?: IMongoFile['metadata'];
     file_id: string;
     temp_file_id?: string;
     filepath: string;

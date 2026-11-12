@@ -17,13 +17,17 @@ const compiled = ts.transpileModule(
 let server: Server;
 let origin: string;
 let servePolicy = true;
+let policyOverride: string | undefined;
 test.beforeEach(async () => {
   servePolicy = true;
+  policyOverride = undefined;
   server = createServer((req, res) => {
     if (req.url === '/api/artifacts/preview') {
       res.writeHead(200, {
         'Content-Type': 'text/html',
-        ...(servePolicy ? { 'Content-Security-Policy': ARTIFACT_PREVIEW_POLICY } : {}),
+        ...(servePolicy
+          ? { 'Content-Security-Policy': policyOverride ?? ARTIFACT_PREVIEW_POLICY }
+          : {}),
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Expose-Headers': 'Content-Security-Policy',
       });
@@ -133,3 +137,33 @@ test('missing binding headers block untrusted content before handoff', async ({ 
   await expect(outer.locator('iframe')).not.toBeVisible();
   expect(await page.locator('body').getAttribute('data-executed')).toBeNull();
 });
+
+for (const weak of [
+  ARTIFACT_PREVIEW_POLICY.replace("connect-src 'none'", "connect-src 'none' https:"),
+  'connect-src https:; ' + ARTIFACT_PREVIEW_POLICY,
+  ARTIFACT_PREVIEW_POLICY.replace(
+    'sandbox allow-scripts',
+    'sandbox allow-scripts allow-same-origin',
+  ),
+]) {
+  test('weakened policy is refused: ' + weak, async ({ page }) => {
+    policyOverride = weak;
+    await page.goto(origin + '/c/policy-check');
+    await page.evaluate((code) => {
+      const exports: Record<string, (source: string, error: string) => string> = {};
+      new Function('exports', code)(exports);
+      const frame = document.createElement('iframe');
+      frame.sandbox.add('allow-scripts');
+      frame.srcdoc = exports.interactiveHtmlDocument(
+        '<h1>Private Daten</h1>',
+        'Sicherheitsrichtlinie unvollständig.',
+      );
+      document.body.append(frame);
+    }, compiled);
+    const outer = page.frames().find((frame) => frame !== page.mainFrame())!;
+    await expect(outer.locator('#preview-error')).toHaveText(
+      'Sicherheitsrichtlinie unvollständig.',
+    );
+    await expect(outer.locator('iframe')).not.toBeVisible();
+  });
+}

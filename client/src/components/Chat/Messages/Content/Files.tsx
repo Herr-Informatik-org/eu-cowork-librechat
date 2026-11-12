@@ -1,8 +1,9 @@
-import { useMemo, useState, useCallback, memo } from 'react';
+import { useMemo, useState, useCallback, memo, Fragment } from 'react';
 import type { TFile, TMessage } from 'librechat-data-provider';
 import FileContainer from '~/components/Chat/Input/Files/FileContainer';
 import FilePreviewDialog from './FilePreviewDialog';
 import Image from './Image';
+import PdfIntakeNotice from './PdfIntakeNotice';
 
 const Files = ({ message }: { message?: TMessage }) => {
   const imageFiles = useMemo(() => {
@@ -25,11 +26,10 @@ const Files = ({ message }: { message?: TMessage }) => {
     <>
       {otherFiles.length > 0 &&
         otherFiles.map((file) => (
-          <FileContainer
-            key={file.file_id}
-            file={file as TFile}
-            onClick={() => setSelectedFile(file)}
-          />
+          <Fragment key={file.file_id}>
+            <FileContainer file={file as TFile} onClick={() => setSelectedFile(file)} />
+            <PdfIntakeNotice file={file} />
+          </Fragment>
         ))}
       {imageFiles.length > 0 &&
         imageFiles.map((file) => (

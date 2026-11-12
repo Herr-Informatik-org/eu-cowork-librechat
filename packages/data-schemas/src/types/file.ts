@@ -63,6 +63,8 @@ export interface IMongoFile extends Omit<Document, 'model'> {
   width?: number;
   height?: number;
   metadata?: {
+    /** Local reading outcome; contains no extracted document content. */
+    documentIntake?: { status: 'read' | 'ocr' | 'incomplete' | 'skipped' };
     /** Server-verified export report, retained with the private file. */
     documentQuality?: Record<string, unknown>;
     /**

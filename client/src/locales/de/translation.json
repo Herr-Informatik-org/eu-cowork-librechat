@@ -2572,5 +2572,9 @@
   "com_ui_artifact_manual_link": "Direktlink zum manuellen Kopieren",
   "com_ui_artifact_interactive_preview": "Interaktive Vorschau",
   "com_ui_artifact_connection_required": "Die interaktive Vorschau konnte nicht sicher geladen werden. Verbindung zu Kisuno prüfen.",
-  "com_ui_artifact_internal_preview_required": "Für dieses Format ist kein interner Vorschaudienst konfiguriert. Fordere im Chat eine HTML-Vorschau an; der Quelltext bleibt verfügbar."
+  "com_ui_artifact_internal_preview_required": "Für dieses Format ist kein interner Vorschaudienst konfiguriert. Fordere im Chat eine HTML-Vorschau an; der Quelltext bleibt verfügbar.",
+  "com_ui_pdf_intake_read": "PDF lokal als Text gelesen. Der Text durchläuft den Datenschutzfilter.",
+  "com_ui_pdf_intake_ocr": "PDF lokal per Texterkennung gelesen. Beträge und Kontonummern bitte am Original prüfen; OCR kann Fehler enthalten.",
+  "com_ui_pdf_intake_incomplete": "PDF nur teilweise gelesen. Die Auswertung ist unvollständig. Für eine vollständige Prüfung die Datei aufteilen.",
+  "com_ui_pdf_intake_skipped": "PDF konnte lokal nicht sicher gelesen werden und wurde ausgelassen. Der Chat läuft weiter; bitte eine unverschlüsselte PDF oder einen Textauszug bereitstellen."
 }

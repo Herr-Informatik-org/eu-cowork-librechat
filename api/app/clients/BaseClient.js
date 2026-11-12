@@ -1404,7 +1404,8 @@ class BaseClient {
         source !== FileSources.text &&
         source !== FileSources.vectordb &&
         (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-          /\.(docx|xlsx)$/i.test(file.filename || ''))
+          file.type === 'application/pdf' ||
+          /\.(docx|xlsx|pdf)$/i.test(file.filename || ''))
       ) {
         categorizedAttachments.documents.push(file);
         allFiles.push(file);

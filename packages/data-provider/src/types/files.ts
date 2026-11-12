@@ -152,6 +152,8 @@ export type TFile = {
    */
   previewError?: string;
   metadata?: {
+    /** Local reading outcome; contains no extracted document content. */
+    documentIntake?: { status: 'read' | 'ocr' | 'incomplete' | 'skipped' };
     /** Server-verified export report for the stored bytes. */
     documentQuality?: Record<string, unknown>;
     fileIdentifier?: string;

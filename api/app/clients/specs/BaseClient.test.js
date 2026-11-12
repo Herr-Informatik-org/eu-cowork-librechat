@@ -1898,3 +1898,50 @@ describe('BaseClient', () => {
     });
   });
 });
+
+describe('local PDF attachment routing', () => {
+  const previous = process.env.KISUNO_DOCUMENTS_ENABLED;
+  beforeEach(() => {
+    process.env.KISUNO_DOCUMENTS_ENABLED = 'true';
+  });
+  afterAll(() => {
+    if (previous === undefined) delete process.env.KISUNO_DOCUMENTS_ENABLED;
+    else process.env.KISUNO_DOCUMENTS_ENABLED = previous;
+  });
+  test.each(['application/pdf', 'application/octet-stream'])(
+    'reads %s PDF before code-environment metadata can skip it',
+    async (type) => {
+      const client = initializeFakeClient(apiKey, optionsForPdf(), []);
+      client.addDocuments = jest.fn().mockImplementation(async (_message, files) => {
+        files[0].metadata.documentIntake = { status: 'read' };
+        return files;
+      });
+      const file = {
+        file_id: 'own-pdf',
+        filename: 'Konto.pdf',
+        type,
+        source: 'local',
+        embedded: true,
+        metadata: {
+          codeEnvRef: {
+            kind: 'user',
+            id: 'user-1',
+            storage_session_id: 'private',
+            file_id: 'private',
+          },
+        },
+      };
+      const message = { messageId: 'pdf-probe' };
+      const result = await client.processAttachments(message, [file]);
+      expect(client.addDocuments).toHaveBeenCalledWith(message, [file]);
+      expect(result[0].metadata.documentIntake.status).toBe('read');
+    },
+  );
+});
+function optionsForPdf() {
+  return {
+    endpoint: EModelEndpoint.openAI,
+    req: { config: {} },
+    modelOptions: { model: 'synthetic' },
+  };
+}

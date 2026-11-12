@@ -1,5 +1,14 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-12 — PDFs im geschützten Chat lesen
+
+- PDF-Anhänge werden lokal als Text ausgelesen und anschliessend maskiert.
+  Originale und Seitenbilder werden nicht als Binärdaten ans Modell geschickt.
+- Unlesbare Anhänge werden mit sichtbarem Dateihinweis ausgelassen. Die übrige
+  Anfrage bleibt benutzbar. OCR und unvollständige Auszüge sind gekennzeichnet.
+- Die interaktive Vorschau lehnt auch abgeschwächte oder doppelte
+  Sicherheitsdirektiven ab, bevor sie private Inhalte übernimmt.
+
 ## 2026-11-12 — Keine stillschweigende externe Artefaktverarbeitung
 
 - Ohne ausdrücklich konfigurierte Bundleradresse wird kein Quelltext an den

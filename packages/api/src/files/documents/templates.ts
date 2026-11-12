@@ -11,7 +11,7 @@ export function isWordTemplate(
   return mimeType === DOCX_MIME || /\.docx$/i.test(filename ?? '');
 }
 
-async function inspectOfficeFile(data: Buffer, format: 'docx' | 'xlsx'): Promise<string> {
+async function inspectOfficeFile(data: Buffer, format: 'docx' | 'xlsx' | 'pdf'): Promise<string> {
   if (!data.length || data.length > MAX_BYTES) {
     throw new Error('Office-Datei ist leer oder grösser als 10 MiB.');
   }
@@ -20,7 +20,11 @@ async function inspectOfficeFile(data: Buffer, format: 'docx' | 'xlsx'): Promise
     throw new Error('Lokale Dokumentverarbeitung ist nicht korrekt eingerichtet.');
   }
   target.pathname =
-    format === 'docx' ? '/documents/inspect-template' : '/documents/inspect-workbook';
+    format === 'docx'
+      ? '/documents/inspect-template'
+      : format === 'xlsx'
+        ? '/documents/inspect-workbook'
+        : '/documents/inspect-pdf';
   target.search = '';
   let response: Response;
   try {
@@ -29,7 +33,7 @@ async function inspectOfficeFile(data: Buffer, format: 'docx' | 'xlsx'): Promise
       body: new Uint8Array(data),
       redirect: 'error',
       headers: { 'content-type': 'application/octet-stream' },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(format === 'pdf' ? 85000 : 15000),
     });
   } catch {
     throw new Error(
@@ -76,6 +80,12 @@ export function inspectWordTemplate(data: Buffer): Promise<string> {
 }
 export function inspectSpreadsheet(data: Buffer): Promise<string> {
   return inspectOfficeFile(data, 'xlsx');
+}
+export function inspectPdfDocument(data: Buffer): Promise<string> {
+  return inspectOfficeFile(data, 'pdf');
+}
+export function isPdfDocument(filename: string | undefined, mimeType: string | undefined): boolean {
+  return mimeType === 'application/pdf' || /\.pdf$/i.test(filename ?? '');
 }
 export function isSpreadsheet(filename: string | undefined, mimeType: string | undefined): boolean {
   return (

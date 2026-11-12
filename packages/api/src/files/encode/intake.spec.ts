@@ -100,6 +100,66 @@ describe('Word uploads cross the model boundary as locally inspected text', () =
     ).rejects.toThrow('Keine vollständige Vorlagenprüfung');
     expect(global.fetch).not.toHaveBeenCalled();
   });
+  it.each([Providers.OPENAI, Providers.ANTHROPIC, Providers.GOOGLE, Providers.BEDROCK])(
+    'PDF accounting data crosses %s only as local text',
+    async (provider) => {
+      const pdf = { ...file, filename: 'Konto.pdf', type: 'application/pdf' };
+      (getFileStream as jest.Mock).mockResolvedValue({
+        file: pdf,
+        metadata: pdf,
+        content: data.toString('base64'),
+      });
+      jest
+        .mocked(global.fetch)
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              format: 'pdf',
+              sha256: createHash('sha256').update(data).digest('hex'),
+              binarySentToModel: false,
+              pages: [{ page: 1, text: '6000 Miete Annegret Zwyssig 1800.00' }],
+              complete: true,
+            }),
+          ),
+        );
+      const result = await encodeAndFormatDocuments(req, [pdf], { provider }, strategy);
+      expect(result.documents).toHaveLength(1);
+      expect(result.documents[0].type).toBe('text');
+      expect(JSON.stringify(result.documents)).toContain('1800.00');
+      expect(JSON.stringify(result.documents)).not.toContain(data.toString('base64'));
+      expect(JSON.stringify(result.documents)).not.toContain('file_data');
+      expect(String(jest.mocked(global.fetch).mock.calls[0][0])).toContain(
+        '/documents/inspect-pdf',
+      );
+    },
+  );
+  it.each(['renderer', 'storage', 'empty', 'hash', 'size'])(
+    'keeps the chat available and omits unreadable PDF on %s failure',
+    async (reason) => {
+      const pdf = { ...file, filename: 'Konto.pdf', type: 'application/pdf' };
+      (getFileStream as jest.Mock).mockResolvedValue({
+        file: pdf,
+        metadata: pdf,
+        content: data.toString('base64'),
+      });
+      if (reason === 'renderer') jest.mocked(global.fetch).mockRejectedValue(Error('offline'));
+      if (reason === 'storage') (getFileStream as jest.Mock).mockRejectedValue(Error('offline'));
+      if (reason === 'empty') (getFileStream as jest.Mock).mockResolvedValue(null);
+      if (reason === 'size') (getConfiguredFileSizeLimit as jest.Mock).mockReturnValue(1);
+      const result = await encodeAndFormatDocuments(
+        req,
+        [pdf],
+        { provider: Providers.OPENAI },
+        strategy,
+      );
+      expect(result.documents).toHaveLength(1);
+      expect(result.documents[0].type).toBe('text');
+      expect(JSON.stringify(result.documents)).toContain('Dateihinweis');
+      expect(JSON.stringify(result.documents)).toContain('Chat');
+      expect(JSON.stringify(result.documents)).not.toContain(data.toString('base64'));
+      expect(JSON.stringify(result.documents)).not.toContain('file_data');
+    },
+  );
   it('honours the configured file limit before invoking the renderer', async () => {
     (getConfiguredFileSizeLimit as jest.Mock).mockReturnValue(1);
     await expect(

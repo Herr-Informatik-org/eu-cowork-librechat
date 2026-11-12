@@ -118,6 +118,19 @@ const file: Schema<IMongoFile> = new Schema(
     width: Number,
     height: Number,
     metadata: {
+      documentIntake: {
+        type: new Schema(
+          {
+            status: {
+              type: String,
+              enum: ['read', 'ocr', 'incomplete', 'skipped'],
+              required: true,
+            },
+          },
+          { _id: false },
+        ),
+        default: undefined,
+      },
       /** Server attestation for the exact bytes accepted by the document renderer. */
       documentQuality: {
         type: Schema.Types.Mixed,

@@ -2981,5 +2981,9 @@
   "com_ui_artifact_manual_link": "Direct link for manual copying",
   "com_ui_artifact_interactive_preview": "Interactive preview",
   "com_ui_artifact_connection_required": "The interactive preview could not be loaded securely. Check your connection to Kisuno.",
-  "com_ui_artifact_internal_preview_required": "No internal preview service is configured for this format. Ask in the chat for an HTML preview; the source remains available."
+  "com_ui_artifact_internal_preview_required": "No internal preview service is configured for this format. Ask in the chat for an HTML preview; the source remains available.",
+  "com_ui_pdf_intake_read": "PDF read locally as text. Its text passes through the privacy filter.",
+  "com_ui_pdf_intake_ocr": "PDF read with local OCR. Check amounts and account numbers against the original; OCR may contain errors.",
+  "com_ui_pdf_intake_incomplete": "Only part of the PDF was read. The analysis is incomplete. Split the file for a complete review.",
+  "com_ui_pdf_intake_skipped": "PDF could not be safely read locally and was omitted. Chat continues; provide an unencrypted PDF or a text extract."
 }
