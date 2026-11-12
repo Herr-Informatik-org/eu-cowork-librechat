@@ -54,7 +54,10 @@ const DownloadArtifact = ({ artifact }: { artifact: Artifact }) => {
 
   const downloadContent = () => {
     const source = currentCode ?? artifact.content ?? '';
-    const content = artifact.type === 'text/html' ? interactiveHtmlDocument(source) : source;
+    const content =
+      artifact.type === 'text/html'
+        ? interactiveHtmlDocument(source, localize('com_ui_artifact_connection_required'))
+        : source;
     if (!content) {
       return;
     }

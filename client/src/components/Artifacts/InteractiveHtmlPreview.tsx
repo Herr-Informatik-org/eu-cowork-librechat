@@ -17,11 +17,14 @@ export default function InteractiveHtmlPreview({
   const location = useLocation();
   const preview = useMemo(() => {
     try {
-      return { html: interactiveHtmlDocument(content), error: false };
+      return {
+        html: interactiveHtmlDocument(content, localize('com_ui_artifact_connection_required')),
+        error: false,
+      };
     } catch {
       return { html: '', error: true };
     }
-  }, [content]);
+  }, [content, localize]);
   if (preview.error)
     return (
       <p role="alert" className="p-4">

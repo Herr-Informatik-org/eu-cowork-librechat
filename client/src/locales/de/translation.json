@@ -2570,5 +2570,6 @@
   "com_ui_artifact_shared_access": "Freigabe dieses Chats gilt.",
   "com_ui_artifact_private_access": "Privat: Zugriff auf diesen Chat erforderlich. Zum Teilen die Chatfreigabe verwenden.",
   "com_ui_artifact_manual_link": "Direktlink zum manuellen Kopieren",
-  "com_ui_artifact_interactive_preview": "Interaktive Vorschau"
+  "com_ui_artifact_interactive_preview": "Interaktive Vorschau",
+  "com_ui_artifact_connection_required": "Die interaktive Vorschau konnte nicht sicher geladen werden. Verbindung zu Kisuno prüfen."
 }

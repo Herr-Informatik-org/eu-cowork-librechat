@@ -2979,5 +2979,6 @@
   "com_ui_artifact_shared_access": "This chat’s sharing settings apply.",
   "com_ui_artifact_private_access": "Private: access to this chat is required. Use chat sharing to share it.",
   "com_ui_artifact_manual_link": "Direct link for manual copying",
-  "com_ui_artifact_interactive_preview": "Interactive preview"
+  "com_ui_artifact_interactive_preview": "Interactive preview",
+  "com_ui_artifact_connection_required": "The interactive preview could not be loaded securely. Check your connection to Kisuno."
 }

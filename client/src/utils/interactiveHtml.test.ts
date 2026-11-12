@@ -8,7 +8,8 @@ describe('isolated interactive HTML', () => {
     expect(result).not.toContain('allow-same-origin');
     expect(result).toContain('/api/artifacts/preview');
     expect(result).not.toContain('frame-src blob:');
-    expect(result).toContain("connect-src 'none'");
+    expect(result).toContain('content-security-policy');
+    expect(result).toContain("credentials:'omit'");
     expect(result).not.toContain('<script>window.result=12*150</script>');
     expect(result).toContain('window.result=12*150');
   });
@@ -21,6 +22,7 @@ describe('isolated interactive HTML', () => {
   it('encodes script delimiters without injecting a wrapper script', () => {
     const result = interactiveHtmlDocument(
       '<script>const x="</script><script>parent.pwned=true</script>"</script>',
+      '</script><script>parent.errorInjected=true</script>',
     );
     expect((result.match(/<script>/g) || []).length).toBe(1);
     expect(result).toContain('\\u003c');

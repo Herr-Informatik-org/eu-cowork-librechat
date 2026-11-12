@@ -1,5 +1,14 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-12 — Vorschau vor fehlenden Sicherheitsheadern schützen
+
+- Die interaktive Vorschau übergibt Inhalte erst nach Prüfung der verbindlichen
+  HTTP-Richtlinie. Fehlt sie am Proxy oder ist die Ladehülle nicht erreichbar,
+  bleibt der Inhalt gesperrt und eine verständliche Meldung erscheint.
+- Die öffentliche Ladehülle liefert ausschliesslich konstanten Programmtext,
+  keine Chatdaten. Die kontrollierte CORS-Freigabe erlaubt nur das Lesen der
+  öffentlichen Sicherheitsmetadaten ohne Sitzungscookies.
+
 ## 2026-11-12 — Vollständige Vorlagen-Skills und interaktive Artefakte
 
 - Ein gemeinsamer Datei-Upload wählt die erlaubte Verarbeitung automatisch;

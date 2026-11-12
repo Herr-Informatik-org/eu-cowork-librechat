@@ -14,12 +14,14 @@ addEventListener('message',event=>{
  parsed.querySelectorAll('script').forEach(node=>{if(!node.hasAttribute('src'))scripts.push({type:node.getAttribute('type'),code:node.textContent});node.remove()});
  document.head.replaceChildren(...Array.from(parsed.head.childNodes).map(node=>document.importNode(node,true)));
  document.body.replaceChildren(...Array.from(parsed.body.childNodes).map(node=>document.importNode(node,true)));
- for(const [target,source] of [[document.documentElement,parsed.documentElement],[document.body,parsed.body]])for(const attribute of source.attributes)if(/^(class|style|lang|dir|id|data-.+|aria-.+)$/.test(attribute.name))target.setAttribute(attribute.name,attribute.value);
+ for(const [target,source] of [[document.documentElement,parsed.documentElement],[document.body,parsed.body]])for(const attribute of source.attributes)if(/^(class|style|lang|dir|id|onload|data-.+|aria-.+)$/.test(attribute.name))target.setAttribute(attribute.name,attribute.value);
  const viewport=document.createElement('meta');viewport.name='viewport';viewport.content='width=device-width,initial-scale=1';document.head.append(viewport);
  scripts.forEach(value=>{const script=document.createElement('script');if(value.type)script.type=value.type;script.textContent=value.code;document.body.append(script)});
  document.dispatchEvent(new Event('DOMContentLoaded'));
+ window.dispatchEvent(new Event('load'));
 });
-parent.postMessage({type:'kisuno-artifact-ready'},'*');
+const ready=()=>parent.postMessage({type:'kisuno-artifact-ready'},'*');
+if(document.readyState==='complete')ready();else addEventListener('load',ready,{once:true});
 </script></body></html>`;
 
 /** Serve a constant, data-free loader; HTTP CSP survives script-driven document replacement. */
@@ -29,6 +31,8 @@ export const artifactPreviewHandler: RequestHandler = (_req, res): void => {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Expose-Headers': 'Content-Security-Policy',
   });
   res.type('html').send(ARTIFACT_PREVIEW_SHELL);
 };

