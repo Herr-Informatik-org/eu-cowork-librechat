@@ -104,4 +104,23 @@ describe('skillDeps saveSkillFileContent', () => {
       },
     );
   });
+
+  it('keeps binary Word originals byte-identical through the storage wrapper', async () => {
+    const original = Buffer.from([0x50, 0x4b, 0x00, 0xff, 0x80, 0x01]);
+    mockDb.upsertSkillFile.mockResolvedValue({
+      bytes: original.length,
+      relativePath: 'templates/Vorlage.docx',
+    });
+    await getSkillToolDeps().saveSkillFileContent({
+      req: { user: { id: 'user-1' }, config: {} },
+      skillId: 'skill-1',
+      relativePath: 'templates/Vorlage.docx',
+      content: original,
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+    expect(mockSaveBuffer.mock.calls[0][0].buffer.equals(original)).toBe(true);
+    expect(mockDb.upsertSkillFile).toHaveBeenCalledWith(
+      expect.objectContaining({ bytes: original.length }),
+    );
+  });
 });

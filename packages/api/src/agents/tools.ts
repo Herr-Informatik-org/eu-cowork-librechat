@@ -183,13 +183,18 @@ const SKILL_CREATE_FILE_PARAMETERS: LCTool['parameters'] = Object.freeze({
       type: 'string',
       description: 'Complete file contents.',
     },
+    source_file_id: {
+      type: 'string',
+      description:
+        'Statt content: ID einer eigenen hochgeladenen DOCX-Datei. Speichert das unveränderte Original privat unter skills/{skillName}/templates/Vorlage.docx. Erst SKILL.md erstellen; keine fremden Datei-IDs oder erfundenen Dateiinhalte verwenden.',
+    },
     overwrite: {
       type: 'boolean',
       description: 'Must be true to replace an existing file. Refuses otherwise.',
       default: false,
     },
   },
-  required: ['path', 'content'],
+  required: ['path'],
 }) as LCTool['parameters'];
 
 const CODE_CREATE_FILE_PARAMETERS: LCTool['parameters'] = Object.freeze({

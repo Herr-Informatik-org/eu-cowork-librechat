@@ -17,6 +17,7 @@ const {
   createDeploymentSkillMethods,
   isDeploymentSkillFileSource,
   getDeploymentSkillDownloadStream,
+  copyUploadToSkill,
 } = require('@librechat/api');
 const {
   Permissions,
@@ -80,7 +81,7 @@ async function saveSkillFileContent({ req, skillId, relativePath, content, mimeT
   const fileId = crypto.randomUUID();
   const filename = basename(relativePath);
   const storageFileName = `${fileId}__${filename}`;
-  const buffer = Buffer.from(content, 'utf8');
+  const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
   const storage = resolveSkillStorage(req, { isImage: mimeType.startsWith('image/') });
   const filepath = await storage.saveBuffer({
     userId: req.user.id,
@@ -344,6 +345,22 @@ const skillToolDeps = {
   canEditSkill,
   grantSkillOwner,
   saveSkillFileContent,
+  saveSkillFileFromUpload: ({ req, skillId, relativePath, sourceFileId }) =>
+    copyUploadToSkill(
+      {
+        req,
+        skillId: String(skillId),
+        relativePath,
+        sourceFileId,
+        tenantId: resolveRequestTenantId(req),
+      },
+      {
+        findFileById: db.findFileById,
+        canEditSkill,
+        getStrategyFunctions,
+        saveContent: saveSkillFileContent,
+      },
+    ),
   listSkillFiles: deploymentSkillMethods.listSkillFiles,
   getStrategyFunctions: getSkillStrategyFunctions,
   batchUploadCodeEnvFiles,

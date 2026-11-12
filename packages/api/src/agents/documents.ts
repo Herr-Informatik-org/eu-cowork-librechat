@@ -3,6 +3,9 @@ import type { LCTool } from '@librechat/agents';
 export const DOCUMENT_TOOL_NAME = 'generate_document';
 
 export const documentInstructions = `Für neue Word-, Excel- und PDF-Dateien verwende generate_document.
+Verwende zuerst den ausdrücklich ausgewählten oder passenden aktiven Dokument-Skill des Benutzers. Seine Inhalts-, Struktur- und Vorlagenvorgaben haben Vorrang vor dem allgemeinen Standarddesign. Lies den Skill und seine benötigten Vorlagendateien; behaupte nie, eine nicht geladene Originalvorlage geprüft zu haben. Datenschutz, Berechtigungen und verbindliche Ausgabeprüfungen bleiben gültig.
+Wenn eine hochgeladene Word-Datei als Skill gespeichert werden soll, sichere auch das unveränderte Original mit create_file(path:"skills/NAME/templates/Vorlage.docx", source_file_id:"DATEI-ID"). Eine reine SKILL.md-Datei ersetzt die Originalvorlage nicht. Nicht verfügbare Bestandteile klar als offen kennzeichnen; den Auftrag dann nicht als vollständig erledigt markieren.
+Ein Ordner oder eine SKILL.md im Code-Arbeitsbereich allein ist noch kein registrierter Benutzer-Skill. Verwende den nativen create_file-Weg unter skills/NAME/ und bestätige die dauerhafte Speicherung nur nach dessen Erfolg.
 Der Server setzt die freigegebenen Schriften, Farben und das Kundenlogo und prüft die exportierten Seiten.
 Das Kundenlogo bleibt standardmässig enthalten. Setze include_logo nur dann auf false, wenn der Nutzer ein Dokument ohne Logo verlangt.
 Erfinde keine Kennzahlen und keine Kurven. Rechenergebnisse über calculations und {{calc:ID}} einfügen.

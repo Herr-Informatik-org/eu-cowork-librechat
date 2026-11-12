@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-12 — Word-Originale privat lesen und in Skills erhalten
+
+- Der Dokumentstandard liest DOCX-Anhänge vor dem Modellaufruf lokal als Text
+  und Formatangaben. Der Datenschutzfilter bleibt aktiv; Originalbytes und Bilder
+  werden nicht als Modellanhang versandt. Fehlende Originale werden klar gemeldet.
+- `create_file` erhält eigene hochgeladene Word-Vorlagen über `source_file_id`
+  unverändert in einem bearbeitbaren Skill. Besitzer, Tenant und Überschreibschutz
+  werden geprüft. `read_file` liest dessen Word-Referenzen ebenfalls lokal.
+- Zugängliche gespeicherte Skills gewinnen bei gleichem Namen vor ausgelieferten
+  Standard-Skills. Die Berechtigungsgrenze und die Katalogfortsetzung bleiben erhalten.
+
 ## 2026-11-12 — Dokumente vor der Ausgabe verbindlich prüfen
 
 - Der Prüfbericht bleibt im Dateischema erhalten. Der echte Mongoose-Speicherpfad

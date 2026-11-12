@@ -335,7 +335,7 @@ describe('createDeploymentSkillMethods', () => {
     ).toEqual(codeEnvRef);
   });
 
-  it('lets deployment skills shadow persisted skills with the same name', async () => {
+  it('prioritizes accessible user skills over deployment defaults with the same name', async () => {
     const root = await makeTempRoot();
     await writeDeploymentSkill(root, {
       skillsDir: 'config/skills',
@@ -347,7 +347,6 @@ describe('createDeploymentSkillMethods', () => {
       env: { [DEPLOYMENT_SKILLS_DIR_ENV]: 'config/skills' },
     });
 
-    const deploymentId = getDeploymentSkillIds()[0];
     const dbId = new Types.ObjectId();
     const otherId = new Types.ObjectId();
     const dbAuthor = new Types.ObjectId();
@@ -408,18 +407,20 @@ describe('createDeploymentSkillMethods', () => {
       preferUserInvocable: true,
     });
     expect(byName).toMatchObject({
-      _id: deploymentId,
+      _id: dbId,
       name: shadowedSkill.name,
-      source: 'deployment',
+      body: shadowedSkill.body,
     });
-    expect(base.getSkillByName).not.toHaveBeenCalled();
+    expect(base.getSkillByName).toHaveBeenCalledWith(shadowedSkill.name, [dbId, otherId], {
+      preferUserInvocable: true,
+    });
 
     const listed = await methods.listSkillsByAccess?.({
       accessibleIds: mergedIds,
       limit: 10,
     });
     expect(listed?.skills.map((skill) => [skill.name, skill._id.toString()]).sort()).toEqual([
-      ['analysis-kit', deploymentId.toString()],
+      ['analysis-kit', dbId.toString()],
       ['db-skill', otherId.toString()],
     ]);
 
@@ -427,18 +428,14 @@ describe('createDeploymentSkillMethods', () => {
       accessibleIds: mergedIds,
       limit: 10,
     });
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy).toHaveBeenNthCalledWith(
-      1,
-      expect.stringContaining('persisted list skill row(s) shadowed'),
-    );
+    expect(warnSpy).not.toHaveBeenCalled();
 
     const alwaysApply = await methods.listAlwaysApplySkills?.({
       accessibleIds: mergedIds,
       limit: 10,
     });
     expect(alwaysApply?.skills.map((skill) => [skill.name, skill._id.toString()]).sort()).toEqual([
-      ['analysis-kit', deploymentId.toString()],
+      ['analysis-kit', dbId.toString()],
       ['db-always', otherId.toString()],
     ]);
 
@@ -446,15 +443,11 @@ describe('createDeploymentSkillMethods', () => {
       accessibleIds: mergedIds,
       limit: 10,
     });
-    expect(warnSpy).toHaveBeenCalledTimes(2);
-    expect(warnSpy).toHaveBeenNthCalledWith(
-      2,
-      expect.stringContaining('persisted always-apply skill row(s) shadowed'),
-    );
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
-  it('preserves pagination when an always-apply DB page only contains shadowed skills', async () => {
+  it('preserves user-defined skills and the cursor across always-apply pages', async () => {
     const root = await makeTempRoot();
     await writeDeploymentSkill(root, {
       skillsDir: 'config/skills',
@@ -475,6 +468,7 @@ describe('createDeploymentSkillMethods', () => {
       name: 'analysis-kit',
       body: 'persisted duplicate body',
       author: dbAuthor,
+      updatedAt: shadowedUpdatedAt,
     };
     const nextSkill = {
       _id: nextId,
@@ -508,7 +502,7 @@ describe('createDeploymentSkillMethods', () => {
       accessibleIds: mergedIds,
       limit: 1,
     });
-    expect(first?.skills).toEqual([]);
+    expect(first?.skills.map((skill) => skill.name)).toEqual(['analysis-kit']);
     expect(first?.has_more).toBe(true);
     expect(first?.after).toBe(shadowedCursor);
 
@@ -599,7 +593,7 @@ describe('createDeploymentSkillMethods', () => {
       accessibleIds: mergedIds,
       limit: 2,
     });
-    expect(first?.skills.map((skill) => skill.name)).toEqual(['db-visible']);
+    expect(first?.skills.map((skill) => skill.name)).toEqual(['analysis-kit', 'db-visible']);
     expect(first?.has_more).toBe(true);
     expect(first?.after).toBe(visibleCursor);
 

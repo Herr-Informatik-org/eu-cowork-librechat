@@ -49,6 +49,7 @@ import { parseFrontmatter } from '../skills/import';
 import { cleanCodeToolOutput } from './cleanup';
 import { primeSkillFiles } from './skillFiles';
 import { markSandboxReady } from './prewarm';
+import { inspectWordTemplate, isWordTemplate } from '~/files/documents/templates';
 
 export interface ToolEndCallbackData {
   output: {
@@ -213,6 +214,12 @@ export interface ToolExecuteOptions {
     bytes: number;
     relativePath: string;
   }>;
+  saveSkillFileFromUpload?: (params: {
+    req: ServerRequest;
+    skillId: Types.ObjectId | string;
+    relativePath: string;
+    sourceFileId: string;
+  }) => Promise<{ bytes: number; relativePath: string }>;
   /** Lists files bundled with a skill (for code env priming) */
   listSkillFiles?: (skillId: Types.ObjectId | string) => Promise<SkillFileRecord[]>;
   /** Storage strategy resolver for skill file streaming */
@@ -2641,11 +2648,21 @@ async function handleCreateFileCall(
   sourceConfigurable?: Record<string, unknown>,
   sandboxContext?: SandboxSessionContext,
 ): AuthoringResult {
-  const args = tc.args as { path?: unknown; content?: unknown; overwrite?: unknown };
+  const args = tc.args as {
+    path?: unknown;
+    content?: unknown;
+    overwrite?: unknown;
+    source_file_id?: unknown;
+  };
   if (typeof args.path !== 'string' || args.path.length === 0) {
     return errorResult(tc, 'path is required');
   }
-  if (typeof args.content !== 'string') {
+  const copyingUpload = typeof args.source_file_id === 'string';
+  if (args.source_file_id !== undefined && !copyingUpload)
+    return errorResult(tc, 'source_file_id muss eine gültige Datei-ID sein.');
+  if (copyingUpload && args.content !== undefined)
+    return errorResult(tc, 'Nur content oder source_file_id übergeben, nicht beides.');
+  if (!copyingUpload && typeof args.content !== 'string') {
     return errorResult(
       tc,
       'content is required. If the file is large, your response may have been cut off at the ' +
@@ -2653,12 +2670,20 @@ async function handleCreateFileCall(
         'sections (templates, schemas, long docs) into separate files written in their own calls.',
     );
   }
-  if (Buffer.byteLength(args.content, 'utf8') > MAX_AUTHORING_BYTES) {
+  if (
+    typeof args.content === 'string' &&
+    Buffer.byteLength(args.content, 'utf8') > MAX_AUTHORING_BYTES
+  ) {
     return errorResult(tc, `content exceeds ${MAX_AUTHORING_BYTES} byte limit`);
   }
 
   const overwrite = args.overwrite === true;
   if (!args.path.startsWith(SKILL_FILE_PREFIX)) {
+    if (copyingUpload)
+      return errorResult(
+        tc,
+        'Originalvorlagen können nur in einem freigegebenen Skill gespeichert werden.',
+      );
     if (mergedConfigurable?.codeEnvAvailable !== true) {
       return errorResult(
         tc,
@@ -2670,7 +2695,7 @@ async function handleCreateFileCall(
       options,
       req,
       filePath: args.path,
-      content: args.content,
+      content: args.content as string,
       overwrite,
       sandboxContext,
     });
@@ -2699,6 +2724,11 @@ async function handleCreateFileCall(
     return hiddenDenied;
   }
   if (parsed.relativePath === SKILL_MD) {
+    if (copyingUpload)
+      return errorResult(
+        tc,
+        'SKILL.md benötigt Text. Originalvorlage zusätzlich unter templates/ speichern.',
+      );
     if (skill && !overwrite) {
       return errorResult(
         tc,
@@ -2713,12 +2743,43 @@ async function handleCreateFileCall(
       sourceConfigurable,
       skill,
       skillName: parsed.skillName,
-      content: args.content,
+      content: args.content as string,
     });
   }
 
   if (!skill) {
     return errorResult(tc, `Skill "${parsed.skillName}" not found or not accessible.`);
+  }
+
+  if (copyingUpload) {
+    if (!req || !options.saveSkillFileFromUpload || !options.getSkillFileByPath)
+      return errorResult(tc, 'Speichern von Originalvorlagen ist nicht eingerichtet.');
+    const editDenied = await ensureCanEditSkill(tc, options, req, skill._id);
+    if (editDenied) return editDenied;
+    const staleDenied = await ensureBundledSkillVersionCurrent({
+      tc,
+      options,
+      skill,
+      displayPath: parsed.displayPath,
+    });
+    if (staleDenied) return staleDenied;
+    const current = await options.getSkillFileByPath(skill._id, parsed.relativePath);
+    if (current && !overwrite)
+      return errorResult(
+        tc,
+        'Vorlagendatei ist bereits vorhanden. Zum Ersetzen overwrite: true übergeben.',
+      );
+    const saved = await options.saveSkillFileFromUpload({
+      req,
+      skillId: skill._id,
+      relativePath: parsed.relativePath,
+      sourceFileId: args.source_file_id as string,
+    });
+    return successResult(
+      tc,
+      'Originalvorlage unverändert und lokal geprüft im Skill gespeichert.',
+      { path: parsed.displayPath, bytes_written: saved.bytes, created: !current },
+    );
   }
 
   const current = await inspectBundledSkillFileForCreate({
@@ -2740,7 +2801,7 @@ async function handleCreateFileCall(
     skill,
     relativePath: parsed.relativePath,
     displayPath: parsed.displayPath,
-    content: args.content,
+    content: args.content as string,
     oldContent: current.status === 'present' ? current.oldContent : undefined,
     created: current.status === 'missing',
   });
@@ -3171,7 +3232,7 @@ async function handleReadFileCall(
   }
 
   // Known binary — serve images as artifacts, others as metadata
-  if (file.isBinary === true) {
+  if (file.isBinary === true && !isWordTemplate(relativePath, file.mimeType)) {
     if (IMAGE_MIMES.has(file.mimeType) && file.bytes <= MAX_BINARY_BYTES) {
       // Stream and return as image artifact (handled below in stream path)
     } else {
@@ -3184,7 +3245,12 @@ async function handleReadFileCall(
   }
 
   // Cached text content
-  if (file.isBinary !== true && file.content != null && file.content !== '') {
+  if (
+    !isWordTemplate(relativePath, file.mimeType) &&
+    file.isBinary !== true &&
+    file.content != null &&
+    file.content !== ''
+  ) {
     return {
       toolCallId: tc.id,
       status: 'success',
@@ -3194,7 +3260,11 @@ async function handleReadFileCall(
 
   // Early size check from DB metadata before streaming
   const isImage = IMAGE_MIMES.has(file.mimeType);
-  if (!isImage && file.bytes > MAX_READABLE_BYTES) {
+  const isWord = isWordTemplate(relativePath, file.mimeType);
+  if (isWord && file.bytes > 10 * 1024 * 1024) {
+    return errorResult(tc, 'Word-Vorlage ist grösser als 10 MiB. Vorlage aufteilen.');
+  }
+  if (!isImage && !isWord && file.bytes > MAX_READABLE_BYTES) {
     return {
       toolCallId: tc.id,
       status: 'success',
@@ -3234,7 +3304,7 @@ async function handleReadFileCall(
     const chunks: Uint8Array[] = [];
     // Use the larger binary limit as streaming cap; cheaper type-specific
     // checks happen after binary detection on the assembled buffer.
-    const streamLimit = MAX_BINARY_BYTES;
+    const streamLimit = isWord ? 10 * 1024 * 1024 : MAX_BINARY_BYTES;
     let streamedBytes = 0;
     for await (const chunk of stream as AsyncIterable<Uint8Array>) {
       streamedBytes += chunk.byteLength;
@@ -3255,6 +3325,16 @@ async function handleReadFileCall(
       chunks.push(chunk);
     }
     const buffer = Buffer.concat(chunks);
+
+    if (isWord) {
+      return {
+        toolCallId: tc.id,
+        status: 'success',
+        content:
+          'Word-Originalvorlage lokal gelesen; Bilder und Binärdaten bleiben privat. Formatangaben und Dokumenttext:\n' +
+          (await inspectWordTemplate(buffer)),
+      };
+    }
 
     // Binary detection on first 8KB
     const checkLen = Math.min(buffer.length, 8192);

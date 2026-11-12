@@ -182,10 +182,6 @@ export type DeploymentSkillBaseMethods = {
 };
 
 type Cursor = { updatedAt: Date; _id: Types.ObjectId };
-type CollisionFilterResult<T> = {
-  rows: T[];
-};
-
 type LoadDeploymentSkillsOptions = {
   projectRoot?: string;
   env?: NodeJS.ProcessEnv;
@@ -330,7 +326,6 @@ export class DeploymentSkillRegistry {
 }
 
 let registry = new DeploymentSkillRegistry(null, []);
-const warnedDeploymentNameCollisions = new Set<string>();
 
 export function getDeploymentSkillRegistry(): DeploymentSkillRegistry {
   return registry;
@@ -452,6 +447,18 @@ export async function loadDeploymentSkillsFromDirectory(
 export function createDeploymentSkillMethods<T extends DeploymentSkillBaseMethods>(
   base: T,
 ): T & Required<Pick<DeploymentSkillBaseMethods, 'getSkillById'>> {
+  const persistedNames = async (ids: Types.ObjectId[], pageNames: string[]) => {
+    const names = new Set(pageNames);
+    const databaseIds = stripDeploymentIds(ids);
+    if (!base.getSkillByName || databaseIds.length === 0) return names;
+    await Promise.all(
+      Array.from(registry.namesByAccess(ids)).map(async (name) => {
+        const skill = await base.getSkillByName?.(name, databaseIds);
+        if (skill && hasAccessibleId(databaseIds, skill._id)) names.add(name);
+      }),
+    );
+    return names;
+  };
   const methods = {
     ...base,
     getSkillById: async (id: SkillId): Promise<SkillDetailRow | null> => {
@@ -466,14 +473,14 @@ export function createDeploymentSkillMethods<T extends DeploymentSkillBaseMethod
       accessibleIds: Types.ObjectId[],
       options?: SkillLookupOptions,
     ): Promise<SkillDetailRow | null> => {
+      const databaseIds = stripDeploymentIds(accessibleIds);
+      const dbSkill =
+        base.getSkillByName && databaseIds.length > 0
+          ? await base.getSkillByName(name, databaseIds, options)
+          : null;
+      if (dbSkill && hasAccessibleId(databaseIds, dbSkill._id)) return dbSkill;
       const deployment = registry.getByName(name, accessibleIds, options);
-      if (deployment) {
-        return toSkillDetailRow(deployment);
-      }
-      const dbSkill = base.getSkillByName
-        ? await base.getSkillByName(name, stripDeploymentIds(accessibleIds), options)
-        : null;
-      return dbSkill;
+      return deployment ? toSkillDetailRow(deployment) : null;
     },
     listSkillsByAccess: async (
       params: ListSkillsByAccessParams,
@@ -484,17 +491,22 @@ export function createDeploymentSkillMethods<T extends DeploymentSkillBaseMethod
             accessibleIds: stripDeploymentIds(params.accessibleIds),
           })
         : { skills: [], has_more: false, after: null };
-      const deploymentNames = registry.namesByAccess(params.accessibleIds);
-      const filteredDb = filterDeploymentNameCollisions(dbResult.skills, deploymentNames, 'list');
+      const customNames = await persistedNames(
+        params.accessibleIds,
+        dbResult.skills.map((row) => row.name),
+      );
       const dbPageBoundary = getDbPageBoundary(dbResult);
       const deploymentRows = limitRowsToDbPageBoundary(
-        registry.listByAccess(params).map(toSkillSummaryRow),
+        registry
+          .listByAccess(params)
+          .filter((row) => !customNames.has(row.name))
+          .map(toSkillSummaryRow),
         dbPageBoundary,
       );
       return mergeSkillPage({
         dbResult: {
           ...dbResult,
-          skills: filteredDb.rows,
+          skills: dbResult.skills,
         },
         dbPageBoundary,
         deploymentRows,
@@ -510,21 +522,22 @@ export function createDeploymentSkillMethods<T extends DeploymentSkillBaseMethod
             accessibleIds: stripDeploymentIds(params.accessibleIds),
           })
         : { skills: [], has_more: false, after: null };
-      const deploymentNames = registry.namesByAccess(params.accessibleIds);
-      const filteredDb = filterDeploymentNameCollisions(
-        dbResult.skills,
-        deploymentNames,
-        'always-apply',
+      const customNames = await persistedNames(
+        params.accessibleIds,
+        dbResult.skills.map((row) => row.name),
       );
       const dbPageBoundary = getDbPageBoundary(dbResult);
       return mergeAlwaysApplyPage({
         dbResult: {
           ...dbResult,
-          skills: filteredDb.rows,
+          skills: dbResult.skills,
         },
         dbPageBoundary,
         deploymentRows: limitRowsToDbPageBoundary(
-          registry.listAlwaysApply(params).map(toAlwaysApplyRow),
+          registry
+            .listAlwaysApply(params)
+            .filter((row) => !customNames.has(row.name))
+            .map(toAlwaysApplyRow),
           dbPageBoundary,
         ),
         limit: params.limit,
@@ -958,38 +971,6 @@ function stripDeploymentIds(ids: Types.ObjectId[]): Types.ObjectId[] {
 function hasAccessibleId(ids: Types.ObjectId[], skillId: Types.ObjectId): boolean {
   const key = skillId.toString();
   return ids.some((id) => id.toString() === key);
-}
-
-function filterDeploymentNameCollisions<
-  T extends { name: string } & Pick<SkillSummaryRow, '_id' | 'updatedAt'>,
->(rows: T[], deploymentNames: Set<string>, context: string): CollisionFilterResult<T> {
-  if (rows.length === 0 || deploymentNames.size === 0) {
-    return { rows };
-  }
-  const hiddenNames = new Set<string>();
-  const filtered = rows.filter((row) => {
-    if (!deploymentNames.has(row.name)) {
-      return true;
-    }
-    hiddenNames.add(row.name);
-    return false;
-  });
-  if (hiddenNames.size > 0) {
-    const unwarnedNames = Array.from(hiddenNames).filter((name) => {
-      const key = `${context}:${name}`;
-      if (warnedDeploymentNameCollisions.has(key)) {
-        return false;
-      }
-      warnedDeploymentNameCollisions.add(key);
-      return true;
-    });
-    if (unwarnedNames.length > 0) {
-      logger.warn(
-        `[deploymentSkills] Hid persisted ${context} skill row(s) shadowed by deployment skill name(s): ${unwarnedNames.join(', ')}`,
-      );
-    }
-  }
-  return { rows: filtered };
 }
 
 function compareBySkillCursor(

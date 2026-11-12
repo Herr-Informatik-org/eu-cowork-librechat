@@ -7,6 +7,12 @@ import type {
   ToolCallRequest,
 } from '@librechat/agents';
 import { createToolExecuteHandler, ToolExecuteOptions } from './handlers';
+import { inspectWordTemplate } from '~/files/documents/templates';
+
+jest.mock('~/files/documents/templates', () => ({
+  ...jest.requireActual('~/files/documents/templates'),
+  inspectWordTemplate: jest.fn(async () => '{"format":"docx","styles":[{"name":"Normal"}]}'),
+}));
 
 function createMockTool(
   name: string,
@@ -1171,6 +1177,78 @@ describe('createToolExecuteHandler', () => {
         ...params,
       });
     }
+
+    it('retains an uploaded original template without inventing text contents', async () => {
+      const skill = {
+        _id: SKILL_ID,
+        name: 'personal-note',
+        body: '# Note',
+        version: 1,
+        fileCount: 0,
+      };
+      const saveSkillFileFromUpload = jest.fn(async () => ({
+        bytes: 1234,
+        relativePath: 'templates/Vorlage.docx',
+      }));
+      const handler = makeAuthoringHandler({
+        getSkillByName: jest.fn(async () => skill),
+        getSkillFileByPath: jest.fn(async () => null),
+        saveSkillFileFromUpload,
+      });
+      const [result] = await invokeHandler(handler, [
+        {
+          id: 'retain-template',
+          name: 'create_file',
+          args: {
+            path: 'skills/personal-note/templates/Vorlage.docx',
+            source_file_id: 'uploaded-docx',
+          },
+        },
+      ]);
+      expect(result.status).toBe('success');
+      expect(saveSkillFileFromUpload).toHaveBeenCalledWith({
+        req,
+        skillId: SKILL_ID,
+        relativePath: 'templates/Vorlage.docx',
+        sourceFileId: 'uploaded-docx',
+      });
+    });
+
+    it('does not overwrite an existing original or accept conflicting content', async () => {
+      const skill = {
+        _id: SKILL_ID,
+        name: 'personal-note',
+        body: '# Note',
+        version: 1,
+        fileCount: 1,
+      };
+      const saveSkillFileFromUpload = jest.fn();
+      const handler = makeAuthoringHandler({
+        getSkillByName: jest.fn(async () => skill),
+        getSkillFileByPath: jest.fn(async () => ({
+          filepath: '/private/existing',
+          bytes: 10,
+          mimeType: 'application/octet-stream',
+          source: 'local',
+        })),
+        saveSkillFileFromUpload,
+      });
+      for (const extra of [{}, { content: 'not a binary replacement' }]) {
+        const [result] = await invokeHandler(handler, [
+          {
+            id: 'retain-conflict',
+            name: 'create_file',
+            args: {
+              path: 'skills/personal-note/templates/Vorlage.docx',
+              source_file_id: 'uploaded-docx',
+              ...extra,
+            },
+          },
+        ]);
+        expect(result.status).toBe('error');
+      }
+      expect(saveSkillFileFromUpload).not.toHaveBeenCalled();
+    });
 
     it('creates a new SKILL.md through create_file', async () => {
       const createSkill = jest.fn(async () => ({
@@ -2678,6 +2756,46 @@ describe('createToolExecuteHandler', () => {
       expect(result.content).toContain('Recovered Body');
     });
 
+    it('reads a private Word skill reference locally including its format metadata', async () => {
+      const req = { user: { id: 'user-1' } } as never;
+      const data = Buffer.from('synthetic-original-docx');
+      const handler = createToolExecuteHandler({
+        loadTools: jest.fn(async () => ({
+          loadedTools: [],
+          configurable: {
+            req,
+            accessibleSkillIds: skillsInScope(),
+            activeSkillNames: new Set(['personal-note']),
+          },
+        })),
+        getSkillByName: jest.fn(async () => ({
+          _id: new (jest.requireActual('mongoose').Types.ObjectId)(),
+          name: 'personal-note',
+          body: '# Note',
+          version: 1,
+          fileCount: 1,
+        })),
+        getSkillFileByPath: jest.fn(async () => ({
+          isBinary: true,
+          source: 'local',
+          mimeType: 'application/octet-stream',
+          bytes: data.length,
+          filepath: '/private/template.docx',
+        })),
+        getStrategyFunctions: () => ({ getDownloadStream: async () => Readable.from([data]) }),
+      });
+      const [result] = await invokeHandler(handler, [
+        {
+          id: 'read-private-template',
+          name: Constants.READ_FILE,
+          args: { path: 'skills/personal-note/templates/Vorlage.docx' },
+        },
+      ]);
+      expect(result.status).toBe('success');
+      expect(result.content).toContain('Word-Originalvorlage lokal gelesen');
+      expect(inspectWordTemplate).toHaveBeenCalledWith(data);
+    });
+
     it('points the bash fallback at the skills/ mount for a binary skill file (#13961)', async () => {
       /**
        * Bundled skill files are primed into the sandbox under the
@@ -2696,11 +2814,11 @@ describe('createToolExecuteHandler', () => {
       const getSkillFileByPath = jest.fn(async () => ({
         content: '',
         isBinary: true,
-        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        mimeType: 'application/pdf',
         bytes: 4096,
-        filepath: '/storage/brand-skill/references/guide.docx',
+        filepath: '/storage/brand-skill/references/guide.pdf',
         source: 'local',
-        relativePath: 'references/guide.docx',
+        relativePath: 'references/guide.pdf',
       }));
       const handler = createToolExecuteHandler({
         loadTools: jest.fn(async () => ({
@@ -2719,13 +2837,13 @@ describe('createToolExecuteHandler', () => {
         {
           id: 'call_binary_skill_read',
           name: Constants.READ_FILE,
-          args: { path: 'skills/brand-skill/references/guide.docx' },
+          args: { path: 'skills/brand-skill/references/guide.pdf' },
         },
       ]);
 
       expect(result.status).toBe('success');
       expect(result.content).toContain(
-        'Use bash to process: /mnt/data/skills/brand-skill/references/guide.docx',
+        'Use bash to process: /mnt/data/skills/brand-skill/references/guide.pdf',
       );
     });
 
@@ -2746,11 +2864,11 @@ describe('createToolExecuteHandler', () => {
       const getSkillFileByPath = jest.fn(async () => ({
         content: '',
         isBinary: true,
-        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        mimeType: 'application/pdf',
         bytes: 4096,
-        filepath: '/storage/brand-skill/references/guide.docx',
+        filepath: '/storage/brand-skill/references/guide.pdf',
         source: 'local',
-        relativePath: 'references/guide.docx',
+        relativePath: 'references/guide.pdf',
       }));
       const handler = createToolExecuteHandler({
         loadTools: jest.fn(async () => ({
@@ -2769,13 +2887,13 @@ describe('createToolExecuteHandler', () => {
         {
           id: 'call_binary_skill_read_implicit',
           name: Constants.READ_FILE,
-          args: { path: 'brand-skill/references/guide.docx' },
+          args: { path: 'brand-skill/references/guide.pdf' },
         },
       ]);
 
       expect(result.status).toBe('success');
-      expect(result.content).toContain('/mnt/data/skills/brand-skill/references/guide.docx');
-      expect(result.content).not.toContain('/mnt/data/brand-skill/references/guide.docx');
+      expect(result.content).toContain('/mnt/data/skills/brand-skill/references/guide.pdf');
+      expect(result.content).not.toContain('/mnt/data/brand-skill/references/guide.pdf');
     });
 
     it('routes through sandbox when skills are not effectively enabled (empty accessibleSkillIds)', async () => {

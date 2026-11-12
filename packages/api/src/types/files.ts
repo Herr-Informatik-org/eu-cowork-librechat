@@ -110,6 +110,7 @@ export interface BedrockDocumentBlock {
 }
 
 export type DocumentBlock =
+  | { type: 'text'; text: string }
   | AnthropicDocumentBlock
   | GoogleDocumentBlock
   | OpenAIFileBlock
