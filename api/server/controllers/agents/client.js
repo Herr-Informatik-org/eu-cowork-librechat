@@ -1184,6 +1184,8 @@ class AgentClient extends BaseClient {
        */
       const needsCanonicalTokenCount =
         !hasDbTokenCount ||
+        (Array.isArray(message.documents) &&
+          message.documents.some((part) => part?.type === 'text')) ||
         (this.isVisionModel && (message.image_urls || message.files)) ||
         (Array.isArray(message.quotes) && message.quotes.length > 0);
 

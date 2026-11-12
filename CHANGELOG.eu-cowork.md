@@ -10,6 +10,8 @@
   werden geprüft. `read_file` liest dessen Word-Referenzen ebenfalls lokal.
 - Zugängliche gespeicherte Skills gewinnen bei gleichem Namen vor ausgelieferten
   Standard-Skills. Die Berechtigungsgrenze und die Katalogfortsetzung bleiben erhalten.
+- Ausgelesener Word-Text wird auch bei vorhandenen älteren Tokenzählungen neu
+  mitgezählt. Das Kontextbudget bleibt dadurch auch bei Modellen ohne Bildfunktion korrekt.
 
 ## 2026-11-12 — Dokumente vor der Ausgabe verbindlich prüfen
 

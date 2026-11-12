@@ -2409,6 +2409,40 @@ describe('AgentClient - titleConvo', () => {
       );
     });
 
+    it('recounts locally read Word text even when a non-vision model has an old cached count', async () => {
+      const { countFormattedMessageTokens } = require('@librechat/api');
+      const word = makeUploadedFile(
+        'word-reference',
+        'Vorlage.docx',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      );
+      client.options.attachments = [word];
+      client.isVisionModel = false;
+      client.addDocuments = jest.fn(async (message) => {
+        message.documents = [{ type: 'text', text: 'Full locally read Word text' }];
+        return [];
+      });
+      countFormattedMessageTokens.mockImplementation(({ content }) =>
+        JSON.stringify(content).includes('Full locally read Word text') ? 777 : 20,
+      );
+      const result = await client.buildMessages(
+        [
+          {
+            messageId: 'word-msg',
+            parentMessageId: null,
+            sender: 'User',
+            text: 'Read the template.',
+            isCreatedByUser: true,
+            tokenCount: 2,
+          },
+        ],
+        'word-msg',
+        {},
+      );
+      expect(result.tokenCountMap['word-msg']).toBe(777);
+      expect(client.indexTokenCountMap[0]).toBe(777);
+    });
+
     it('persists canonical token counts while counting request file context for the prompt', async () => {
       const { countFormattedMessageTokens } = require('@librechat/api');
       const currentFile = makeTextFile('current-file', 'current.txt', 'Current turn file body');
