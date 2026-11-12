@@ -1,5 +1,18 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-12 — Anmeldehärtung und reduzierte Logintexte
+
+- Fehlgeschlagene Passwortanmeldungen liefern denselben Fehlertext. Auch fehlende
+  Konten und Konten ohne lokales Passwort durchlaufen bcrypt-Arbeit, ohne damit
+  eine Anmeldung zu erlauben.
+- Der gemeinsame Prüfkern unterstützt optional serverseitige Browsersitzungen.
+  Native Passwort-, Authenticator-, Passkey/FIDO2- und Recovery-Abläufe bleiben erhalten.
+- Die Anmeldeseite zeigt nur Logo, Eingaben und Aktionen; zusätzliche Begrüssungs-
+  und Fussnotentexte entfallen. MFA-Einrichtungs- und Fehlerhinweise bleiben sichtbar.
+- Regressionen belegen die bereits bestehende Entwertung alter Access-/Refresh-
+  Nachweise nach Passwortänderung sowie den Erhalt vorhandener Faktoren.
+
+
 ## 2026-11-12 — Kisuno-Anmeldung und sichere Wiederherstellung
 
 - Einheitliche Anmeldeseite mit Kisuno-Logo, Blauverlauf, hellem und dunklem

@@ -44,11 +44,18 @@ jest.mock('@librechat/api', () => ({
 const openIdClient = require('openid-client');
 const jwt = require('jsonwebtoken');
 const { logger } = require('@librechat/data-schemas');
-const { isEnabled, findOpenIDUser, buildOpenIDRefreshParams } = require('@librechat/api');
+const {
+  isEnabled,
+  findOpenIDUser,
+  buildOpenIDRefreshParams,
+  requiredSecurity,
+  validAssurance,
+} = require('@librechat/api');
 const {
   graphTokenController,
   refreshController,
   registrationController,
+  resetPasswordController,
 } = require('./AuthController');
 const { getGraphApiToken } = require('~/server/services/GraphTokenService');
 const {
@@ -57,8 +64,41 @@ const {
   setAuthTokens,
 } = require('~/server/services/AuthService');
 const { getOpenIdConfig, getOpenIdEmail } = require('~/strategies');
-const { getUserById, findSession, updateUser, deleteTokens } = require('~/models');
-const { registerUser } = require('~/server/services/AuthService');
+const {
+  getUserById,
+  findSession,
+  updateUser,
+  deleteTokens,
+  deleteAllUserSessions,
+} = require('~/models');
+const { registerUser, resetPassword } = require('~/server/services/AuthService');
+
+describe('password reset session revocation', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('deletes refresh sessions only after a successful password update', async () => {
+    resetPassword.mockResolvedValue({ message: 'Password reset was successful' });
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+
+    await resetPasswordController({ body: { userId: 'reset-user' } }, res);
+
+    expect(deleteAllUserSessions).toHaveBeenCalledWith({ userId: 'reset-user' });
+    expect(resetPassword.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteAllUserSessions.mock.invocationCallOrder[0],
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('preserves existing sessions when the reset token is invalid', async () => {
+    resetPassword.mockResolvedValue(new Error('Invalid reset token'));
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+
+    await resetPasswordController({ body: { userId: 'reset-user' } }, res);
+
+    expect(deleteAllUserSessions).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+});
 
 describe('invited registration', () => {
   const response = () => {
@@ -783,6 +823,7 @@ describe('refreshController – LibreChat path', () => {
     jest.clearAllMocks();
     process.env.JWT_REFRESH_SECRET = refreshSecret;
     process.env.NODE_ENV = 'test';
+    requiredSecurity.mockReturnValue(false);
     setAuthTokens.mockResolvedValue('local-app-token');
     findSession.mockResolvedValue({ expiration: new Date(Date.now() + 60_000) });
 
@@ -799,6 +840,28 @@ describe('refreshController – LibreChat path', () => {
       send: jest.fn().mockReturnThis(),
       redirect: jest.fn(),
     };
+  });
+
+  afterEach(() => requiredSecurity.mockReturnValue(false));
+
+  it('rejects a refresh session whose assurance predates a password change', async () => {
+    requiredSecurity.mockReturnValue(true);
+    validAssurance.mockReturnValue(false);
+    const user = { _id: 'local-user-id', securityVersion: 5 };
+    const assurance = { method: 'passkey', verifiedAt: Date.now(), version: 4 };
+    getUserById.mockResolvedValue(user);
+    findSession.mockResolvedValue({
+      expiration: new Date(Date.now() + 60_000),
+      securityAssurance: assurance,
+    });
+    res.json = jest.fn();
+
+    await refreshController(req, res);
+
+    expect(validAssurance).toHaveBeenCalledWith(assurance, { ...user, id: 'local-user-id' });
+    expect(setAuthTokens).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'MFA_REQUIRED' }));
   });
 
   afterAll(() => {

@@ -25,12 +25,16 @@ const { getUserById, updateUser } = require('~/models');
 
 function invokeVerify(payload) {
   return new Promise((resolve, reject) => {
-    capturedVerifyCallback({ originalUrl: '/api/user', method: 'GET' }, payload, (err, user, info) => {
-      if (err) {
-        return reject(err);
-      }
-      resolve({ user, info });
-    });
+    capturedVerifyCallback(
+      { originalUrl: '/api/user', method: 'GET' },
+      payload,
+      (err, user, info) => {
+        if (err) {
+          return reject(err);
+        }
+        resolve({ user, info });
+      },
+    );
   });
 }
 
@@ -71,5 +75,26 @@ describe('jwtStrategy', () => {
     const { user } = await invokeVerify({ id: 'missing' });
 
     expect(user).toBe(false);
+  });
+
+  it('rejects access assurance from before a password change while accepting the current version', async () => {
+    const previousPolicy = process.env.ENFORCE_TWO_FACTOR_AUTHENTICATION;
+    process.env.ENFORCE_TWO_FACTOR_AUTHENTICATION = 'true';
+    try {
+      getUserById.mockResolvedValue({
+        _id: { toString: () => 'reset-user' },
+        role: SystemRoles.USER,
+        securityVersion: 5,
+      });
+      const proof = { method: 'totp', verifiedAt: Date.now(), version: 4 };
+
+      expect((await invokeVerify({ id: 'reset-user', mfa: proof })).user).toBe(false);
+      expect(
+        (await invokeVerify({ id: 'reset-user', mfa: { ...proof, version: 5 } })).user.id,
+      ).toBe('reset-user');
+    } finally {
+      if (previousPolicy === undefined) delete process.env.ENFORCE_TWO_FACTOR_AUTHENTICATION;
+      else process.env.ENFORCE_TWO_FACTOR_AUTHENTICATION = previousPolicy;
+    }
   });
 });
