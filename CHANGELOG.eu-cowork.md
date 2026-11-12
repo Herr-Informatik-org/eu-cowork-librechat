@@ -2,6 +2,9 @@
 
 ## 2026-11-12 — Dokumente vor der Ausgabe verbindlich prüfen
 
+- Der Prüfbericht bleibt im Dateischema erhalten. Der echte Mongoose-Speicherpfad
+  ist gegen einen stillen Verlust der Metadaten abgesichert.
+
 - Ein natives Dokumentwerkzeug erstellt Word, Excel und PDF über den
   tenant-eigenen Renderer. Kundenlogos sind standardmässig enthalten und
   können im Auftrag abgewählt werden.

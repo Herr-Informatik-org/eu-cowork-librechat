@@ -118,6 +118,11 @@ const file: Schema<IMongoFile> = new Schema(
     width: Number,
     height: Number,
     metadata: {
+      /** Server attestation for the exact bytes accepted by the document renderer. */
+      documentQuality: {
+        type: Schema.Types.Mixed,
+        default: undefined,
+      },
       codeEnvRef: {
         type: new Schema(
           {

@@ -63,6 +63,8 @@ export interface IMongoFile extends Omit<Document, 'model'> {
   width?: number;
   height?: number;
   metadata?: {
+    /** Server-verified export report, retained with the private file. */
+    documentQuality?: Record<string, unknown>;
     /**
      * Code-environment cache pointer for files re-uploadable to
      * codeapi (chat attachments, agent tool resources, code-output

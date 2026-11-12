@@ -152,6 +152,8 @@ export type TFile = {
    */
   previewError?: string;
   metadata?: {
+    /** Server-verified export report for the stored bytes. */
+    documentQuality?: Record<string, unknown>;
     fileIdentifier?: string;
     /**
      * Structured form of `fileIdentifier`. Persisted alongside the
