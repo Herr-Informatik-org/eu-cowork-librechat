@@ -20,3 +20,7 @@ export function artifactDeepLink(href: string, artifactId: string): string {
   url.searchParams.set('artifactView', '1');
   return url.toString();
 }
+
+export function isHtmlArtifact(type: string | undefined): boolean {
+  return type === 'text/html' || type === 'application/vnd.code-html';
+}

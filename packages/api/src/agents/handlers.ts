@@ -4188,7 +4188,7 @@ export function createToolExecuteHandler(options: ToolExecuteOptions): EventHand
                           mergedConfigurable,
                           options,
                           req,
-                          sourceConfigurable,
+                          sourceConfigurable ?? loadedConfigurable,
                           sandboxContext,
                         );
                       } else if (tc.name === EDIT_FILE_TOOL_NAME && isFileAuthoringCall) {

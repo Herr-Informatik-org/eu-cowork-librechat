@@ -1178,6 +1178,76 @@ describe('createToolExecuteHandler', () => {
       });
     }
 
+    it('retains new skill scope when only loader configuration is available', async () => {
+      const { Types } = jest.requireActual<typeof import('mongoose')>('mongoose');
+      const skills = new Map<
+        string,
+        { _id: typeof SKILL_ID; name: string; body: string; version: number; fileCount: number }
+      >();
+      const configurable = {
+        req,
+        accessibleSkillIds: [SKILL_ID],
+        activeSkillNames: new Set(['existing-skill']),
+        skillAuthoringAvailable: true,
+        fileAuthoringToolNames: new Set(['create_file', 'edit_file']),
+      };
+      const handler = createToolExecuteHandler({
+        loadTools: async () => ({ loadedTools: [], configurable }),
+        canCreateSkill: async () => true,
+        canEditSkill: async () => true,
+        grantSkillOwner: async () => undefined,
+        createSkill: async (data) => {
+          const skill = {
+            _id: new Types.ObjectId(),
+            name: data.name,
+            body: data.body,
+            version: 1,
+            fileCount: 0,
+          };
+          skills.set(skill.name, skill);
+          return { skill };
+        },
+        getAuthorSkillByName: async ({ name }) => skills.get(name) ?? null,
+        getSkillByName: async (name, ids) => {
+          const skill = skills.get(name);
+          return skill && ids.some((id) => String(id) === String(skill._id)) ? skill : null;
+        },
+        getSkillFileByPath: async () => null,
+        saveSkillFileContent: async ({ content, relativePath }) => ({
+          bytes: Buffer.byteLength(content),
+          relativePath,
+        }),
+      });
+      for (const name of ['first-owned-skill', 'second-owned-skill']) {
+        const [created] = await invokeHandler(handler, [
+          {
+            id: name,
+            name: 'create_file',
+            args: {
+              path: 'skills/' + name + '/SKILL.md',
+              content:
+                '---\nname: ' +
+                name +
+                '\ndescription: Dieser eigene Skill verwendet bestätigte Referenzdateien.\n---\n\nNur geprüfte Fakten verwenden.',
+            },
+          },
+        ]);
+        expect(created.status).toBe('success');
+      }
+      const [written] = await invokeHandler(handler, [
+        {
+          id: 'reference',
+          name: 'create_file',
+          args: {
+            path: 'skills/second-owned-skill/references/guide.md',
+            content: 'Verbindliche Referenz.',
+          },
+        },
+      ]);
+      expect(written.status).toBe('success');
+      expect(configurable.activeSkillNames.has('second-owned-skill')).toBe(true);
+    });
+
     it('can read a package built earlier in the same request', async () => {
       const authored = {
         _id: SKILL_ID,

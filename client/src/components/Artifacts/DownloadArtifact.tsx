@@ -1,4 +1,4 @@
-import { interactiveHtmlDocument } from '~/utils/interactiveHtml';
+import { interactiveHtmlDocument, isHtmlArtifact } from '~/utils/interactiveHtml';
 import React, { useState } from 'react';
 import { Button } from '@librechat/client';
 import { Download, CircleCheckBig } from 'lucide-react';
@@ -54,10 +54,9 @@ const DownloadArtifact = ({ artifact }: { artifact: Artifact }) => {
 
   const downloadContent = () => {
     const source = currentCode ?? artifact.content ?? '';
-    const content =
-      artifact.type === 'text/html'
-        ? interactiveHtmlDocument(source, localize('com_ui_artifact_connection_required'))
-        : source;
+    const content = isHtmlArtifact(artifact.type)
+      ? interactiveHtmlDocument(source, localize('com_ui_artifact_connection_required'))
+      : source;
     if (!content) {
       return;
     }

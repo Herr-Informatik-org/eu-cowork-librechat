@@ -1,5 +1,18 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-12 — Keine stillschweigende externe Artefaktverarbeitung
+
+- Ohne ausdrücklich konfigurierte Bundleradresse wird kein Quelltext an den
+  bisherigen externen Standarddienst übergeben. HTML und SVG erhalten die
+  interne isolierte Vorschau; Quelltexte anderer Formate bleiben erhalten.
+- Neue interaktive Darstellungen verwenden standardmässig HTML mit lokalen
+  SVG-/Canvas-Grafiken. Ein freigegebener eigener Bundler bleibt konfigurierbar.
+
+## 2026-11-12 — Mehrere Skills im selben Chat vervollständigen
+
+- Nach mehreren Neuanlagen bleiben die eigenen Skills im selben Auftrag für
+  ihre Referenzdateien erreichbar. Rechte und Mandantengrenzen bleiben erhalten.
+
 ## 2026-11-12 — Vorschau vor fehlenden Sicherheitsheadern schützen
 
 - Die interaktive Vorschau übergibt Inhalte erst nach Prüfung der verbindlichen
