@@ -209,6 +209,27 @@ export function createAccessRoleMethods(mongoose: typeof import('mongoose')): {
         permBits: RoleBits.OWNER,
       },
       {
+        accessRoleId: AccessRoleIds.NOTEBOOK_VIEWER,
+        name: 'com_ui_role_viewer',
+        description: 'com_ui_role_viewer_desc',
+        resourceType: ResourceType.NOTEBOOK,
+        permBits: RoleBits.VIEWER,
+      },
+      {
+        accessRoleId: AccessRoleIds.NOTEBOOK_EDITOR,
+        name: 'com_ui_role_editor',
+        description: 'com_ui_role_editor_desc',
+        resourceType: ResourceType.NOTEBOOK,
+        permBits: RoleBits.EDITOR,
+      },
+      {
+        accessRoleId: AccessRoleIds.NOTEBOOK_OWNER,
+        name: 'com_ui_role_owner',
+        description: 'com_ui_role_owner_desc',
+        resourceType: ResourceType.NOTEBOOK,
+        permBits: RoleBits.OWNER,
+      },
+      {
         accessRoleId: AccessRoleIds.SKILL_VIEWER,
         name: 'com_ui_role_viewer',
         description: 'com_ui_role_viewer_desc',

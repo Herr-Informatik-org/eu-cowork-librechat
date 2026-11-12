@@ -141,6 +141,14 @@ export const router = createBrowserRouter(
               errorElement: <RouteErrorBoundary />,
             },
             {
+              path: 'api/notebooks/app',
+              lazy: () => import('~/components/Notebooks/Workspace').then((m) => ({ Component: m.default })),
+            },
+            {
+              path: 'wissensraeume',
+              lazy: () => import('~/components/Notebooks/Workspace').then((m) => ({ Component: m.default })),
+            },
+            {
               path: 'mail',
               lazy: () =>
                 import('~/components/Mail/Workspace').then((m) => ({ Component: m.default })),

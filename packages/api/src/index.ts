@@ -88,3 +88,7 @@ export type * from './types';
 
 export * from './opsLlm';
 export * from './opsPersonal';
+
+export * from './notebooks/client';
+export * from './notebooks/router';
+export * from './notebooks/model';

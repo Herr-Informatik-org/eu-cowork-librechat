@@ -1,5 +1,11 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-12 — Interner Wissensraum-Pilot mit nativen Rechten
+
+- Wissensräume verwenden bestehende Anmeldung, Dateisuche-Berechtigung, Ressourcen-ACLs und Verbrauchserfassung. Öffentliche Freigaben sind ausgeschlossen.
+- Quellenbelege, Modellzonen und historische Antworten werden vor jeder Ausgabe geprüft; bei unsicherem Modellweg bleiben lokal persönlich freigegebene Auszüge verfügbar.
+- Eigenständiger API-Einstieg und neue Asset-Pfade ermöglichen den additiven CWV01-Pilot ohne Neustart bestehender Chat-/Mail-/MCP-Aufträge.
+
 ## 2026-11-10 — Interne OPS-Verbindungen mit getrennten Berechtigungen
 
 - Eine eigene Text-API verwendet ausschliesslich das zentrale Standardmodell,

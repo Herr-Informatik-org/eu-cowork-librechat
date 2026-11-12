@@ -1,0 +1,14 @@
+FROM ghcr.io/herr-informatik-org/eu-cowork-librechat@sha256:f48bd37b2321a7fe0aeee74c3fdc04114739328b30e56d0d4d17aa61a1fdf46a
+WORKDIR /app
+COPY --chown=node:node packages/api/dist ./packages/api/dist
+COPY --chown=node:node packages/data-provider/dist ./packages/data-provider/dist
+COPY --chown=node:node packages/data-schemas/dist ./packages/data-schemas/dist
+COPY --chown=node:node api/server/notebooks.js ./api/server/notebooks.js
+COPY --chown=node:node api/server/routes/notebooks.js ./api/server/routes/notebooks.js
+COPY --chown=node:node api/server/services/PermissionService.js ./api/server/services/PermissionService.js
+COPY --chown=node:node client/dist ./client/dist
+ARG BUILD_COMMIT
+ENV BUILD_COMMIT=$BUILD_COMMIT NOTEBOOKS_ENABLED=true OTEL_SDK_DISABLED=true LANGCHAIN_TRACING_V2=false DEBUG_LOGGING=false DEBUG_CONSOLE=false BAN_VIOLATIONS=true
+LABEL org.opencontainers.image.revision="$BUILD_COMMIT" org.opencontainers.image.title="Kisuno CWV01 Wissensraum-Pilot"
+USER node
+CMD ["node","api/server/notebooks.js"]

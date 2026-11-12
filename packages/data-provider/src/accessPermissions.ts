@@ -48,6 +48,7 @@ export enum ResourceType {
   MCPSERVER = 'mcpServer',
   REMOTE_AGENT = 'remoteAgent',
   SKILL = 'skill',
+  NOTEBOOK = 'notebook',
   SHARED_LINK = 'sharedLink',
 }
 
@@ -84,6 +85,9 @@ export enum AccessRoleIds {
   SKILL_VIEWER = 'skill_viewer',
   SKILL_EDITOR = 'skill_editor',
   SKILL_OWNER = 'skill_owner',
+  NOTEBOOK_VIEWER = 'notebook_viewer',
+  NOTEBOOK_EDITOR = 'notebook_editor',
+  NOTEBOOK_OWNER = 'notebook_owner',
   SHARED_LINK_VIEWER = 'sharedLink_viewer',
   SHARED_LINK_OWNER = 'sharedLink_owner',
 }

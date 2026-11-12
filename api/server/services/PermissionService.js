@@ -73,6 +73,9 @@ const grantPermission = async ({
   session,
 }) => {
   try {
+    if (resourceType === ResourceType.NOTEBOOK && principalType === PrincipalType.PUBLIC) {
+      throw new Error('Öffentliche Wissensraum-Freigaben sind nicht zugelassen.');
+    }
     if (!Object.values(PrincipalType).includes(principalType)) {
       throw new Error(`Invalid principal type: ${principalType}`);
     }
@@ -755,6 +758,10 @@ const bulkUpdateResourcePermissions = async ({
       revoked: [],
       errors: [],
     };
+
+    if (resourceType === ResourceType.NOTEBOOK && updatedPrincipals.some((principal) => principal.type === PrincipalType.PUBLIC || principal.principalType === PrincipalType.PUBLIC)) {
+      throw new Error('Öffentliche Wissensraum-Freigaben sind nicht zugelassen.');
+    }
 
     const bulkWrites = [];
 

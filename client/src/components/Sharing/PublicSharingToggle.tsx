@@ -18,13 +18,14 @@ interface PublicSharingToggleProps {
 
 const accessDescriptions: Record<
   ResourceType,
-  'com_ui_agent' | 'com_ui_prompt' | 'com_ui_mcp_server' | 'com_ui_skill' | 'com_ui_shared_link'
+  'com_ui_agent' | 'com_ui_prompt' | 'com_ui_mcp_server' | 'com_ui_skill' | 'com_ui_shared_link' | 'com_ui_knowledge_title'
 > = {
   [ResourceType.AGENT]: 'com_ui_agent',
   [ResourceType.PROMPTGROUP]: 'com_ui_prompt',
   [ResourceType.MCPSERVER]: 'com_ui_mcp_server',
   [ResourceType.REMOTE_AGENT]: 'com_ui_agent',
   [ResourceType.SKILL]: 'com_ui_skill',
+  [ResourceType.NOTEBOOK]: 'com_ui_knowledge_title',
   [ResourceType.SHARED_LINK]: 'com_ui_shared_link',
 };
 
@@ -44,6 +45,8 @@ export default function PublicSharingToggle({
     },
     [onPublicToggle],
   );
+
+  if (resourceType === ResourceType.NOTEBOOK) return null;
 
   return (
     <div className={cn('space-y-4', className)}>

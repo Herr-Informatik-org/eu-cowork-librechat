@@ -60,6 +60,16 @@ export const RESOURCE_CONFIGS: Record<ResourceType, ResourceConfig> = {
       `Manage API access for ${name && name !== '' ? `"${name}"` : 'agent'}`,
     getCopyUrlMessage: () => 'API endpoint copied',
   },
+  [ResourceType.NOTEBOOK]: {
+    resourceType: ResourceType.NOTEBOOK,
+    defaultViewerRoleId: AccessRoleIds.NOTEBOOK_VIEWER,
+    defaultEditorRoleId: AccessRoleIds.NOTEBOOK_EDITOR,
+    defaultOwnerRoleId: AccessRoleIds.NOTEBOOK_OWNER,
+    getResourceName: (name?: string) => name || 'Wissensraum',
+    getShareMessage: (name?: string) => name || 'Wissensraum',
+    getManageMessage: (name?: string) => `Zugriffe für ${name || 'Wissensraum'} verwalten`,
+    getCopyUrlMessage: () => 'Wissensraum-Link kopiert',
+  },
   [ResourceType.SKILL]: {
     resourceType: ResourceType.SKILL,
     defaultViewerRoleId: AccessRoleIds.SKILL_VIEWER,

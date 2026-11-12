@@ -18,6 +18,7 @@ const staticRoute = require('./static');
 const messages = require('./messages');
 const memories = require('./memories');
 const brain = require('./brain');
+const notebooks = require('./notebooks');
 const presets = require('./presets');
 const projects = require('./projects');
 const prompts = require('./prompts');
@@ -83,6 +84,7 @@ module.exports = {
   messages,
   memories,
   brain,
+  notebooks,
   endpoints,
   assistants,
   categories,

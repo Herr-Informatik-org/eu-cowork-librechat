@@ -48,6 +48,7 @@ const resourceToPermissionType: Record<ResourceType, PermissionTypes> = {
   [ResourceType.MCPSERVER]: PermissionTypes.MCP_SERVERS,
   [ResourceType.REMOTE_AGENT]: PermissionTypes.REMOTE_AGENTS,
   [ResourceType.SKILL]: PermissionTypes.SKILLS,
+  [ResourceType.NOTEBOOK]: PermissionTypes.FILE_SEARCH,
   [ResourceType.SHARED_LINK]: PermissionTypes.SHARED_LINKS,
 };
 
