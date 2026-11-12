@@ -1,6 +1,13 @@
 import type { Document, Types } from 'mongoose';
 
+export interface SessionAssurance {
+  method: 'totp' | 'passkey' | 'recovery' | 'operator' | 'idp';
+  verifiedAt: number;
+  version: number;
+}
+
 export interface ISession extends Document {
+  securityAssurance?: SessionAssurance;
   refreshTokenHash: string;
   expiration: Date;
   user: Types.ObjectId;
@@ -8,6 +15,7 @@ export interface ISession extends Document {
 }
 
 export interface CreateSessionOptions {
+  securityAssurance?: SessionAssurance;
   expiration?: Date;
   /** Duration in milliseconds for session expiry. Default: 7 days */
   expiresIn?: number;

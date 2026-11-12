@@ -2,6 +2,10 @@ import mongoose, { Schema } from 'mongoose';
 import { ISession } from '~/types';
 
 const sessionSchema: Schema<ISession> = new Schema({
+  securityAssurance: {
+    type: { method: String, verifiedAt: Number, version: Number },
+    default: undefined,
+  },
   refreshTokenHash: {
     type: String,
     required: true,

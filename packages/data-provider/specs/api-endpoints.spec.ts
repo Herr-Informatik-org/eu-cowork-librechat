@@ -4,6 +4,10 @@
 import { buildLoginRedirectUrl } from '../src/api-endpoints';
 
 describe('buildLoginRedirectUrl', () => {
+  it('retains the editable discovery email across the automatic session check', () => {
+    expect(buildLoginRedirectUrl('/login', '?email=person%2Bteam%40example.ch', '')).toBe('/login?email=person%2Bteam%40example.ch');
+    expect(buildLoginRedirectUrl('/login', '?email=invalid&tempToken=private', '')).toBe('/login');
+  });
   afterEach(() => {
     window.history.replaceState({}, '', '/');
   });

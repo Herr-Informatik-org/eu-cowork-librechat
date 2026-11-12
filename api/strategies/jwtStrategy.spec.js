@@ -25,7 +25,7 @@ const { getUserById, updateUser } = require('~/models');
 
 function invokeVerify(payload) {
   return new Promise((resolve, reject) => {
-    capturedVerifyCallback(payload, (err, user, info) => {
+    capturedVerifyCallback({ originalUrl: '/api/user', method: 'GET' }, payload, (err, user, info) => {
       if (err) {
         return reject(err);
       }

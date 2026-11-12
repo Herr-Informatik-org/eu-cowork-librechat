@@ -11,6 +11,7 @@ const {
 } = require('@librechat/data-schemas');
 const {
   isEnabled,
+  requiredSecurity,
   getAdminPanelUrl,
   exchangeAdminCode,
   createSetBalanceConfig,
@@ -117,7 +118,7 @@ router.post(
 router.get('/verify', middleware.requireJwtAuth, requireAdminAccess, (req, res) => {
   const { password: _p, totpSecret: _t, __v, ...user } = req.user;
   user.id = user._id.toString();
-  res.status(200).json({ user });
+  res.status(200).json({ user, securityRequired: requiredSecurity(), mfaVerified: req.mfaVerified === true });
 });
 
 router.get('/oauth/openid/check', (req, res) => {

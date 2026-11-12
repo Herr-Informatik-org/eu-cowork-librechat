@@ -194,6 +194,7 @@ const openIdJwtLogin = (openIdConfig) => {
             expires_at: payload.exp,
           };
 
+          req.verifiedAuthClaims = payload;
           done(null, user);
         } else {
           logger.warn(

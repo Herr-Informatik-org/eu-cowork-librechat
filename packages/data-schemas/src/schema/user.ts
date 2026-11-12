@@ -95,6 +95,9 @@ const userSchema: Schema<IUser> = new Schema<IUser>(
     plugins: {
       type: Array,
     },
+    securityVersion: { type: Number, default: 0 },
+    securityEnrolled: { type: Boolean, default: false },
+    pendingTotpExpires: { type: Date, select: false },
     twoFactorEnabled: {
       type: Boolean,
       default: false,

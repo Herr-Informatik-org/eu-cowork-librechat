@@ -1,4 +1,5 @@
 const { logger } = require('@librechat/data-schemas');
+const { requiredSecurity } = require('@librechat/api');
 const { generate2FATempToken } = require('~/server/services/twoFactorService');
 const { setAuthTokens } = require('~/server/services/AuthService');
 
@@ -7,6 +8,8 @@ const loginController = async (req, res) => {
     if (!req.user) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
+
+    if (requiredSecurity()) return await require('~/server/services/SecurityService').beginSecurityLogin(req, res);
 
     if (req.user.twoFactorEnabled) {
       const tempToken = generate2FATempToken(req.user._id);

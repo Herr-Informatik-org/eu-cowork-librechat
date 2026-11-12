@@ -1,6 +1,6 @@
-const { webcrypto } = require('node:crypto');
+const { webcrypto, timingSafeEqual } = require('node:crypto');
 const { hashBackupCode, decryptV3, decryptV2 } = require('@librechat/data-schemas');
-const { updateUser } = require('~/models');
+const { consumeBackupCode } = require('~/models');
 
 // Base32 alphabet for TOTP secret encoding.
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -58,7 +58,7 @@ const decodeBase32 = (base32Str) => {
  * @returns {string}
  */
 const generateTOTPSecret = () => {
-  const randomArray = new Uint8Array(10);
+  const randomArray = new Uint8Array(20);
   webcrypto.getRandomValues(randomArray);
   return encodeBase32(Buffer.from(randomArray));
 };
@@ -113,7 +113,7 @@ const verifyTOTP = async (secret, token) => {
   const currentTime = Date.now();
   for (let offset = -1; offset <= 1; offset++) {
     const expected = await generateTOTP(secret, currentTime + offset * timeStepMS);
-    if (expected === token) {
+    if (typeof token === 'string' && token.length === expected.length && timingSafeEqual(Buffer.from(expected), Buffer.from(token))) {
       return true;
     }
   }
@@ -162,7 +162,7 @@ const verifyBackupCode = async ({ user, backupCode, persist = true }) => {
     return false;
   }
 
-  const hashedInput = await hashBackupCode(backupCode.trim());
+  const hashedInput = await hashBackupCode(backupCode.trim().replace(/-/g, '').toLowerCase());
   const matchingCode = user.backupCodes.find(
     (codeObj) => codeObj.codeHash === hashedInput && !codeObj.used,
   );
@@ -171,14 +171,7 @@ const verifyBackupCode = async ({ user, backupCode, persist = true }) => {
     return false;
   }
 
-  if (persist) {
-    const updatedBackupCodes = user.backupCodes.map((codeObj) =>
-      codeObj.codeHash === hashedInput && !codeObj.used
-        ? { ...codeObj, used: true, usedAt: new Date() }
-        : codeObj,
-    );
-    await updateUser(user._id, { backupCodes: updatedBackupCodes });
-  }
+  if (persist) return consumeBackupCode(String(user._id), hashedInput);
   return true;
 };
 

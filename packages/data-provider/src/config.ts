@@ -1572,6 +1572,7 @@ export type TRumConfig = {
 export type StartupConfigContext = 'share';
 
 export type TStartupConfig = {
+  securityRequired?: boolean;
   /** Browser-local, read-only folder tools; exposed only after authentication. */
   localFoldersEnabled?: boolean;
   privacyTextEndpoints?: string[];

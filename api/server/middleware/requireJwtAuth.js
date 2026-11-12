@@ -4,6 +4,9 @@ const passport = require('passport');
 const { logger } = require('@librechat/data-schemas');
 const {
   isEnabled,
+  requiredSecurity,
+  validAssurance,
+  automationAllowed,
   tenantContextMiddleware,
   getAuthFailureReason,
   getAuthFailureErrorName,
@@ -187,6 +190,37 @@ const requireJwtAuth = (req, res, next) => {
         }
         logAuthenticationFailure({ strategy, info, status: 401, err });
         return res.status(401).json({ message: 'Unauthorized' });
+      }
+      if (requiredSecurity()) {
+        const claims = req.verifiedAuthClaims;
+        const proof = claims && typeof claims === 'object' ? claims.mfa : null;
+        const sensitive =
+          req.originalUrl.startsWith('/api/admin') ||
+          (req.method !== 'GET' && req.originalUrl.startsWith('/api/user'));
+        const strong = validAssurance(proof, { ...user, id: String(user._id || user.id) });
+        const externalMfa =
+          strategy === 'openidJwt' &&
+          Array.isArray(claims?.amr) &&
+          claims.amr.some((value) => ['mfa', 'fido2', 'webauthn'].includes(value));
+        req.mfaVerified = strong || externalMfa;
+        if (
+          (sensitive || strategy === 'openidJwt') &&
+          !strong &&
+          !externalMfa &&
+          !(
+            strategy === 'jwt' &&
+            automationAllowed(
+              claims,
+              { ...user, id: String(user._id || user.id) },
+              req.originalUrl,
+              req.method,
+            )
+          )
+        ) {
+          return res
+            .status(401)
+            .json({ code: 'MFA_REQUIRED', message: 'Bitte mit 2FA oder Passkey anmelden.' });
+        }
       }
       req.user = user;
       req.authStrategy = strategy;

@@ -45,6 +45,7 @@ export interface SettingsContextValue {
   hasPrompts: boolean;
   isLocalProvider: boolean;
   twoFactorEnabled: boolean;
+  securityRequired?: boolean;
   allowAccountDeletion: boolean;
   aboutEnabled: boolean;
   engineTTS: string;

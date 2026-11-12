@@ -197,7 +197,10 @@ const LOGIN_PATH_RE = /(?:^|\/)login(?:\/|$)/;
 export function buildLoginRedirectUrl(pathname?: string, search?: string, hash?: string): string {
   const p = pathname ?? window.location.pathname;
   if (LOGIN_PATH_RE.test(p)) {
-    return '/login';
+    const params = new URLSearchParams(search ?? window.location.search);
+    const email = params.get('email')?.trim() ?? '';
+    const hint = email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+    return hint ? `/login?email=${encodeURIComponent(hint)}` : '/login';
   }
   const s = search ?? window.location.search;
   const h = hash ?? window.location.hash;

@@ -20,6 +20,8 @@ jest.mock(
 jest.mock(
   '@librechat/api',
   () => ({
+    requiredSecurity: jest.fn(() => false),
+    validAssurance: jest.fn(() => false),
     isEnabled: jest.fn((val) => val === 'true' || val === true),
     isSupportServiceIdentity: jest.fn(() => false),
     checkEmailConfig: jest.fn(),

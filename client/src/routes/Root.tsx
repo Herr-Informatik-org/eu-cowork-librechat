@@ -26,6 +26,7 @@ import { TermsAndConditionsModal } from '~/components/ui';
 import { useHealthCheck } from '~/data-provider';
 import { Banner } from '~/components/Banners';
 import ReleaseUpdateBanner from '~/components/Banners/ReleaseUpdateBanner';
+import SecurityEnrollmentBanner from '~/components/Banners/SecurityEnrollmentBanner';
 import store from '~/store';
 
 /** Isolates keyboard shortcut listeners so they only mount after auth. */
@@ -102,6 +103,7 @@ export default function Root() {
                       inert={isSmallScreen && sidebarExpanded ? '' : undefined}
                     >
                       <ReleaseUpdateBanner />
+                      <SecurityEnrollmentBanner />
                       <Outlet />
                     </div>
                   </div>

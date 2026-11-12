@@ -1,3 +1,4 @@
+import { SecurityCenterButton } from '~/components/Banners/SecurityEnrollmentBanner';
 import { SettingsTabValues } from 'librechat-data-provider';
 import type { SettingEntry } from './types';
 import {
@@ -557,13 +558,21 @@ export const registry: SettingEntry[] = [
     labelKey: 'com_ui_settings_label_avatar',
     Component: Avatar,
   },
-  // Account · Security
+  // Account security uses the same native flow as sign-in.
+  {
+    id: 'securityCenter',
+    tab: ACCOUNT,
+    section: 'security',
+    labelKey: 'com_auth_security_center',
+    show: (ctx) => ctx.securityRequired === true,
+    Component: SecurityCenterButton,
+  },
   {
     id: 'twoFactor',
     tab: ACCOUNT,
     section: 'security',
     labelKey: 'com_ui_settings_label_2fa',
-    show: (ctx) => ctx.isLocalProvider,
+    show: (ctx) => ctx.isLocalProvider && !ctx.securityRequired,
     Component: EnableTwoFactorItem,
   },
   {
@@ -571,7 +580,7 @@ export const registry: SettingEntry[] = [
     tab: ACCOUNT,
     section: 'security',
     labelKey: 'com_ui_settings_label_backup_codes',
-    show: (ctx) => ctx.isLocalProvider && ctx.twoFactorEnabled,
+    show: (ctx) => ctx.isLocalProvider && ctx.twoFactorEnabled && !ctx.securityRequired,
     Component: BackupCodesItem,
   },
   // Account · Billing

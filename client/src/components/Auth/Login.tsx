@@ -22,6 +22,15 @@ function Login() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
+  useEffect(() => {
+    if (startupConfig?.securityRequired) {
+      const email = searchParams.get('email');
+      window.location.replace(
+        '/api/auth/security/page' + (email ? '?email=' + encodeURIComponent(email) : ''),
+      );
+    }
+  }, [startupConfig?.securityRequired, searchParams]);
+
   const disableAutoRedirect = searchParams.get('redirect') === 'false';
 
   const [isAutoRedirectDisabled, setIsAutoRedirectDisabled] = useState(disableAutoRedirect);

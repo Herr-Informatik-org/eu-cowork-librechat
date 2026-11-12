@@ -1,5 +1,18 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-12 — Verbindlicher Anmeldeschutz und E-Mail-Übernahme
+
+- Lokale Konten richten vor dem ersten Zugriff Authenticator oder einen Passkey/FIDO2
+  mit PIN beziehungsweise Biometrie ein. Chat und Kundenverwaltung teilen Faktoren
+  und die nativen LibreChat-Sitzungen; Einrichtungsberechtigungen sind strikt getrennt.
+- Einmalige Challenges und Wiederherstellungscodes, TOTP-Replay-Schutz, frische
+  Bestätigung für Faktoränderungen und Schutz des letzten Faktors. Passwortänderungen
+  entwerten vorhandene Sicherheitsnachweise. Automatische Konfiguration verwendet
+  gesonderte, auf konkrete Verwaltungsrouten und 60 Sekunden begrenzte Diensttokens.
+- Die E-Mail aus der Zuordnungsseite bleibt beim automatischen Sitzungscheck
+  erhalten und ist in der Anmeldung bereits bearbeitbar ausgefüllt.
+
+
 ## 2026-11-12 — PDFs im geschützten Chat lesen
 
 - PDF-Anhänge werden lokal als Text ausgelesen und anschliessend maskiert.

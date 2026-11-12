@@ -33,6 +33,19 @@ const setBalanceConfig = createSetBalanceConfig({
 });
 
 const router = express.Router();
+router.use('/security', async (req, res, next) => {
+  if (process.env.ENFORCE_TWO_FACTOR_AUTHENTICATION !== 'true') return res.sendStatus(404);
+  try {
+    const { getSecurityEngine } = require('~/server/services/SecurityService');
+    const security = await getSecurityEngine();
+    return security.router(req, res, next);
+  } catch { return res.status(503).json({ message: 'Sichere Anmeldung ist vorübergehend nicht verfügbar.' }); }
+});
+router.use('/2fa', (_req, res, next) => {
+  if (process.env.ENFORCE_TWO_FACTOR_AUTHENTICATION !== 'true') return next();
+  return res.status(403).json({ code: 'SECURITY_CENTER_REQUIRED', message: 'Bitte die Sicherheitsverwaltung öffnen.', url: '/api/auth/security/page?manage=1' });
+});
+
 const invitationDetailsLimiter = rateLimit({
   windowMs: 60_000,
   limit: 30,

@@ -5,6 +5,8 @@ const { logger } = require('@librechat/data-schemas');
 const {
   math,
   isEnabled,
+  requiredSecurity,
+  validAssurance,
   findOpenIDUser,
   getOpenIdIssuer,
   buildOpenIDRefreshParams,
@@ -274,7 +276,7 @@ const refreshController = async (req, res) => {
 
     const userId = payload.id;
 
-    if (process.env.NODE_ENV === 'CI') {
+    if (process.env.NODE_ENV === 'CI' && !requiredSecurity()) {
       const token = await setAuthTokens(userId, res, null, req);
       return res.status(200).send({ token, user: sanitizeUserForAuthResponse(user) });
     }
@@ -289,6 +291,9 @@ const refreshController = async (req, res) => {
     );
 
     if (session && session.expiration > new Date()) {
+      if (requiredSecurity() && !validAssurance(session.securityAssurance, { ...user, id: String(user._id) })) {
+        return res.status(401).json({ code: 'MFA_REQUIRED', message: 'Bitte erneut mit Passwort und 2FA oder mit Passkey anmelden.' });
+      }
       const token = await setAuthTokens(userId, res, session, req);
 
       res.status(200).send({ token, user: sanitizeUserForAuthResponse(user) });

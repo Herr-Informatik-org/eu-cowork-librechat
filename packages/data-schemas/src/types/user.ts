@@ -30,6 +30,8 @@ export interface IUser extends Document {
   appleId?: string;
   plugins?: string[];
   openidIssuer?: string;
+  securityVersion?: number;
+  securityEnrolled?: boolean;
   twoFactorEnabled?: boolean;
   totpSecret?: string;
   backupCodes?: Array<{
@@ -92,6 +94,8 @@ export interface UpdateUserRequest {
   emailVerified?: boolean;
   avatar?: string;
   plugins?: string[];
+  securityVersion?: number;
+  securityEnrolled?: boolean;
   twoFactorEnabled?: boolean;
   termsAccepted?: boolean;
   termsAcceptedAt?: Date | null;
@@ -113,6 +117,8 @@ export interface UserFilterOptions extends CursorPaginationParams {
   role?: string;
   emailVerified?: boolean;
   provider?: string;
+  securityVersion?: number;
+  securityEnrolled?: boolean;
   twoFactorEnabled?: boolean;
   // External IDs
   googleId?: string;

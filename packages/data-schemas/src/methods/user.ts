@@ -4,7 +4,7 @@ import {
   CacheKeys,
   type RefillIntervalUnit,
 } from 'librechat-data-provider';
-import type { IUser, BalanceConfig, CreateUserRequest, UserDeleteResult } from '~/types';
+import type { IUser, BalanceConfig, CreateUserRequest, UserDeleteResult, SessionAssurance } from '~/types';
 import type { CacheStore } from '~/types';
 import { escapeRegExp } from '~/utils/string';
 import { signPayload } from '~/crypto';
@@ -114,7 +114,8 @@ export function createUserMethods(
     }[]
   >;
   getUserById: (userId: string, fieldsToSelect?: string | string[] | null) => Promise<IUser | null>;
-  generateToken: (user: IUser, expiresIn?: number) => Promise<string>;
+  consumeBackupCode: (userId: string, codeHash: string) => Promise<boolean>;
+  generateToken: (user: IUser, expiresIn?: number, assurance?: SessionAssurance) => Promise<string>;
   deleteUserById: (userId: string) => Promise<UserDeleteResult>;
   updateUserPlugins: (
     userId: string,
@@ -262,7 +263,8 @@ export function createUserMethods(
     const User = mongoose.models.User;
     const updateOperation = {
       $set: updateData,
-      $unset: { expiresAt: '' }, // Remove the expiresAt field to prevent TTL
+      $unset: { expiresAt: '', ...(updateData.password ? { pendingTotpSecret: '', pendingTotpExpires: '' } : {}) },
+      ...(updateData.password ? { $inc: { securityVersion: 1 } } : {}),
     };
     const updated = await User.findByIdAndUpdate(userId, updateOperation, {
       new: true,
@@ -270,6 +272,15 @@ export function createUserMethods(
     }).lean<IUser>();
     await invalidateAuthUserDocCache(userId);
     return updated;
+  }
+
+  async function consumeBackupCode(userId: string, codeHash: string): Promise<boolean> {
+    const result = await mongoose.models.User.updateOne(
+      { _id: userId, backupCodes: { $elemMatch: { codeHash, used: false } } },
+      { $set: { 'backupCodes.$.used': true, 'backupCodes.$.usedAt': new Date() } },
+    );
+    if (result.modifiedCount === 1) await invalidateAuthUserDocCache(userId);
+    return result.modifiedCount === 1;
   }
 
   async function invalidateAuthUserDocCache(userId: string): Promise<void> {
@@ -418,7 +429,7 @@ export function createUserMethods(
    * @param user - The user object
    * @param expiresIn - Optional expiry time in milliseconds. Default: 15 minutes
    */
-  async function generateToken(user: IUser, expiresIn?: number): Promise<string> {
+  async function generateToken(user: IUser, expiresIn?: number, assurance?: SessionAssurance): Promise<string> {
     if (!user) {
       throw new Error('No user provided');
     }
@@ -428,6 +439,7 @@ export function createUserMethods(
     return await signPayload({
       payload: {
         id: user._id,
+        ...(assurance ? { mfa: assurance } : {}),
         username: user.username,
         provider: user.provider,
         email: user.email,
@@ -647,6 +659,7 @@ export function createUserMethods(
     searchUsers,
     getUserById,
     generateToken,
+    consumeBackupCode,
     deleteUserById,
     updateUserPlugins,
     toggleUserMemories,

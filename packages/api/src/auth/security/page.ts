@@ -1,0 +1,67 @@
+import { randomBytes } from 'node:crypto';
+
+interface PageOptions {
+  name: string;
+  portal: string;
+  email: string;
+  manage: boolean;
+  storage?: { token: string; user: string };
+}
+export function securityPage(options: PageOptions): { body: string; policy: string } {
+  const nonce = randomBytes(24).toString('base64');
+  const config = JSON.stringify(options)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+  const policy = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src data:; frame-ancestors 'none'; form-action 'self'; base-uri 'none'; object-src 'none'`;
+  return {
+    policy,
+    body: `<!doctype html><html lang="de-CH"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sicher anmelden</title>
+<style nonce="${nonce}">:root{font:16px system-ui,sans-serif;color-scheme:light dark}body{margin:0;background:#101412;color:#f1f5f3;display:grid;min-height:100dvh;place-items:center}.card{background:#1b231f;border:1px solid #3b4942;border-radius:20px;box-sizing:border-box;padding:32px;width:min(94vw,510px);margin:24px}h1{font-size:27px;margin:8px 0 12px}h2{font-size:20px}p{line-height:1.55;color:#c1cfc7}label{display:block;margin:18px 0 7px}input,button,a.button{box-sizing:border-box;border-radius:9px;padding:12px;width:100%;font:inherit}input{background:#101412;border:1px solid #718078;color:#fff}button,a.button{background:#b1e6cb;color:#062416;border:0;font-weight:650;cursor:pointer;margin-top:15px;text-align:center;text-decoration:none;display:block}button.secondary{background:transparent;border:1px solid #718078;color:#eef8f2}button:disabled{opacity:.5;cursor:wait}.muted{font-size:14px}.link{display:block;color:#b1e6cb;margin-top:16px}.error{color:#ffd0ca;background:#3d211f;padding:12px;border-radius:8px;white-space:pre-wrap}.hidden{display:none!important}pre{font:14px ui-monospace,monospace;white-space:pre-wrap;word-break:break-all;background:#101412;padding:14px;border-radius:8px}img.qr{display:block;max-width:240px;margin:20px auto;background:white}input[type=checkbox]{width:auto;margin-right:8px}.status{border-block:1px solid #46584d;padding:14px 0;margin-top:20px}.tag{text-transform:uppercase;letter-spacing:.1em;color:#a4c3b2;font-size:12px}</style>
+<main class="card"><div class="tag" id="brand"></div><h1 id="title">Sicher anmelden</h1><p id="intro">Mit Ihrem Kundenkonto. Passkeys funktionieren mit Geräte-PIN, Biometrie oder einem FIDO2-Schlüssel.</p><div id="error" role="alert" class="error hidden"></div>
+<section id="login"><form id="password-form"><label for="email">E-Mail</label><input id="email" type="email" autocomplete="username" required><label for="password">Passwort</label><input id="password" type="password" autocomplete="current-password" required><button type="submit">Mit Passwort weiter</button></form><button id="passkey-login" class="secondary">Mit Passkey oder FIDO2 anmelden</button></section>
+<section id="challenge" class="hidden"><p id="factor-intro">Geben Sie den aktuellen Code Ihrer Authenticator-App ein.</p><form id="verify-form"><label id="code-label" for="code">Authenticator-Code</label><input id="code" autocomplete="one-time-code" inputmode="numeric"><button type="submit">Anmeldung bestätigen</button></form><button id="recovery-mode" class="secondary">Wiederherstellungscode verwenden</button><button id="factor-passkey" class="secondary">Stattdessen mit Passkey anmelden</button></section>
+<section id="setup" class="hidden"><h2>Konto schützen</h2><p>Vor dem ersten Zugriff richten Sie einen sicheren Anmeldeweg ein. Ein Passkey ist meist der einfachste Weg.</p><button id="setup-passkey">Passkey / FIDO2 einrichten</button><button id="setup-totp" class="secondary">Authenticator-App einrichten</button></section>
+<section id="totp" class="hidden"><h2>Authenticator verbinden</h2><p>Scannen Sie den QR-Code mit Ihrer Authenticator-App. Alternativ können Sie den Einrichtungsschlüssel manuell übernehmen.</p><img id="qr" class="qr" alt="QR-Code für die Authenticator-Einrichtung"><pre id="totp-secret"></pre><form id="confirm-form"><label for="setup-code">Aktueller sechsstelliger Code</label><input id="setup-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required><button type="submit">Authenticator bestätigen</button></form></section>
+<section id="backup" class="hidden"><h2>Wiederherstellungscodes sichern</h2><p>Jeder Code funktioniert genau einmal zusammen mit Ihrem Passwort. Bewahren Sie die Codes getrennt vom Anmeldegerät auf.</p><pre id="backup-codes"></pre><button id="download-codes" class="secondary">Codes herunterladen</button><label><input id="saved" type="checkbox">Ich habe die Codes sicher aufbewahrt.</label><button id="backup-done" disabled>Weiter</button></section>
+<section id="manage" class="hidden"><h2>Anmeldeschutz verwalten</h2><div id="factor-status" class="status"></div><button id="add-passkey">Weiteren Passkey einrichten</button><button id="add-totp" class="secondary">Authenticator einrichten / erneuern</button><button id="remove-totp" class="secondary">Authenticator entfernen</button><button id="regenerate" class="secondary">Neue Wiederherstellungscodes</button><a href="/" class="button">Zur Anwendung</a><p class="muted">Sicherheitsänderungen brauchen eine Anmeldung aus den letzten fünf Minuten. Den letzten Anmeldeweg können Sie nicht entfernen.</p></section>
+<p class="muted" id="footer">Kundenverwaltung und Chat verwenden dieselben Faktoren. Abgebrochene Geräteabfragen können Sie erneut starten.</p><a href="/" class="link">Zurück</a></main>
+<script nonce="${nonce}">const config=${config};${CLIENT}</script></html>`,
+  };
+}
+
+const CLIENT = String.raw`
+let pending='',access='',useRecovery=false,codes=[],busy=false;
+const $=id=>document.getElementById(id);
+$('brand').textContent=config.name;
+$('email').value=config.email;
+if(config.portal==='admin'&&!config.storage){sessionStorage.removeItem('eucowork_token');sessionStorage.removeItem('eucowork_user');}
+const cleanURL=new URL(location.href);cleanURL.searchParams.delete('email');history.replaceState(null,'',cleanURL.pathname+cleanURL.search);
+if(config.storage)$('footer').textContent='Dieses Konto gilt für die Betreiberkonsole. Kundenkonten bleiben getrennt.';
+if(config.portal==='admin')$('title').textContent='Sicher zur Verwaltung';
+function show(id){for(const name of ['login','challenge','setup','totp','backup','manage'])$(name).classList.toggle('hidden',name!==id);$('error').classList.add('hidden');}
+async function call(path,data={}){const r=await fetch('/api/auth/security/'+path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',...(access?{Authorization:'Bearer '+access}:{})},body:JSON.stringify({...data,portal:config.portal,...(pending?{tempToken:pending}:{})})});const result=await r.json().catch(()=>({}));if(!r.ok)throw Error(result.message||result.error||'Sicherheitsprüfung fehlgeschlagen.');return result;}
+async function action(fn){if(busy)return;busy=true;for(const b of document.querySelectorAll('button'))b.disabled=true;try{await fn();}catch(e){$('error').textContent=e.name==='NotAllowedError'?'Die Geräteabfrage wurde abgebrochen oder nicht bestätigt. Sie können es erneut versuchen.':e.message||'Anmeldung fehlgeschlagen.';$('error').classList.remove('hidden');}finally{busy=false;for(const b of document.querySelectorAll('button'))b.disabled=false;$('backup-done').disabled=!$('saved').checked;}}
+async function accepted(result){if(result.twoFAPending){pending=result.tempToken;if(result.setupRequired)show('setup');else{show('challenge');if(!result.hasTotp){useRecovery=true;recoveryInput();}}return;}if(!result.token)throw Error('Keine bestätigte Sitzung erhalten.');access=result.token;pending='';if(config.storage){localStorage.setItem(config.storage.token,access);localStorage.setItem(config.storage.user,JSON.stringify(result.user));}if(result.backupCodes){codes=result.backupCodes;$('backup-codes').textContent=codes.join('\n');$('saved').checked=false;show('backup');return;}if(config.manage)await management();else location.replace('/');}
+function decode(s){return Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));}
+function encode(value){return btoa(String.fromCharCode(...new Uint8Array(value))).split('+').join('-').split('/').join('_').replace(/=+$/,'');}
+async function passkeyLogin(){const start=await call('passkeys/options',{email:$('email').value.trim()});const o=start.options;o.challenge=decode(o.challenge);if(o.allowCredentials)o.allowCredentials=o.allowCredentials.map(x=>({...x,id:decode(x.id)}));const c=await navigator.credentials.get({publicKey:o});if(!c)throw Error('Kein Passkey bestätigt.');const r=c.response;await accepted(await call('passkeys/verify',{sessionId:start.sessionId,credential:{id:c.id,rawId:encode(c.rawId),type:c.type,response:{clientDataJSON:encode(r.clientDataJSON),authenticatorData:encode(r.authenticatorData),signature:encode(r.signature),userHandle:r.userHandle?encode(r.userHandle):undefined},clientExtensionResults:c.getClientExtensionResults(),authenticatorAttachment:c.authenticatorAttachment}}));}
+async function register(){if(!window.PublicKeyCredential)throw Error('Dieser Browser unterstützt keine Passkeys. Verwenden Sie eine Authenticator-App.');const o=await call('passkeys/register/options');o.challenge=decode(o.challenge);o.user.id=decode(o.user.id);if(o.excludeCredentials)o.excludeCredentials=o.excludeCredentials.map(x=>({...x,id:decode(x.id)}));const c=await navigator.credentials.create({publicKey:o});if(!c)throw Error('Kein Passkey bestätigt.');const r=c.response;await accepted(await call('passkeys/register/verify',{credential:{id:c.id,rawId:encode(c.rawId),type:c.type,response:{clientDataJSON:encode(r.clientDataJSON),attestationObject:encode(r.attestationObject),transports:r.getTransports?r.getTransports():[]},clientExtensionResults:c.getClientExtensionResults(),authenticatorAttachment:c.authenticatorAttachment}}));}
+async function startTotp(){const r=await call('totp/start');$('qr').src=r.qr;$('totp-secret').textContent=r.secret;show('totp');$('setup-code').focus();}
+function recoveryInput(){$('code').value='';$('code').inputMode=useRecovery?'text':'numeric';$('code').maxLength=useRecovery?40:6;$('code-label').textContent=useRecovery?'Wiederherstellungscode':'Authenticator-Code';$('factor-intro').textContent=useRecovery?'Geben Sie einen Ihrer gesicherten Wiederherstellungscodes ein.':'Geben Sie den aktuellen Code Ihrer Authenticator-App ein.';$('recovery-mode').textContent=useRecovery?'Authenticator-Code verwenden':'Wiederherstellungscode verwenden';}
+async function management(){const s=await call('status');show('manage');$('remove-totp').classList.toggle('hidden',!s.hasTotp);$('factor-status').replaceChildren();const text=document.createElement('p');text.textContent=s.email+' · Authenticator: '+(s.hasTotp?'aktiv':'nicht eingerichtet');$('factor-status').append(text);for(const key of s.passkeys){const row=document.createElement('p');row.textContent=key.name;const b=document.createElement('button');b.className='secondary';b.textContent='Diesen Passkey entfernen';b.onclick=()=>action(async()=>accepted(await call('passkeys/remove',{credentialId:key.id})));row.append(b);$('factor-status').append(row);}}
+$('password-form').insertAdjacentHTML('beforeend','<a href="/forgot-password" class="link">Passwort vergessen?</a>');
+if(config.storage)$('password-form a').remove();
+$('password-form').onsubmit=e=>{e.preventDefault();action(async()=>{const r=await fetch('/api/auth/login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value.trim(),password:$('password').value,portal:config.portal})});$('password').value='';const result=await r.json().catch(()=>({}));if(!r.ok)throw Error(result.message||result.error||'E-Mail oder Passwort stimmt nicht.');await accepted(result);});};
+$('verify-form').onsubmit=e=>{e.preventDefault();action(async()=>accepted(await call('verify',useRecovery?{backupCode:$('code').value.trim()}:{token:$('code').value.trim()})));};
+$('confirm-form').onsubmit=e=>{e.preventDefault();action(async()=>accepted(await call('totp/confirm',{token:$('setup-code').value.trim()})));};
+for(const id of ['passkey-login','factor-passkey'])$(id).onclick=()=>action(passkeyLogin);
+for(const id of ['setup-passkey','add-passkey'])$(id).onclick=()=>action(register);
+for(const id of ['setup-totp','add-totp'])$(id).onclick=()=>action(startTotp);
+$('recovery-mode').onclick=()=>{useRecovery=!useRecovery;recoveryInput();};
+$('remove-totp').onclick=()=>action(async()=>accepted(await call('totp/remove')));
+$('regenerate').onclick=()=>action(async()=>accepted(await call('recovery/regenerate')));
+$('saved').onchange=()=>{$('backup-done').disabled=!$('saved').checked;};
+$('backup-done').onclick=()=>action(async()=>{codes=[];$('backup-codes').textContent='';if(config.manage)await management();else location.replace('/');});
+$('download-codes').onclick=()=>{const url=URL.createObjectURL(new Blob(['Wiederherstellungscodes für '+config.name+'\nJeder Code ist einmal verwendbar.\n\n'+codes.join('\n')],{type:'text/plain'}));const a=document.createElement('a');a.href=url;a.download='Wiederherstellungscodes.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+`;

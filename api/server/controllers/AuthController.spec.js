@@ -24,6 +24,8 @@ jest.mock('~/models', () => ({
 }));
 jest.mock('@librechat/api', () => ({
   math: jest.fn((value, fallback) => fallback),
+  requiredSecurity: jest.fn(() => false),
+  validAssurance: jest.fn(() => false),
   isEnabled: jest.fn(),
   findOpenIDUser: jest.fn(),
   getOpenIdIssuer: jest.fn(() => 'https://issuer.example.com'),

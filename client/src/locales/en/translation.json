@@ -2985,5 +2985,8 @@
   "com_ui_pdf_intake_read": "PDF read locally as text. Its text passes through the privacy filter.",
   "com_ui_pdf_intake_ocr": "PDF read with local OCR. Check amounts and account numbers against the original; OCR may contain errors.",
   "com_ui_pdf_intake_incomplete": "Only part of the PDF was read. The analysis is incomplete. Split the file for a complete review.",
-  "com_ui_pdf_intake_skipped": "PDF could not be safely read locally and was omitted. Chat continues; provide an unencrypted PDF or a text extract."
+  "com_ui_pdf_intake_skipped": "PDF could not be safely read locally and was omitted. Chat continues; provide an unencrypted PDF or a text extract.",
+  "com_auth_security_center": "Sign-in protection and passkeys",
+  "com_auth_security_setup_hint": "Protect your account with an authenticator or passkey. Finish running responses before setup.",
+  "com_auth_security_wait": "Please finish running responses and tasks first."
 }

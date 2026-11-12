@@ -2576,5 +2576,8 @@
   "com_ui_pdf_intake_read": "PDF lokal als Text gelesen. Der Text durchläuft den Datenschutzfilter.",
   "com_ui_pdf_intake_ocr": "PDF lokal per Texterkennung gelesen. Beträge und Kontonummern bitte am Original prüfen; OCR kann Fehler enthalten.",
   "com_ui_pdf_intake_incomplete": "PDF nur teilweise gelesen. Die Auswertung ist unvollständig. Für eine vollständige Prüfung die Datei aufteilen.",
-  "com_ui_pdf_intake_skipped": "PDF konnte lokal nicht sicher gelesen werden und wurde ausgelassen. Der Chat läuft weiter; bitte eine unverschlüsselte PDF oder einen Textauszug bereitstellen."
+  "com_ui_pdf_intake_skipped": "PDF konnte lokal nicht sicher gelesen werden und wurde ausgelassen. Der Chat läuft weiter; bitte eine unverschlüsselte PDF oder einen Textauszug bereitstellen.",
+  "com_auth_security_center": "Anmeldeschutz und Passkeys",
+  "com_auth_security_setup_hint": "Schützen Sie Ihr Konto mit Authenticator oder Passkey. Richten Sie den Schutz nach Abschluss laufender Antworten ein.",
+  "com_auth_security_wait": "Bitte zuerst laufende Antworten und Aufträge abschliessen."
 }

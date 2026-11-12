@@ -11,6 +11,8 @@ const { ErrorTypes, SystemRoles, errorsToString } = require('librechat-data-prov
 const {
   math,
   isEnabled,
+  requiredSecurity,
+  validAssurance,
   checkEmailConfig,
   setCloudFrontCookies,
   getCloudFrontConfig,
@@ -663,19 +665,24 @@ const setAuthTokens = async (userId, res, _session = null, req = null) => {
     let refreshTokenExpires;
     const expiresIn = math(process.env.REFRESH_TOKEN_EXPIRY, DEFAULT_REFRESH_TOKEN_EXPIRY);
 
+    const user = await getUserById(userId);
+    const assurance = req?.securityAssurance || session?.securityAssurance;
+    if (requiredSecurity() && !validAssurance(assurance, { ...user, id: String(user._id) })) {
+      throw new Error('MFA_REQUIRED');
+    }
+
     if (session && session._id && session.expiration != null) {
       refreshTokenExpires = session.expiration.getTime();
       refreshToken = await generateRefreshToken(session);
     } else {
-      const result = await createSession(userId, { expiresIn });
+      const result = await createSession(userId, { expiresIn, ...(req?.securityAssurance ? { securityAssurance: req.securityAssurance } : {}) });
       session = result.session;
       refreshToken = result.refreshToken;
       refreshTokenExpires = session.expiration.getTime();
     }
 
-    const user = await getUserById(userId);
     const sessionExpiry = math(process.env.SESSION_EXPIRY, DEFAULT_SESSION_EXPIRY);
-    const token = await generateToken(user, sessionExpiry);
+    const token = await generateToken(user, sessionExpiry, assurance);
 
     res.cookie('refreshToken', refreshToken, {
       expires: new Date(refreshTokenExpires),
