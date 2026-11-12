@@ -63,6 +63,7 @@ import {
   isFileAuthoringToolDefinition,
 } from './tools';
 import { registerMemoryTools, memoryToolUsageGuard } from './memory';
+import { DOCUMENT_TOOL_NAME, documentToolDefinition, documentInstructions } from './documents';
 import { applyIntentLabels, sanitizeIntentLabels } from './intent';
 import { applyBackgroundToolCalls } from './background';
 import { filterFilesByEndpointConfig } from '~/files';
@@ -1212,6 +1213,15 @@ export async function initializeAgent(
     });
     toolDefinitions = codeExecResult.toolDefinitions;
     recordCapabilityToolNames(AgentCapabilities.execute_code, codeExecResult.toolNames);
+    if (process.env.KISUNO_DOCUMENTS_ENABLED === 'true') {
+      toolRegistry?.set(DOCUMENT_TOOL_NAME, documentToolDefinition);
+      toolDefinitions = [
+        ...(toolDefinitions ?? []).filter((definition) => definition.name !== DOCUMENT_TOOL_NAME),
+        documentToolDefinition,
+      ];
+      recordCapabilityToolNames(AgentCapabilities.execute_code, [DOCUMENT_TOOL_NAME]);
+      appendAdditionalInstructions(agent, documentInstructions);
+    }
   } else if (agentRequestsCodeExec) {
     /**
      * Agent asked for `execute_code` but the admin-level gate is off —

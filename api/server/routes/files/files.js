@@ -1,4 +1,8 @@
 const fs = require('fs').promises;
+const {
+  assertDocumentQuality,
+  enabled: documentsEnabled,
+} = require('~/server/services/Files/documentQuality');
 const express = require('express');
 const { logger, SystemCapabilities } = require('@librechat/data-schemas');
 const {
@@ -366,9 +370,30 @@ router.get('/code/download/:session_id/:fileId', async (req, res) => {
       },
       req,
     );
+    if (documentsEnabled()) {
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of response.data) {
+        size += chunk.length;
+        if (size > 10 * 1024 * 1024) {
+          response.data.destroy();
+          return res.status(413).send('Datei zu gross für die verbindliche Ausgabeprüfung.');
+        }
+        chunks.push(Buffer.from(chunk));
+      }
+      const buffer = Buffer.concat(chunks);
+      await assertDocumentQuality(response.headers['content-disposition'] || '', buffer);
+      res.set('Content-Type', response.headers['content-type'] || 'application/octet-stream');
+      if (response.headers['content-disposition'])
+        res.set('Content-Disposition', response.headers['content-disposition']);
+      return res.send(buffer);
+    }
     res.set(response.headers);
     response.data.pipe(res);
   } catch (error) {
+    if (error?.code === 'DOCUMENT_QUALITY_BLOCKED') {
+      return res.status(422).json({ error: error.message });
+    }
     /* `logAxiosError` redacts buffer/stream response bodies — without
      * it, a stream-typed axios failure dumps the entire `Readable`'s
      * internal state (megabytes of socket + readableState) into the

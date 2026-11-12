@@ -2284,3 +2284,52 @@ describe('initializeAgent — run-scoped MCP tool definitions', () => {
     expect(result.accessibleMcpServerNames).toEqual(['db_only_server', rawServerName]);
   });
 });
+
+describe('initializeAgent — mandatory document generation', () => {
+  const original = process.env.KISUNO_DOCUMENTS_ENABLED;
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.KISUNO_DOCUMENTS_ENABLED = 'true';
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.KISUNO_DOCUMENTS_ENABLED;
+    else process.env.KISUNO_DOCUMENTS_ENABLED = original;
+  });
+  it.each([
+    { marker: true, available: true, expected: true },
+    { marker: true, available: false, expected: false },
+    { marker: false, available: true, expected: false },
+  ])(
+    'gates the native document tool on the existing code capability: %j',
+    async ({ marker, available, expected }) => {
+      const { agent, req, res, loadTools, db } = createMocks();
+      agent.tools = marker ? [Tools.execute_code] : [];
+      const registry = new Map();
+      loadTools.mockResolvedValue({
+        tools: [],
+        toolRegistry: registry,
+        toolDefinitions: [],
+        toolContextMap: {},
+        dynamicToolContextMap: {},
+      });
+      const result = await initializeAgent(
+        {
+          req,
+          res,
+          agent,
+          loadTools,
+          codeEnvAvailable: available,
+          endpointOption: { endpoint: EModelEndpoint.agents },
+          allowedProviders: new Set([Providers.OPENAI]),
+          isInitialAgent: true,
+        },
+        db,
+      );
+      expect(
+        result.toolDefinitions?.some((definition) => definition.name === 'generate_document'),
+      ).toBe(expected);
+      expect(registry.has('generate_document')).toBe(expected);
+      if (expected) expect(result.additional_instructions).toContain('Kundenlogo');
+    },
+  );
+});

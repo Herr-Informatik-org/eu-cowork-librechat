@@ -35,6 +35,7 @@ export * from './codeFilesSession';
 export * from './run';
 export * from './testHook';
 export * from './tools';
+export * from './documents';
 export * from './validation';
 export * from './added';
 export * from './load';

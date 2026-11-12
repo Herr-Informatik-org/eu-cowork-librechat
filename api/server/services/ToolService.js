@@ -1,4 +1,9 @@
 const { logger, redactMessage } = require('@librechat/data-schemas');
+const {
+  createDocumentTool,
+  guardBashDocumentOutputs,
+  enabled: documentsEnabled,
+} = require('./Files/documentQuality');
 const { tool: toolFn, DynamicStructuredTool } = require('@librechat/agents/langchain/tools');
 const {
   sleep,
@@ -29,6 +34,7 @@ const {
   buildMCPAuthRunStepCompletedEvent,
   isFileAuthoringToolDefinition,
   ASK_USER_QUESTION_TOOL_NAME,
+  DOCUMENT_TOOL_NAME,
   splitMCPToolKey,
   buildServerNameAliases,
   findShadowedServerNames,
@@ -1639,7 +1645,12 @@ async function loadToolsForExecution({
   const isCodeExecutionToolRequested = isBashToolRequested || isLegacyExecuteCodeRequested;
 
   let enabledCapabilities;
-  if (actionsEnabled === undefined || isPTCRequested || isCodeExecutionToolRequested) {
+  if (
+    actionsEnabled === undefined ||
+    isPTCRequested ||
+    isCodeExecutionToolRequested ||
+    toolNames.includes(DOCUMENT_TOOL_NAME)
+  ) {
     enabledCapabilities = await resolveAgentCapabilities(req, appConfig, agent?.id);
   }
   if (actionsEnabled === undefined) {
@@ -1714,10 +1725,19 @@ async function loadToolsForExecution({
         authHeaders: () => getCodeApiAuthHeaders(req),
         statefulSessions: statefulCodeSessions,
       });
-      allLoadedTools.push(bashTool);
+      allLoadedTools.push(guardBashDocumentOutputs(bashTool));
     } catch (error) {
       logger.error('[loadToolsForExecution] Failed to create bash_tool', error);
     }
+  }
+
+  if (
+    toolNames.includes(DOCUMENT_TOOL_NAME) &&
+    documentsEnabled() &&
+    codeExecutionEnabled &&
+    toolRegistry?.has(DOCUMENT_TOOL_NAME)
+  ) {
+    allLoadedTools.push(createDocumentTool(req));
   }
 
   const fileAuthoringToolNames = new Set(
@@ -1728,6 +1748,7 @@ async function loadToolsForExecution({
       : [],
   );
   const specialToolNames = new Set([
+    DOCUMENT_TOOL_NAME,
     AgentConstants.TOOL_SEARCH,
     AgentConstants.PROGRAMMATIC_TOOL_CALLING,
     AgentConstants.BASH_PROGRAMMATIC_TOOL_CALLING,

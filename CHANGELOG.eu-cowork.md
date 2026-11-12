@@ -1,5 +1,15 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-12 — Dokumente vor der Ausgabe verbindlich prüfen
+
+- Ein natives Dokumentwerkzeug erstellt Word, Excel und PDF über den
+  tenant-eigenen Renderer. Kundenlogos sind standardmässig enthalten und
+  können im Auftrag abgewählt werden.
+- Der Dateipfad verlangt den Nachweis des geprüften Exports. Freier Code
+  und Ausweichdownloads können ungeprüfte Office-Dateien nicht freigeben.
+- Rechen-, Layout- und Schriftfehler liefern eine Rückmeldung zur Korrektur;
+  Berechtigungen für Code-Ausführung und privater Dateibesitz gelten weiter.
+
 ## 2026-11-11 — PDF-Dateien im rechten Vorschaufenster öffnen
 
 - Erzeugte PDFs öffnen denselben Seitenbereich wie Word-Dateien, mit

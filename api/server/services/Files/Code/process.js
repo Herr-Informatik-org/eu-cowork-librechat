@@ -1,4 +1,9 @@
 const releaseLifecycle = require('~/server/services/daytimeRelease');
+const {
+  assertDocumentQuality,
+  governedFormat,
+  enabled: documentsEnabled,
+} = require('../documentQuality');
 const path = require('path');
 const { v4 } = require('uuid');
 const { logger } = require('@librechat/data-schemas');
@@ -370,9 +375,12 @@ const processCodeOutput = async ({
     });
 
     const buffer = Buffer.from(response.data, 'binary');
+    const documentQuality = await assertDocumentQuality(name, buffer);
 
     // Enforce file size limit
     if (buffer.length > fileSizeLimit) {
+      if (documentQuality)
+        throw new Error('Geprüfte Dokumentdatei überschreitet die erlaubte Dateigrösse.');
       logger.warn(
         `[processCodeOutput] File "${name}" (${(buffer.length / megabyte).toFixed(2)} MB) exceeds size limit of ${(fileSizeLimit / megabyte).toFixed(2)} MB, falling back to download URL`,
       );
@@ -549,6 +557,8 @@ const processCodeOutput = async ({
 
     const { saveBuffer } = getStrategyFunctions(appConfig.fileStrategy);
     if (!saveBuffer) {
+      if (documentQuality)
+        throw new Error('Dokument kann nicht im geschützten Dateispeicher abgelegt werden.');
       logger.warn(
         `[processCodeOutput] saveBuffer not available for strategy ${appConfig.fileStrategy}, falling back to download URL`,
       );
@@ -640,7 +650,7 @@ const processCodeOutput = async ({
       tenantId: req.user.tenantId,
       bytes: buffer.length,
       updatedAt: formattedDate,
-      metadata: { codeEnvRef, sourceDispatchedAt },
+      metadata: { codeEnvRef, sourceDispatchedAt, ...(documentQuality ? { documentQuality } : {}) },
       source: appConfig.fileStrategy,
       context: FileContext.execute_code,
       usage: isUpdate ? (claimed.usage ?? 0) + 1 : 1,
@@ -715,6 +725,13 @@ const processCodeOutput = async ({
     }
     return { file: Object.assign(file, { messageId, toolCallId, agentId }) };
   } catch (error) {
+    if (
+      documentsEnabled() &&
+      (governedFormat(name) || error?.code === 'DOCUMENT_QUALITY_BLOCKED')
+    ) {
+      logger.warn('[processCodeOutput] Document output blocked by mandatory quality policy');
+      throw error;
+    }
     if (error?.message === 'Path traversal detected in filename') {
       logger.warn(
         `[processCodeOutput] Path traversal blocked for file "${name}" | conv=${conversationId}`,
