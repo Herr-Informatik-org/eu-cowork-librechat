@@ -4,7 +4,13 @@ import {
   CacheKeys,
   type RefillIntervalUnit,
 } from 'librechat-data-provider';
-import type { IUser, BalanceConfig, CreateUserRequest, UserDeleteResult, SessionAssurance } from '~/types';
+import type {
+  IUser,
+  BalanceConfig,
+  CreateUserRequest,
+  UserDeleteResult,
+  SessionAssurance,
+} from '~/types';
 import type { CacheStore } from '~/types';
 import { escapeRegExp } from '~/utils/string';
 import { signPayload } from '~/crypto';
@@ -263,7 +269,10 @@ export function createUserMethods(
     const User = mongoose.models.User;
     const updateOperation = {
       $set: updateData,
-      $unset: { expiresAt: '', ...(updateData.password ? { pendingTotpSecret: '', pendingTotpExpires: '' } : {}) },
+      $unset: {
+        expiresAt: '',
+        ...(updateData.password ? { pendingTotpSecret: '', pendingTotpExpires: '' } : {}),
+      },
       ...(updateData.password ? { $inc: { securityVersion: 1 } } : {}),
     };
     const updated = await User.findByIdAndUpdate(userId, updateOperation, {
@@ -396,6 +405,10 @@ export function createUserMethods(
         .deleteMany({ ownerId: userId });
       await mailbox.deleteOne({ _id: userId, ownerId: userId });
       const result = await User.deleteOne({ _id: userId });
+      if (result.deletedCount > 0) await invalidateAuthUserDocCache(userId);
+      await mongoose.connection
+        .collection('kisuno_passkeys')
+        .deleteMany({ userId: String(userId) });
       // Close a connection-start race between the initial cleanup and account deletion.
       await mongoose.connection
         .collection<{ _id: string }>('eucowork_mail_credentials')
@@ -416,7 +429,6 @@ export function createUserMethods(
       if (result.deletedCount === 0) {
         return { deletedCount: 0, message: 'No user found with that ID.' };
       }
-      await invalidateAuthUserDocCache(userId);
       return { deletedCount: result.deletedCount, message: 'User was deleted successfully.' };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -429,7 +441,11 @@ export function createUserMethods(
    * @param user - The user object
    * @param expiresIn - Optional expiry time in milliseconds. Default: 15 minutes
    */
-  async function generateToken(user: IUser, expiresIn?: number, assurance?: SessionAssurance): Promise<string> {
+  async function generateToken(
+    user: IUser,
+    expiresIn?: number,
+    assurance?: SessionAssurance,
+  ): Promise<string> {
     if (!user) {
       throw new Error('No user provided');
     }

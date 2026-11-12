@@ -582,6 +582,19 @@ describe('User Methods - Database Tests', () => {
   });
 
   describe('deleteUserById', () => {
+    test('removes only the deleted account passkeys and preserves other accounts', async () => {
+      const user = await User.create({ email: 'passkey-owner@example.com', provider: 'local' });
+      const owner = String(user._id);
+      const keys = mongoose.connection.collection('kisuno_passkeys');
+      await keys.insertMany([
+        { userId: owner, credentialId: 'owned' },
+        { userId: 'other-account', credentialId: 'retained' },
+      ]);
+      await methods.deleteUserById(owner);
+      expect(await keys.countDocuments({ userId: owner })).toBe(0);
+      expect(await keys.countDocuments({ credentialId: 'retained' })).toBe(1);
+    });
+
     test('should delete user by ID', async () => {
       const user = await User.create({
         name: 'To Delete',

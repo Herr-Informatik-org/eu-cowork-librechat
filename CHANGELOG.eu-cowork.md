@@ -5,6 +5,7 @@
 - Lokale Konten richten vor dem ersten Zugriff Authenticator oder einen Passkey/FIDO2
   mit PIN beziehungsweise Biometrie ein. Chat und Kundenverwaltung teilen Faktoren
   und die nativen LibreChat-Sitzungen; Einrichtungsberechtigungen sind strikt getrennt.
+- Bei einer Kontolöschung werden auch die zugehörigen Passkeys entfernt.
 - Einmalige Challenges und Wiederherstellungscodes, TOTP-Replay-Schutz, frische
   Bestätigung für Faktoränderungen und Schutz des letzten Faktors. Passwortänderungen
   entwerten vorhandene Sicherheitsnachweise. Automatische Konfiguration verwendet
