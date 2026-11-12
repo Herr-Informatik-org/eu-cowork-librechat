@@ -156,6 +156,7 @@ export async function createSecurityStore(
       return (await credentials.find({ userId: id }).sort({ slot: 1 }).toArray()).map(normalize);
     },
     async credential(id) {
+      if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,2048}$/.test(id)) return null;
       const row = await credentials.findOne({ credentialId: id });
       return row ? normalize(row) : null;
     },

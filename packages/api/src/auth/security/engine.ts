@@ -350,8 +350,15 @@ export function createSecurityEngine(deps: SecurityDependencies): {
     route(async (req, res) => {
       await budget(req, undefined, 20);
       const body = req.body as Body;
-      const credential = body.credential ? await store.credential(body.credential.id) : null;
-      if (!credential || !body.credential || typeof body.sessionId !== 'string') throw failure();
+      if (
+        !body.credential ||
+        typeof body.credential.id !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,2048}$/.test(body.credential.id) ||
+        typeof body.sessionId !== 'string'
+      )
+        throw failure();
+      const credential = await store.credential(body.credential.id);
+      if (!credential) throw failure();
       const user = await store.account(credential.userId);
       if (disabled(user)) throw failure();
       const expectedEmail = await store.get('passkey-email:' + body.sessionId);

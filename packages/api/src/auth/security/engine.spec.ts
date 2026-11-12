@@ -197,6 +197,16 @@ describe('required MFA engine', () => {
     const token = jwt.sign({ id: h.getUser().id, mfa: proof }, 's'.repeat(48));
     expect((await h.post('recovery/regenerate', {}, token)).status).toBe(401);
   });
+  it('rejects structured credential identifiers before any credential database query', async () => {
+    const h = harness();
+    const lookup = jest.spyOn(h.store, 'credential');
+    const r = await h.post('passkeys/verify', {
+      sessionId: 'fixture',
+      credential: { id: { $regex: '.*' } },
+    });
+    expect(r.status).toBe(401);
+    expect(lookup).not.toHaveBeenCalled();
+  });
   it('rejects unknown origins before any security work', async () => {
     const h = harness(),
       r = await request(h.app)
