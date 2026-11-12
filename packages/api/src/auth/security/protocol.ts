@@ -46,9 +46,14 @@ export const requiredSecurity = (): boolean =>
 
 export function resolveSecurityConfig(env: NodeJS.ProcessEnv = process.env): SecurityConfig {
   const client = new URL(env.DOMAIN_CLIENT || 'http://localhost:3080');
+  const localPanel = ['localhost', '127.0.0.1'].includes(client.hostname)
+    ? `${client.protocol}//${client.hostname}:${env.ADMIN_SIDECAR_PORT || '3010'}`
+    : '';
   const origins = (
     env.PASSKEY_ORIGINS ||
-    [env.DOMAIN_CLIENT, env.DOMAIN_SERVER, env.EUCOWORK_PANEL_URL].filter(Boolean).join(',')
+    [client.origin, env.DOMAIN_SERVER, env.EUCOWORK_PANEL_URL || localPanel]
+      .filter(Boolean)
+      .join(',')
   )
     .split(',')
     .filter(Boolean)

@@ -71,6 +71,14 @@ describe('machine provisioning credentials', () => {
 });
 
 describe('security protocol', () => {
+  it('keeps the standard local chat and admin installation usable without extra origin configuration', () => {
+    const local = resolveSecurityConfig({
+      JWT_SECRET: 's'.repeat(48),
+      ENFORCE_TWO_FACTOR_AUTHENTICATION: 'true',
+    });
+    expect(local.origins).toEqual(['http://localhost:3080', 'http://localhost:3010']);
+    expect(local.rpID).toBe('localhost');
+  });
   it('separates setup, login challenge and full bearer credentials', () => {
     const token = securityToken(config, user, 'nonce', true);
     expect(verifySecurityToken(token, config)?.tokenPurpose).toBe('mfa-setup');
