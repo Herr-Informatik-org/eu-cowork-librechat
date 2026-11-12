@@ -7,8 +7,8 @@ COPY --chown=node:node api/server/notebooks.js ./api/server/notebooks.js
 COPY --chown=node:node api/server/routes/notebooks.js ./api/server/routes/notebooks.js
 COPY --chown=node:node api/server/services/PermissionService.js ./api/server/services/PermissionService.js
 COPY --chown=node:node client/dist ./client/dist
-ARG BUILD_COMMIT
-ENV BUILD_COMMIT=$BUILD_COMMIT NOTEBOOKS_ENABLED=true OTEL_SDK_DISABLED=true LANGCHAIN_TRACING_V2=false DEBUG_LOGGING=false DEBUG_CONSOLE=false BAN_VIOLATIONS=true
-LABEL org.opencontainers.image.revision="$BUILD_COMMIT" org.opencontainers.image.title="Kisuno CWV01 Wissensraum-Pilot"
+ARG NOTEBOOKS_SOURCE_COMMIT
+ENV BUILD_COMMIT=$NOTEBOOKS_SOURCE_COMMIT NOTEBOOKS_ENABLED=true OTEL_SDK_DISABLED=true LANGCHAIN_TRACING_V2=false DEBUG_LOGGING=false DEBUG_CONSOLE=false BAN_VIOLATIONS=true
+LABEL org.opencontainers.image.revision="$NOTEBOOKS_SOURCE_COMMIT" org.opencontainers.image.title="Kisuno CWV01 Wissensraum-Pilot"
 USER node
 CMD ["node","api/server/notebooks.js"]
