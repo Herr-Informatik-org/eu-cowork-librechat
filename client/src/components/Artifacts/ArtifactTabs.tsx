@@ -12,6 +12,7 @@ import { useShareContext } from '~/Providers';
 import { isPreviewOnlyArtifact } from '~/utils/artifacts';
 import OfficeDocumentPreview from './OfficeDocumentPreview';
 import SpreadsheetPreview from './SpreadsheetPreview';
+import InteractiveHtmlPreview from './InteractiveHtmlPreview';
 
 export default function ArtifactTabs({
   artifact,
@@ -65,6 +66,11 @@ export default function ArtifactTabs({
           ) : (
             <OfficeDocumentPreview artifact={artifact} />
           )
+        ) : artifact.type === 'text/html' ? (
+          <InteractiveHtmlPreview
+            artifact={artifact}
+            content={currentCode ?? artifact.content ?? ''}
+          />
         ) : (
           <ArtifactPreview
             files={files}

@@ -5,6 +5,10 @@ import { components } from './components';
 
 const artifactsPrompt = dedent`The assistant can create and reference artifacts during conversations.
   
+Bei Vergleichen mit veränderbaren Annahmen, Rechnern, Dashboards, Filtern, Zeitplänen oder anschaulichen Abläufen prüfe aktiv, ob ein interaktives Artefakt einen konkreten Mehrwert bietet. Schlage es knapp vor; bei einem klaren Auftrag für eine solche Darstellung erstelle es direkt. Für kurze Fakten und gewöhnliche Texte genügt die normale Antwort.
+Bevorzuge eigenständiges text/html mit eingebettetem CSS und JavaScript für teilbare interaktive Werkzeuge. Keine externen Skripte, Fonts, Bilder, CDN-Abhängigkeiten, API-Aufrufe, Tracking oder Backend-Geheimnisse. Verwende semantische Eingaben, sichtbare Beschriftungen, Tastaturbedienung, gut lesbare Kontraste, responsives Layout, Einheiten, Quellen und nachvollziehbare Berechnungen. Keine erfundenen Daten. Stelle Beispieldaten ausdrücklich als solche dar. Berücksichtige den ausgewählten Benutzer-Skill und seine Gestaltung.
+Die HTML-Vorschau läuft isoliert. Zustand bleibt nur im aktuellen Browserrahmen; keine dauerhafte Speicherung oder Anmeldung versprechen. Der Nutzer kann das Artefakt in einem neuen Tab öffnen, einen geschützten Direktlink kopieren oder das HTML herunterladen. Ein privater Link veröffentlicht nichts. Für andere Personen muss der Nutzer die vorhandene Chatfreigabe ausdrücklich verwenden; erfinde keine öffentliche URL. Bei Änderungen vollständigen lauffähigen Inhalt mit gleichem identifier ausgeben.
+
 Artifacts are for substantial, self-contained content that users might modify or reuse, displayed in a separate UI window for clarity.
 
 # Good artifacts are...
@@ -21,11 +25,11 @@ Artifacts are for substantial, self-contained content that users might modify or
 - Conversational or explanatory content that doesn't represent a standalone piece of work
 - Content that is dependent on the current conversational context to be useful
 - Content that is unlikely to be modified or iterated upon by the user
-- Request from users that appears to be a one-off question
+- Kurze Einzelfragen ohne Nutzen durch eine eigenständige interaktive Darstellung
 
 # Usage notes
 - One artifact per message unless specifically requested
-- Prefer in-line content (don't use artifacts) when possible. Unnecessary use of artifacts can be jarring for users.
+- Nutze normale Antworten für kurze Erklärungen. Wenn veränderbare Annahmen, Filter oder Interaktion helfen, bevorzuge ein Artefakt und erkläre seinen Nutzen knapp.
 - If a user asks the assistant to "draw an SVG" or "make a website," the assistant does not need to explain that it doesn't have these capabilities. Creating the code and placing it within the appropriate artifact will fulfill the user's intentions.
 - If asked to generate an image, the assistant can offer an SVG instead. The assistant isn't very proficient at making SVG images but should engage with the task positively. Self-deprecating humor about its abilities can make it an entertaining experience for users.
 - The assistant errs on the side of simplicity and avoids overusing artifacts for content that can be effectively presented within the conversation.
@@ -49,7 +53,7 @@ Artifacts are for substantial, self-contained content that users might modify or
     - HTML: "text/html"
       - The user interface can render single file HTML pages placed within the artifact tags. HTML, JS, and CSS should be in a single file when using the \`text/html\` type.
       - Images from the web are not allowed, but you can use placeholder images by specifying the width and height like so \`<img src="/api/placeholder/400/320" alt="placeholder" />\`
-      - The only place external scripts can be imported from is https://cdnjs.cloudflare.com
+      - External scripts and network requests are blocked in HTML previews. Include all JavaScript and CSS inline.
     - SVG: "image/svg+xml"
       - The user interface will render the Scalable Vector Graphics (SVG) image within the artifact tags.
       - The assistant should specify the viewbox of the SVG rather than defining a width/height
@@ -196,6 +200,10 @@ Here are some examples of correct usage of artifacts:
 
 const artifactsOpenAIPrompt = dedent`The assistant can create and reference artifacts during conversations.
   
+Bei Vergleichen mit veränderbaren Annahmen, Rechnern, Dashboards, Filtern, Zeitplänen oder anschaulichen Abläufen prüfe aktiv, ob ein interaktives Artefakt einen konkreten Mehrwert bietet. Schlage es knapp vor; bei einem klaren Auftrag für eine solche Darstellung erstelle es direkt. Für kurze Fakten und gewöhnliche Texte genügt die normale Antwort.
+Bevorzuge eigenständiges text/html mit eingebettetem CSS und JavaScript für teilbare interaktive Werkzeuge. Keine externen Skripte, Fonts, Bilder, CDN-Abhängigkeiten, API-Aufrufe, Tracking oder Backend-Geheimnisse. Verwende semantische Eingaben, sichtbare Beschriftungen, Tastaturbedienung, gut lesbare Kontraste, responsives Layout, Einheiten, Quellen und nachvollziehbare Berechnungen. Keine erfundenen Daten. Stelle Beispieldaten ausdrücklich als solche dar. Berücksichtige den ausgewählten Benutzer-Skill und seine Gestaltung.
+Die HTML-Vorschau läuft isoliert. Zustand bleibt nur im aktuellen Browserrahmen; keine dauerhafte Speicherung oder Anmeldung versprechen. Der Nutzer kann das Artefakt in einem neuen Tab öffnen, einen geschützten Direktlink kopieren oder das HTML herunterladen. Ein privater Link veröffentlicht nichts. Für andere Personen muss der Nutzer die vorhandene Chatfreigabe ausdrücklich verwenden; erfinde keine öffentliche URL. Bei Änderungen vollständigen lauffähigen Inhalt mit gleichem identifier ausgeben.
+
 Artifacts are for substantial, self-contained content that users might modify or reuse, displayed in a separate UI window for clarity.
 
 # Good artifacts are...
@@ -212,11 +220,11 @@ Artifacts are for substantial, self-contained content that users might modify or
 - Conversational or explanatory content that doesn't represent a standalone piece of work
 - Content that is dependent on the current conversational context to be useful
 - Content that is unlikely to be modified or iterated upon by the user
-- Request from users that appears to be a one-off question
+- Kurze Einzelfragen ohne Nutzen durch eine eigenständige interaktive Darstellung
 
 # Usage notes
 - One artifact per message unless specifically requested
-- Prefer in-line content (don't use artifacts) when possible. Unnecessary use of artifacts can be jarring for users.
+- Nutze normale Antworten für kurze Erklärungen. Wenn veränderbare Annahmen, Filter oder Interaktion helfen, bevorzuge ein Artefakt und erkläre seinen Nutzen knapp.
 - If a user asks the assistant to "draw an SVG" or "make a website," the assistant does not need to explain that it doesn't have these capabilities. Creating the code and placing it within the appropriate artifact will fulfill the user's intentions.
 - If asked to generate an image, the assistant can offer an SVG instead. The assistant isn't very proficient at making SVG images but should engage with the task positively. Self-deprecating humor about its abilities can make it an entertaining experience for users.
 - The assistant errs on the side of simplicity and avoids overusing artifacts for content that can be effectively presented within the conversation.
@@ -254,7 +262,7 @@ Artifacts are for substantial, self-contained content that users might modify or
     - HTML: "text/html"
       - The user interface can render single file HTML pages placed within the artifact tags. HTML, JS, and CSS should be in a single file when using the \`text/html\` type.
       - Images from the web are not allowed, but you can use placeholder images by specifying the width and height like so \`<img src="/api/placeholder/400/320" alt="placeholder" />\`
-      - The only place external scripts can be imported from is https://cdnjs.cloudflare.com
+      - External scripts and network requests are blocked in HTML previews. Include all JavaScript and CSS inline.
     - SVG: "image/svg+xml"
       - The user interface will render the Scalable Vector Graphics (SVG) image within the artifact tags.
       - The assistant should specify the viewbox of the SVG rather than defining a width/height

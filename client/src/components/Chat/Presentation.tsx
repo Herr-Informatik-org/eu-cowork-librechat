@@ -1,3 +1,4 @@
+import useArtifactDeepLink from '~/hooks/Artifacts/useArtifactDeepLink';
 import { useEffect, useMemo } from 'react';
 import { useRecoilValue, useSetRecoilState } from 'recoil';
 import { FileSources, LocalStorageKeys } from 'librechat-data-provider';
@@ -26,6 +27,7 @@ export default function Presentation({ children }: { children: React.ReactNode }
   const currentArtifactId = useRecoilValue(store.currentArtifactId);
 
   useResetArtifactsOnConversationChange();
+  useArtifactDeepLink();
   useSessionExit();
   useEffect(() => {
     if (artifactsVisibility && currentArtifactId) setContextHidden(false);

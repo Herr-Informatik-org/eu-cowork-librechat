@@ -1399,6 +1399,17 @@ class BaseClient {
     for (const file of attachments) {
       /** @type {FileSources} */
       const source = file.source ?? FileSources.local;
+      if (
+        process.env.KISUNO_DOCUMENTS_ENABLED === 'true' &&
+        source !== FileSources.text &&
+        source !== FileSources.vectordb &&
+        (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+          /\.(docx|xlsx)$/i.test(file.filename || ''))
+      ) {
+        categorizedAttachments.documents.push(file);
+        allFiles.push(file);
+        continue;
+      }
       if (source === FileSources.text) {
         allFiles.push(file);
         continue;

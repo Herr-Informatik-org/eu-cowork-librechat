@@ -45,7 +45,15 @@ export default function UploadSkillDialog({ isOpen, setIsOpen }: UploadSkillDial
 
   const importMutation = useImportSkillMutation({
     onSuccess: (skill) => {
-      showToast({ status: 'success', message: localize('com_ui_skill_created') });
+      const failed =
+        (skill as typeof skill & { _importSummary?: { filesFailed?: number } })._importSummary
+          ?.filesFailed ?? 0;
+      showToast({
+        status: failed ? 'error' : 'success',
+        message: failed
+          ? localize('com_ui_skill_partial_import', { 0: String(failed) })
+          : localize('com_ui_skill_created'),
+      });
       setIsOpen(false);
       navigate(`/skills/${skill._id}`);
     },
@@ -150,7 +158,7 @@ export default function UploadSkillDialog({ isOpen, setIsOpen }: UploadSkillDial
           <input
             ref={fileInputRef}
             type="file"
-            accept=".zip,.skill,.md"
+            accept=".zip,.skill,.plugin,.md"
             className="hidden"
             onChange={handleFileInput}
           />

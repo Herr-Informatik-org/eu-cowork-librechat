@@ -1,5 +1,23 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-12 — Vollständige Vorlagen-Skills und interaktive Artefakte
+
+- Ein gemeinsamer Datei-Upload wählt die erlaubte Verarbeitung automatisch;
+  technische Alternativen bleiben aufklappbar. Word- und Excel-Originale werden
+  lokal ausgewertet. Auch Analyse-Uploads liefern nun ihre private Datei-ID.
+- `build_skill` bündelt Anleitung, eigene Ressourcen, Anwendungsfälle und
+  Gegenbeispiele. Word-Pakete enthalten das Original, effektive Schriftstile
+  und tatsächlich erzeugte, geprüfte DOCX-/PDF-Proben. Erst ein vollständiges
+  Paket wird aktiviert. Fehlversuche werden zurückgenommen.
+- Registrierte private Vorlagen können direkt im Dokumentgenerator verwendet
+  werden. Benutzer-Skills bleiben vorrangig. Einteilige Word-Vorlagen erhalten
+  Kopf-/Fusszeile, Seitenlayout und Hausschrift; der PDF-Ersatz wird ausgewiesen.
+- Einzelne `.plugin`-Pakete können ohne Ausführung ihres fremden Codes importiert
+  werden. Unvollständige Pluginimporte werden zurückgenommen.
+- HTML-Artefakte erhalten eine isolierte interaktive Vorschau, Grossansicht,
+  geschützte Direktlinks und HTML-Download. Der Assistent schlägt passende
+  interaktive Darstellungen vor. Teilen erfolgt über die Chatfreigabe.
+
 ## 2026-11-12 — Word-Originale privat lesen und in Skills erhalten
 
 - Der Dokumentstandard liest DOCX-Anhänge vor dem Modellaufruf lokal als Text

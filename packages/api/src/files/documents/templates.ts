@@ -11,15 +11,16 @@ export function isWordTemplate(
   return mimeType === DOCX_MIME || /\.docx$/i.test(filename ?? '');
 }
 
-export async function inspectWordTemplate(data: Buffer): Promise<string> {
+async function inspectOfficeFile(data: Buffer, format: 'docx' | 'xlsx'): Promise<string> {
   if (!data.length || data.length > MAX_BYTES) {
-    throw new Error('Word-Vorlage ist leer oder grösser als 10 MiB.');
+    throw new Error('Office-Datei ist leer oder grösser als 10 MiB.');
   }
   const target = new URL(process.env.OFFICE_PREVIEW_RENDERER_URL || 'http://office-preview:8090');
   if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) {
     throw new Error('Lokale Dokumentverarbeitung ist nicht korrekt eingerichtet.');
   }
-  target.pathname = '/documents/inspect-template';
+  target.pathname =
+    format === 'docx' ? '/documents/inspect-template' : '/documents/inspect-workbook';
   target.search = '';
   let response: Response;
   try {
@@ -32,7 +33,7 @@ export async function inspectWordTemplate(data: Buffer): Promise<string> {
     });
   } catch {
     throw new Error(
-      'Word-Vorlage konnte lokal nicht geprüft werden. Es werden keine ungeprüften Originaldateien an das Modell gesendet.',
+      'Office-Datei konnte lokal nicht geprüft werden. Es werden keine ungeprüften Originaldateien an das Modell gesendet.',
     );
   }
   const chunks: Buffer[] = [];
@@ -52,7 +53,7 @@ export async function inspectWordTemplate(data: Buffer): Promise<string> {
   }
   if (!response.ok)
     throw new Error(
-      'Word-Vorlage kann nicht sicher gelesen werden. Unverschlüsselte DOCX-Datei ohne Makros verwenden.',
+      'Office-Datei kann nicht sicher gelesen werden. Unverschlüsselte DOCX- oder XLSX-Datei ohne Makros verwenden.',
     );
   const text = Buffer.concat(chunks).toString('utf8');
   const report = JSON.parse(text) as {
@@ -61,11 +62,24 @@ export async function inspectWordTemplate(data: Buffer): Promise<string> {
     binarySentToModel?: boolean;
   };
   if (
-    report.format !== 'docx' ||
+    report.format !== format ||
     report.sha256 !== createHash('sha256').update(data).digest('hex') ||
     report.binarySentToModel !== false
   ) {
     throw new Error('Vorlage und lokale Prüfung stimmen nicht überein.');
   }
   return text;
+}
+
+export function inspectWordTemplate(data: Buffer): Promise<string> {
+  return inspectOfficeFile(data, 'docx');
+}
+export function inspectSpreadsheet(data: Buffer): Promise<string> {
+  return inspectOfficeFile(data, 'xlsx');
+}
+export function isSpreadsheet(filename: string | undefined, mimeType: string | undefined): boolean {
+  return (
+    mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    /\.xlsx$/i.test(filename ?? '')
+  );
 }

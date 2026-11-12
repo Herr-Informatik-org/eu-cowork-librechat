@@ -51,7 +51,7 @@ const router = express.Router();
 // ---------------------------------------------------------------------------
 // Multer: memory storage for skill imports (zip processed in-memory)
 // ---------------------------------------------------------------------------
-const ALLOWED_EXTENSIONS = new Set(['.md', '.zip', '.skill']);
+const ALLOWED_EXTENSIONS = new Set(['.md', '.zip', '.skill', '.plugin']);
 const MAX_IMPORT_SIZE = 50 * 1024 * 1024; // 50 MB
 
 const memoryStorage = multer.memoryStorage();
@@ -67,7 +67,7 @@ const skillImportFilter = (_req, file, cb) => {
     cb(null, true);
   } else {
     // N.B. The error handler at the bottom of this file matches this "Only " prefix.
-    cb(new Error('Only .md, .zip, and .skill files are allowed'), false);
+    cb(new Error('Only .md, .zip, .skill, and .plugin files are allowed'), false);
   }
 };
 

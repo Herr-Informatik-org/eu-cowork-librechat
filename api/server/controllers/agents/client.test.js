@@ -2264,6 +2264,28 @@ describe('AgentClient - titleConvo', () => {
       client.useMemory = jest.fn().mockResolvedValue(undefined);
     });
 
+    it('locally inspects a Word analysis upload even when it has code-environment metadata', async () => {
+      const previous = process.env.KISUNO_DOCUMENTS_ENABLED;
+      process.env.KISUNO_DOCUMENTS_ENABLED = 'true';
+      try {
+        const file = {
+          ...makeUploadedFile(
+            'word-upload',
+            'Vorlage.docx',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          ),
+          metadata: { codeEnvRef: { kind: 'user', id: 'user-123', file_id: 'code-object' } },
+        };
+        const message = { messageId: 'word-msg', text: 'Erstelle einen Skill aus dieser Vorlage.' };
+        client.addDocuments = jest.fn(async () => [file]);
+        expect(await client.processAttachments(message, [file])).toEqual([file]);
+        expect(client.addDocuments).toHaveBeenCalledWith(message, [file]);
+      } finally {
+        if (previous === undefined) delete process.env.KISUNO_DOCUMENTS_ENABLED;
+        else process.env.KISUNO_DOCUMENTS_ENABLED = previous;
+      }
+    });
+
     it.each([
       ['CSV', 'csv-file', 'sample.csv', 'text/csv'],
       [

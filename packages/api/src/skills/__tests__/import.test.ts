@@ -416,3 +416,79 @@ describe('createImportHandler', () => {
     expect(deps.createSkill).not.toHaveBeenCalled();
   });
 });
+
+describe('single-skill plugin packages', () => {
+  it('imports nested Claude-compatible skill resources without package metadata', async () => {
+    const zip = new JSZip();
+    zip.file('.claude-plugin/plugin.json', '{}');
+    zip.file('README.md', 'Metadata');
+    zip.file(
+      'skills/demo/SKILL.md',
+      '---\nname: demo\ndescription: Wiederverwendbarer Skill mit vollständig gebündelten Referenzen.\n---\n# Demo',
+    );
+    zip.file('skills/demo/assets/reference.txt', 'Original resource');
+    const request = mockZipRequest(await zip.generateAsync({ type: 'nodebuffer' }));
+    request.file!.originalname = 'demo.plugin';
+    const deps = mockImportDeps();
+    const response = mockResponse();
+    await createImportHandler(deps)(request, response);
+    expect(response.statusCode).toBe(201);
+    expect(deps.upsertSkillFile).toHaveBeenCalledTimes(1);
+    expect(deps.upsertSkillFile).toHaveBeenCalledWith(
+      expect.objectContaining({ relativePath: 'assets/reference.txt' }),
+    );
+  });
+  it('rejects an ambiguous multi-skill plugin before creating a skill', async () => {
+    const zip = new JSZip();
+    for (const name of ['first', 'second'])
+      zip.file(
+        'skills/' + name + '/SKILL.md',
+        '---\nname: ' +
+          name +
+          '\ndescription: Ein dokumentierter wiederverwendbarer Test-Skill.\n---\n# Demo',
+      );
+    const request = mockZipRequest(await zip.generateAsync({ type: 'nodebuffer' }));
+    request.file!.originalname = 'ambiguous.plugin';
+    const deps = mockImportDeps();
+    const response = mockResponse();
+    await createImportHandler(deps)(request, response);
+    expect(response.statusCode).toBe(400);
+    expect(deps.createSkill).not.toHaveBeenCalled();
+  });
+});
+
+it('rolls back incomplete plugin packages instead of presenting them as ready', async () => {
+  const request = mockZipRequest(await zipWithAdditionalFiles(1, 1024));
+  request.file!.originalname = 'incomplete.plugin';
+  const deps = mockImportDeps({ maxSingleFileBytes: 512 });
+  const response = mockResponse();
+  await createImportHandler(deps)(request, response);
+  expect(response.statusCode).toBe(422);
+  expect(deps.deleteSkill).toHaveBeenCalledTimes(1);
+});
+it('adapts a bundled Word skill to the verified native document path', async () => {
+  const previous = process.env.KISUNO_DOCUMENTS_ENABLED;
+  process.env.KISUNO_DOCUMENTS_ENABLED = 'true';
+  try {
+    const zip = new JSZip();
+    zip.file(
+      'skills/demo/SKILL.md',
+      '---\nname: demo\ndescription: Ein vollständiger Vorlagen-Skill für Word-Dokumente.\n---\nOriginal workflow',
+    );
+    zip.file('skills/demo/assets/reference.docx', 'inert test resource');
+    const request = mockZipRequest(await zip.generateAsync({ type: 'nodebuffer' }));
+    request.file!.originalname = 'demo.plugin';
+    const deps = mockImportDeps();
+    const response = mockResponse();
+    await createImportHandler(deps)(request, response);
+    expect(response.statusCode).toBe(201);
+    expect(deps.createSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('skills/demo/assets/reference.docx'),
+      }),
+    );
+  } finally {
+    if (previous === undefined) delete process.env.KISUNO_DOCUMENTS_ENABLED;
+    else process.env.KISUNO_DOCUMENTS_ENABLED = previous;
+  }
+});

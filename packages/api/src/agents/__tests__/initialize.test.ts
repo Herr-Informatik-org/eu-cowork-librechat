@@ -1546,7 +1546,7 @@ describe('initializeAgent — skill `allowed-tools` union (Phase 6)', () => {
        so skill authoring still works. */
     expect(loadTools).toHaveBeenCalledTimes(2);
     const definedNames = result.toolDefinitions?.map((d) => d.name) ?? [];
-    expect(definedNames).toEqual(['read_file', 'create_file', 'edit_file']);
+    expect(definedNames).toEqual(['build_skill', 'read_file', 'create_file', 'edit_file']);
   });
 
   it('propagates the error when loadTools fails AND there are no skill-added extras to drop', async () => {

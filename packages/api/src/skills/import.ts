@@ -163,7 +163,7 @@ export function createImportHandler(deps: ImportSkillDeps) {
       if (ext === '.md') {
         return await handleMarkdown(req, res, deps, file);
       }
-      if (ext === '.zip' || ext === '.skill') {
+      if (ext === '.zip' || ext === '.skill' || ext === '.plugin') {
         return await handleZip(req, res, deps, file);
       }
       return res.status(400).json({ error: `Unsupported file type: ${ext}` });
@@ -324,25 +324,18 @@ async function handleZip(
     return res.status(400).json({ error: `Too many files in archive (max ${limits.maxEntries})` });
   }
 
-  // Find SKILL.md — at root or one level deep
-  let skillMdPath: string | null = null;
-  let prefix = '';
-  for (const p of entries) {
-    const normalized = p.replace(/\\/g, '/');
-    const segments = normalized.split('/').filter(Boolean);
-    const basename = segments[segments.length - 1];
-    if (basename?.toUpperCase() === SKILL_MD.toUpperCase() && segments.length <= 2) {
-      skillMdPath = p;
-      if (segments.length === 2) {
-        prefix = segments[0] + '/';
-      }
-      break;
-    }
+  // Accept one canonical skill at root, one folder deep, or in a plugin skills folder.
+  const candidates = entries.filter((entry) => {
+    const p = entry.replace(/\\/g, '/');
+    return /^(?:[^/]+\/)?SKILL\.md$/i.test(p) || /^skills\/[^/]+\/SKILL\.md$/i.test(p);
+  });
+  if (candidates.length !== 1) {
+    return res
+      .status(400)
+      .json({ error: 'Paket muss genau einen eindeutig zugeordneten SKILL.md enthalten.' });
   }
-
-  if (!skillMdPath) {
-    return res.status(400).json({ error: 'Archive must contain a SKILL.md file' });
-  }
+  const skillMdPath = candidates[0];
+  const prefix = skillMdPath.replace(/\\/g, '/').slice(0, -SKILL_MD.length);
 
   const skillMdEntry = zip.file(skillMdPath);
   const declaredSize =
@@ -379,7 +372,7 @@ async function handleZip(
   const inferredName =
     name ||
     file.originalname
-      .replace(/\.(zip|skill)$/i, '')
+      .replace(/\.(zip|skill|plugin)$/i, '')
       .replace(/[^a-z0-9-]/gi, '-')
       .replace(/^-+/, '')
       .toLowerCase();
@@ -390,11 +383,22 @@ async function handleZip(
 
   const { authorId, authorName, tenantId } = getAuthorInfo(req);
 
+  const wordReferences = entries
+    .map((entry) => entry.replace(/\\/g, '/'))
+    .filter((entry) => entry.startsWith(prefix))
+    .map((entry) => entry.slice(prefix.length))
+    .filter((entry) => /\.docx$/i.test(entry) && isSafeSkillFilePath(entry));
+  const nativeDocumentGuide =
+    process.env.KISUNO_DOCUMENTS_ENABLED === 'true' && wordReferences.length === 1
+      ? '\n\n## Verbindlicher Ausgabeweg in Kisuno\nDie importierten Inhalts- und Gestaltungsvorgaben bleiben massgebend. Für Word/PDF verwende generate_document mit template_path=' +
+        JSON.stringify('skills/' + inferredName + '/' + wordReferences[0]) +
+        '. Das Original zuerst mit read_file prüfen. Der native Generator erhält Kopf, Fusszeile, Layout und Schriftrollen; PDF-Ersatzschriften werden im Prüfbericht ausgewiesen. Importierte Skripte können der Analyse dienen, ersetzen aber die verbindliche Dokumentprüfung nicht. Ist die Originaldatei nicht verfügbar, keinen erfolgreichen Vorlagenimport behaupten und nicht still auf das Standardlayout wechseln.\n'
+      : '';
   // Create the skill (runs full validation: name pattern, description length, etc.)
   const result = await deps.createSkill({
     name: inferredName,
     description: description || inferredName,
-    body: skillMdContent,
+    body: skillMdContent + nativeDocumentGuide,
     author: authorId,
     authorName,
     alwaysApply,
@@ -412,6 +416,7 @@ async function handleZip(
   // Process additional files (everything except SKILL.md)
   const fileResults: Array<{ path: string; status: 'ok' | 'error'; error?: string }> = [];
   let totalDecompressed = 0;
+  const savedFiles: Array<{ filepath: string; source: string; [key: string]: unknown }> = [];
 
   for (const [entryPath, zipEntry] of Object.entries(zip.files)) {
     if (zipEntry.dir) {
@@ -419,7 +424,9 @@ async function handleZip(
     }
     const normalized = entryPath.replace(/\\/g, '/');
 
-    // Strip the prefix if SKILL.md was inside a folder
+    // Package metadata and sibling skills never become part of the selected skill.
+    if (prefix && !normalized.startsWith(prefix)) continue;
+    // Strip the selected skill's prefix.
     const relativePath =
       prefix && normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized;
 
@@ -542,6 +549,7 @@ async function handleZip(
         throw dbError;
       }
 
+      savedFiles.push({ filepath, source, storageKey, storageRegion, user: authorId, tenantId });
       fileResults.push({ path: relativePath, status: 'ok' });
     } catch (error) {
       logger.error(`[importSkill] Failed to process file ${relativePath}:`, error);
@@ -561,6 +569,16 @@ async function handleZip(
     } else {
       errors.push(r);
     }
+  }
+
+  if (errors.length && path.extname(file.originalname).toLowerCase() === '.plugin') {
+    for (const stored of savedFiles) await deps.deleteFile?.(req, stored).catch(() => undefined);
+    await deps.deleteSkill(String(skill._id));
+    return res.status(422).json({
+      error:
+        'Plugin konnte nicht vollständig importiert werden. Keine unvollständige Skill-Anlage aktiviert.',
+      errors,
+    });
   }
 
   logger.info(

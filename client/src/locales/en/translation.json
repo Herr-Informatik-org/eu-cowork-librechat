@@ -2964,5 +2964,20 @@
   "com_ui_mail_research_template": "Beispiel für Offerten und Lizenzen einfügen",
   "com_ui_mail_research_template_name": "Offerten und Lizenzen prüfen",
   "com_ui_mail_research_template_instructions": "Vergleiche die aktuelle Offerte mit früheren Rechnungen und Lizenzpositionen des ausgewählten Kunden. Unterscheide Lizenzen, Backup-Leistungen und optionale Positionen. Prüfe besonders, ob Microsoft-365-Lizenzen enthalten sind. Belege jede Aussage mit Quelle und Datum; kennzeichne fehlende Angaben als nicht belegt.",
-  "com_ui_mail_rule_shortcut": "Ctrl/⌘ + Enter speichert nur deine ausdrücklich formulierte persönliche Regel. Escape schliesst diesen Bereich."
+  "com_ui_mail_rule_shortcut": "Ctrl/⌘ + Enter speichert nur deine ausdrücklich formulierte persönliche Regel. Escape schliesst diesen Bereich.",
+  "com_ui_upload_add_files": "Add files",
+  "com_ui_upload_use_in_chat": "Use file in chat",
+  "com_ui_upload_auto_description": "Kisuno chooses suitable processing for content, spreadsheets and templates. Privacy rules remain active.",
+  "com_ui_upload_advanced": "Advanced options",
+  "com_ui_upload_word_template": "Analyze a Word file or use it as a template",
+  "com_ui_upload_word_template_description": "Makes the original, including its logo and formatting, available for a complete template skill. Describe the skill you need in the chat.",
+  "com_ui_skill_partial_import": "Skill import is incomplete: {{0}} file(s) are missing. Fix the resources before use.",
+  "com_ui_artifact_too_large": "The interactive preview is too large. Split the content into multiple artifacts.",
+  "com_ui_artifact_open_tab": "Open in new tab",
+  "com_ui_artifact_copy_link": "Copy link",
+  "com_ui_artifact_link_copied": "Link copied",
+  "com_ui_artifact_shared_access": "This chat’s sharing settings apply.",
+  "com_ui_artifact_private_access": "Private: access to this chat is required. Use chat sharing to share it.",
+  "com_ui_artifact_manual_link": "Direct link for manual copying",
+  "com_ui_artifact_interactive_preview": "Interactive preview"
 }

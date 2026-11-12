@@ -1,3 +1,4 @@
+import { defaultUploadRoute } from '~/utils/defaultUploadRoute';
 import React, { useMemo } from 'react';
 import { useRecoilValue } from 'recoil';
 import { OGDialog, OGDialogTemplate } from '@librechat/client';
@@ -61,8 +62,14 @@ const DragDropModal = () => {
         };
       case EToolResources.execute_code:
         return {
-          label: localize('com_ui_upload_code_environment'),
-          description: localize('com_ui_upload_code_description'),
+          label:
+            files.length > 0 && files.every((file) => /\.docx$/i.test(file.name))
+              ? localize('com_ui_upload_word_template')
+              : localize('com_ui_upload_code_environment'),
+          description:
+            files.length > 0 && files.every((file) => /\.docx$/i.test(file.name))
+              ? localize('com_ui_upload_word_template_description')
+              : localize('com_ui_upload_code_description'),
           icon: <TerminalSquareIcon className="icon-md" />,
         };
       case EToolResources.context:
@@ -95,33 +102,53 @@ const DragDropModal = () => {
   return (
     <OGDialog open={isVisible} onOpenChange={(open) => !open && closeModal()}>
       <OGDialogTemplate
-        title={localize('com_ui_upload_type')}
+        title={localize('com_ui_upload_add_files')}
         className="w-11/12 sm:w-[440px] md:w-[400px] lg:w-[360px]"
         main={
           <div className="flex flex-col gap-2">
-            {options.map((value) => {
-              const { label, description, icon } = getOptionMeta(value);
-              return (
-                <button
-                  key={value ?? 'provider'}
-                  onClick={() => {
-                    routeFiles(files, value);
-                    closeModal();
-                  }}
-                  className="flex items-start gap-2 rounded-lg p-2 text-left hover:bg-surface-active-alt"
-                >
-                  <span className="mt-0.5 shrink-0" aria-hidden="true">
-                    {icon}
-                  </span>
-                  <span className="flex flex-col gap-1">
-                    <span>{label}</span>
-                    <span className="text-xs leading-relaxed text-text-secondary">
-                      {description}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
+            <button
+              type="button"
+              onClick={() => {
+                routeFiles(files, defaultUploadRoute(files, options));
+                closeModal();
+              }}
+              className="rounded-lg border border-border-heavy bg-surface-active-alt p-3 text-left"
+            >
+              <span className="block font-medium">{localize('com_ui_upload_use_in_chat')}</span>
+              <span className="mt-1 block text-xs text-text-secondary">
+                {localize('com_ui_upload_auto_description')}
+              </span>
+            </button>
+            <details className="rounded-lg border border-border-light p-2">
+              <summary className="cursor-pointer text-sm">
+                {localize('com_ui_upload_advanced')}
+              </summary>
+              <div className="mt-2 flex flex-col gap-2">
+                {options.map((value) => {
+                  const { label, description, icon } = getOptionMeta(value);
+                  return (
+                    <button
+                      key={value ?? 'provider'}
+                      onClick={() => {
+                        routeFiles(files, value);
+                        closeModal();
+                      }}
+                      className="flex items-start gap-2 rounded-lg p-2 text-left hover:bg-surface-active-alt"
+                    >
+                      <span className="mt-0.5 shrink-0" aria-hidden="true">
+                        {icon}
+                      </span>
+                      <span className="flex flex-col gap-1">
+                        <span>{label}</span>
+                        <span className="text-xs leading-relaxed text-text-secondary">
+                          {description}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </details>
           </div>
         }
       />

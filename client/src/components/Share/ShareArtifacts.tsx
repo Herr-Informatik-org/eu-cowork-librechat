@@ -1,3 +1,4 @@
+import useArtifactDeepLink from '~/hooks/Artifacts/useArtifactDeepLink';
 import { useState, useMemo } from 'react';
 import { useRecoilValue } from 'recoil';
 import {
@@ -54,6 +55,7 @@ export function ShareArtifactsContainer({
   conversationId,
   mainContent,
 }: ShareArtifactsContainerProps) {
+  useArtifactDeepLink();
   const artifacts = useRecoilValue(store.artifactsState);
   const artifactsVisibility = useRecoilValue(store.artifactsVisibility);
   const currentArtifactId = useRecoilValue(store.currentArtifactId);

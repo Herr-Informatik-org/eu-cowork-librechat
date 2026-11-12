@@ -4343,6 +4343,29 @@ export function createToolExecuteHandler(options: ToolExecuteOptions): EventHand
                       } as Record<string, unknown>,
                     );
 
+                    if (
+                      tc.name === 'build_skill' &&
+                      isSkillAuthoringAvailable(mergedConfigurable)
+                    ) {
+                      const marker = (
+                        result.artifact as
+                          | { createdSkill?: { id?: string; name?: string } }
+                          | undefined
+                      )?.createdSkill;
+                      const request = mergedConfigurable.req as ServerRequest | undefined;
+                      if (request && marker?.name && marker.id && options.getAuthorSkillByName) {
+                        const authored = await options.getAuthorSkillByName({
+                          req: request,
+                          name: marker.name,
+                        });
+                        if (authored && String(authored._id) === marker.id)
+                          rememberAuthoredSkill(
+                            [mergedConfigurable, sourceConfigurable, loadedConfigurable],
+                            authored,
+                          );
+                      }
+                    }
+
                     /* Only sandbox-bound calls carry a runtime session hint, so
                      * this refreshes the prewarm module's warm window without
                      * inspecting tool names. */

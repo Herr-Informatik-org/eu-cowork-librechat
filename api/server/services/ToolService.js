@@ -1,3 +1,4 @@
+const { createBuildSkillTool } = require('./Files/skillPackages');
 const { logger, redactMessage } = require('@librechat/data-schemas');
 const {
   createDocumentTool,
@@ -1740,6 +1741,8 @@ async function loadToolsForExecution({
     allLoadedTools.push(createDocumentTool(req));
   }
 
+  if (toolNames.includes('build_skill') && toolRegistry?.has('build_skill'))
+    allLoadedTools.push(createBuildSkillTool(req));
   const fileAuthoringToolNames = new Set(
     toolRegistry
       ? Array.from(toolRegistry.values())
@@ -1748,6 +1751,7 @@ async function loadToolsForExecution({
       : [],
   );
   const specialToolNames = new Set([
+    'build_skill',
     DOCUMENT_TOOL_NAME,
     AgentConstants.TOOL_SEARCH,
     AgentConstants.PROGRAMMATIC_TOOL_CALLING,

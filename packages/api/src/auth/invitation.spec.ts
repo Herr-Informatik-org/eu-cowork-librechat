@@ -88,7 +88,9 @@ it('serves no-store responses and returns a generic failure for database errors'
   const deps = dependencies();
   const app = express();
   app.use(express.json());
-  app.post('/details', (req, res) => invitationDetailsController(req, res, deps));
+  app.post('/details', async (req, res) => {
+    await invitationDetailsController(req, res, deps);
+  });
   const good = await request(app).post('/details').send({ token }).expect(200);
   expect(good.headers['cache-control']).toBe('no-store');
   expect(good.body).toEqual({ email: valid.email, name: valid.name });

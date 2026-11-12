@@ -2555,5 +2555,20 @@
   "com_ui_mail_memory_disabled": "Persönliches Brain war für diese Analyse ausgeschaltet oder nicht freigegeben.",
   "com_ui_mail_memory_empty": "Keine passenden persönlichen Erinnerungen gefunden.",
   "com_ui_mail_memory_privacy": "Wenn dein persönliches Brain eingeschaltet und freigegeben ist, erhält dieses Modell passende eigene Erinnerungen für Mailanalyse und Entwurf. Neue dauerhafte Mailregeln speicherst du ausdrücklich aus deinen eigenen Korrekturen.",
-  "com_ui_mail_rule_shortcut": "Ctrl/⌘ + Enter speichert nur deine ausdrücklich formulierte persönliche Regel. Escape schliesst diesen Bereich."
+  "com_ui_mail_rule_shortcut": "Ctrl/⌘ + Enter speichert nur deine ausdrücklich formulierte persönliche Regel. Escape schliesst diesen Bereich.",
+  "com_ui_upload_add_files": "Dateien hinzufügen",
+  "com_ui_upload_use_in_chat": "Datei im Chat verwenden",
+  "com_ui_upload_auto_description": "Kisuno wählt die passende Verarbeitung für Inhalt, Tabellen und Vorlagen. Die Datenschutzregeln bleiben aktiv.",
+  "com_ui_upload_advanced": "Erweiterte Optionen",
+  "com_ui_upload_word_template": "Word-Datei analysieren oder als Vorlage verwenden",
+  "com_ui_upload_word_template_description": "Stellt das Original mit Logo und Formatierung für einen vollständigen Vorlagen-Skill bereit. Im Chat den gewünschten Skill beschreiben.",
+  "com_ui_skill_partial_import": "Skill unvollständig importiert: {{0}} Datei(en) fehlen. Ressourcen vor der Verwendung korrigieren.",
+  "com_ui_artifact_too_large": "Die interaktive Vorschau ist zu gross. Inhalt auf mehrere Artefakte aufteilen.",
+  "com_ui_artifact_open_tab": "In neuem Tab öffnen",
+  "com_ui_artifact_copy_link": "Link kopieren",
+  "com_ui_artifact_link_copied": "Link kopiert",
+  "com_ui_artifact_shared_access": "Freigabe dieses Chats gilt.",
+  "com_ui_artifact_private_access": "Privat: Zugriff auf diesen Chat erforderlich. Zum Teilen die Chatfreigabe verwenden.",
+  "com_ui_artifact_manual_link": "Direktlink zum manuellen Kopieren",
+  "com_ui_artifact_interactive_preview": "Interaktive Vorschau"
 }

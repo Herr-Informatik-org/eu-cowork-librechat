@@ -7,3 +7,5 @@ export * from './parse';
 export * from './skillStates';
 export * from './deployment';
 export * from './sync';
+
+export * from './builder';

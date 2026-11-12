@@ -1178,6 +1178,46 @@ describe('createToolExecuteHandler', () => {
       });
     }
 
+    it('can read a package built earlier in the same request', async () => {
+      const authored = {
+        _id: SKILL_ID,
+        name: 'built-skill',
+        body: '# Complete skill',
+        version: 5,
+        fileCount: 2,
+      };
+      const configurable = {
+        req,
+        accessibleSkillIds: [],
+        activeSkillNames: new Set(),
+        skillAuthoringAvailable: true,
+      };
+      const built = {
+        name: 'build_skill',
+        invoke: jest.fn(async () => ({
+          content: 'Package complete',
+          artifact: { createdSkill: { id: String(SKILL_ID), name: 'built-skill' } },
+        })),
+      };
+      const handler = createToolExecuteHandler({
+        loadTools: jest.fn(async () => ({ loadedTools: [built] as never[], configurable })),
+        getAuthorSkillByName: jest.fn(async () => authored) as never,
+        getSkillByName: jest.fn(async (_name: string, ids: string[]) =>
+          ids.some((id) => String(id) === String(SKILL_ID)) ? authored : null,
+        ) as never,
+        listSkillFiles: jest.fn(async () => []) as never,
+      });
+      const [created] = await invokeHandler(handler, [
+        { id: 'build-call', name: 'build_skill', args: {} },
+      ]);
+      expect(created.status).toBe('success');
+      const [read] = await invokeHandler(handler, [
+        { id: 'read-built', name: 'read_file', args: { path: 'skills/built-skill/SKILL.md' } },
+      ]);
+      expect(read.status).toBe('success');
+      expect(read.content).toContain('Complete skill');
+    });
+
     it('retains an uploaded original template without inventing text contents', async () => {
       const skill = {
         _id: SKILL_ID,
@@ -1227,6 +1267,7 @@ describe('createToolExecuteHandler', () => {
         getSkillByName: jest.fn(async () => skill),
         getSkillFileByPath: jest.fn(async () => ({
           filepath: '/private/existing',
+          relativePath: 'templates/Vorlage.docx',
           bytes: 10,
           mimeType: 'application/octet-stream',
           source: 'local',
@@ -2781,6 +2822,7 @@ describe('createToolExecuteHandler', () => {
           mimeType: 'application/octet-stream',
           bytes: data.length,
           filepath: '/private/template.docx',
+          relativePath: 'templates/Vorlage.docx',
         })),
         getStrategyFunctions: () => ({ getDownloadStream: async () => Readable.from([data]) }),
       });

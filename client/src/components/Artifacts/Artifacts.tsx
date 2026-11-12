@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import copy from 'copy-to-clipboard';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -21,6 +23,8 @@ const MAX_BACKDROP_OPACITY = 0.3;
 
 export default function Artifacts() {
   const localize = useLocalize();
+  const [params, setParams] = useSearchParams();
+  const focused = params.get('artifactView') === '1';
   const { isMutating } = useMutationState();
   const { isSharedConvo } = useShareContext();
   const isMobile = useMediaQuery('(max-width: 868px)');
@@ -184,9 +188,14 @@ export default function Artifacts() {
       ? (Math.min(blurAmount, MAX_BLUR_AMOUNT) / MAX_BLUR_AMOUNT) * MAX_BACKDROP_OPACITY
       : 0;
 
-  return (
+  const rendered = (
     <Tabs.Root value={displayedTab} onValueChange={setActiveTab} asChild>
-      <div className="flex h-full w-full min-w-0 flex-col">
+      <div
+        className={cn(
+          'flex h-full w-full min-w-0 flex-col',
+          focused && 'fixed inset-0 z-[1000] bg-surface-primary',
+        )}
+      >
         {/* Mobile backdrop with dynamic blur */}
         {isMobile && (
           <div
@@ -224,7 +233,13 @@ export default function Artifacts() {
                     : 'translate-x-full opacity-0',
                 ),
           )}
-          style={isMobile ? { height: `${height}vh` } : { overflow: 'hidden' }}
+          style={
+            focused
+              ? { height: '100vh', overflow: 'hidden' }
+              : isMobile
+                ? { height: `${height}vh` }
+                : { overflow: 'hidden' }
+          }
         >
           {isMobile && (
             <div
@@ -308,7 +323,13 @@ export default function Artifacts() {
                 size="icon"
                 variant="ghost"
                 className="h-9 w-9"
-                onClick={closeArtifacts}
+                onClick={() => {
+                  if (focused) {
+                    const next = new URLSearchParams(params);
+                    next.delete('artifactView');
+                    setParams(next);
+                  } else closeArtifacts();
+                }}
                 aria-label={localize('com_ui_close')}
               >
                 <X size={16} aria-hidden="true" />
@@ -359,4 +380,5 @@ export default function Artifacts() {
       </div>
     </Tabs.Root>
   );
+  return focused ? createPortal(rendered, document.body) : rendered;
 }

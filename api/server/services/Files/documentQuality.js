@@ -126,16 +126,24 @@ function createDocumentTool(req) {
         }
         if (!content || typeof content !== 'object' || Array.isArray(content))
           throw new Error('Dokumentinhalt muss ein JSON-Objekt sein.');
+        if ('_template' in content)
+          throw new Error(
+            'Binäre Vorlagen dürfen nur aus einem freigegebenen Skill geladen werden.',
+          );
+        const template = input.template_path
+          ? await require('./skillPackages').resolveSkillTemplate(req, input.template_path)
+          : null;
         const raw = Buffer.from(
           JSON.stringify({
             ...content,
+            ...(template ? { _template: template } : {}),
             version: 1,
             format: input.format,
             filename: input.filename,
             branding: input.include_logo === false ? 'none' : 'default',
           }),
         );
-        if (raw.length > 2 * 1024 * 1024) throw new Error('Dokumentauftrag ist zu gross.');
+        if (raw.length > 16 * 1024 * 1024) throw new Error('Dokumentauftrag ist zu gross.');
         const { response, data } = await serviceRequest('/documents/generate', raw);
         const report = JSON.parse(
           Buffer.from(response.headers.get('x-kisuno-document-report'), 'base64').toString(),
@@ -152,6 +160,9 @@ function createDocumentTool(req) {
         });
         return [
           `Datei ${input.filename} erstellt und geprüft. ${report.pages} Vorschauseiten. Mindestkontrast ${report.minimumContrast}:1. ` +
+            (report.templatePreserved
+              ? 'Originalvorlage verwendet. PDF-Ersatzschrift: ' + report.pdfFontFallback + '. '
+              : '') +
             (report.logoApplied
               ? 'Kundenlogo eingefügt.'
               : input.include_logo === false
@@ -189,6 +200,7 @@ function createDocumentTool(req) {
           .min(2)
           .max(2 * 1024 * 1024),
         include_logo: z.boolean().optional(),
+        template_path: z.string().max(240).optional(),
       }),
       responseFormat: 'content_and_artifact',
     },
@@ -220,5 +232,6 @@ module.exports = {
   serviceRequest,
   assertDocumentQuality,
   createDocumentTool,
+  serviceRequest,
   guardBashDocumentOutputs,
 };

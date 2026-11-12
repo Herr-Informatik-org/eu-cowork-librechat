@@ -63,7 +63,13 @@ import {
   isFileAuthoringToolDefinition,
 } from './tools';
 import { registerMemoryTools, memoryToolUsageGuard } from './memory';
-import { DOCUMENT_TOOL_NAME, documentToolDefinition, documentInstructions } from './documents';
+import {
+  DOCUMENT_TOOL_NAME,
+  documentToolDefinition,
+  documentInstructions,
+  BUILD_SKILL_TOOL_NAME,
+  buildSkillToolDefinition,
+} from './documents';
 import { applyIntentLabels, sanitizeIntentLabels } from './intent';
 import { applyBackgroundToolCalls } from './background';
 import { filterFilesByEndpointConfig } from '~/files';
@@ -1261,6 +1267,16 @@ export async function initializeAgent(
   }
 
   if (skillAuthoringAvailable) {
+    toolRegistry?.set(BUILD_SKILL_TOOL_NAME, buildSkillToolDefinition);
+    toolDefinitions = [
+      ...(toolDefinitions ?? []).filter((d) => d.name !== BUILD_SKILL_TOOL_NAME),
+      buildSkillToolDefinition,
+    ];
+    recordCapabilityToolNames(AgentCapabilities.skills, [BUILD_SKILL_TOOL_NAME]);
+    appendAdditionalInstructions(
+      agent,
+      'Für neue vollständige Benutzer-Skills build_skill verwenden. Auslöser, Eingaben, Grenzen, überprüfbare Beispiele und benötigte Originaldateien bündeln. Fachliche Testresultate nur nach tatsächlicher Ausführung bestätigen.',
+    );
     const skillReadResult = registerCodeExecutionTools({
       toolRegistry,
       toolDefinitions,

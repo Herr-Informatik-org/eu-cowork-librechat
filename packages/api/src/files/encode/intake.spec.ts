@@ -31,7 +31,7 @@ describe('Word uploads cross the model boundary as locally inspected text', () =
       metadata: file,
       content: data.toString('base64'),
     });
-    global.fetch = jest.fn(
+    jest.spyOn(global, 'fetch').mockImplementation(
       async () =>
         new Response(
           JSON.stringify({
@@ -58,6 +58,39 @@ describe('Word uploads cross the model boundary as locally inspected text', () =
       expect(JSON.stringify(result.documents)).toContain('Synthetische Notiz');
       expect(JSON.stringify(result.documents)).not.toContain(data.toString('base64'));
       expect(JSON.stringify(result.documents)).not.toContain('file_data');
+    },
+  );
+  it.each([Providers.OPENAI, Providers.ANTHROPIC, Providers.GOOGLE, Providers.BEDROCK])(
+    'reads XLSX as local values and formulas for %s',
+    async (provider) => {
+      const spreadsheet = {
+        ...file,
+        filename: 'Kosten.xlsx',
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      };
+      (getFileStream as jest.Mock).mockResolvedValue({
+        file: spreadsheet,
+        metadata: spreadsheet,
+        content: data.toString('base64'),
+      });
+      jest.spyOn(global, 'fetch').mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              format: 'xlsx',
+              sha256: createHash('sha256').update(data).digest('hex'),
+              binarySentToModel: false,
+              sheets: [
+                { name: 'Kosten', cells: [{ address: 'B4', formula: 'B2*B3', value: '1800' }] },
+              ],
+            }),
+          ),
+      );
+      const result = await encodeAndFormatDocuments(req, [spreadsheet], { provider }, strategy);
+      expect(result.documents[0].type).toBe('text');
+      expect(JSON.stringify(result.documents)).toContain('B2*B3');
+      expect(JSON.stringify(result.documents)).not.toContain(data.toString('base64'));
+      expect(String(jest.mocked(global.fetch).mock.calls[0][0])).toContain('inspect-workbook');
     },
   );
   it('stops with an actionable error when the private original is unavailable', async () => {

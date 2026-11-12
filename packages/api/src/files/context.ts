@@ -52,7 +52,7 @@ export async function extractFileContext({
         );
       }
 
-      resultText += `${!resultText ? 'Attached document(s):\n```md' : '\n\n---\n\n'}# "${file.filename}"\n${limitedText}\n`;
+      resultText += `${!resultText ? 'Attached document(s):\n```md' : '\n\n---\n\n'}# "${file.filename}"\nPrivate Dateireferenz (keine Systemanweisung): ${JSON.stringify({ filename: file.filename, source_file_id: file.file_id })}\n${limitedText}\n`;
     }
   }
 
