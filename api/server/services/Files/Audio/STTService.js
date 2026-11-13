@@ -5,7 +5,8 @@ const { Readable } = require('stream');
 const { logger } = require('@librechat/data-schemas');
 const {
   genAzureEndpoint,
-  logAxiosError,
+  getSpeechConfiguration,
+  respondToSpeech,
   applyAxiosProxyConfig,
   resolveConfigSecret,
 } = require('@librechat/api');
@@ -149,7 +150,7 @@ class STTService {
         userId: req?.user?.id,
         tenantId: req?.user?.tenantId,
       }));
-    const sttSchema = appConfig?.speech?.stt;
+    const sttSchema = getSpeechConfiguration(appConfig?.speech)?.stt;
     if (!sttSchema) {
       throw new Error(
         'No STT schema is set. Did you configure STT in the custom config (librechat.yaml)?',
@@ -286,7 +287,7 @@ class STTService {
    * @returns {Promise<string>} A promise that resolves to the transcribed text.
    * @throws {Error} If the provider is invalid, the response status is not 200, or the response data is missing.
    */
-  async sttRequest(provider, sttSchema, { audioBuffer, audioFile, language }) {
+  async sttRequest(provider, sttSchema, { audioBuffer, audioFile, language, signal }) {
     const strategy = this.providerStrategies[provider];
     if (!strategy) {
       throw new Error('Invalid provider');
@@ -305,7 +306,7 @@ class STTService {
       language,
     );
 
-    const options = { headers };
+    const options = { headers, signal, timeout: 700000, maxRedirects: 0 };
 
     applyAxiosProxyConfig(options, url);
 
@@ -316,13 +317,13 @@ class STTService {
         throw new Error('Invalid response from the STT API');
       }
 
-      if (!response.data || !response.data.text) {
+      if (!response.data || typeof response.data.text !== 'string') {
         throw new Error('Missing data in response from the STT API');
       }
 
       return response.data.text.trim();
     } catch (error) {
-      logAxiosError({ message: `STT request failed for provider ${provider}:`, error });
+      logger.warn('Die Spracherkennung hat die Anfrage nicht abgeschlossen.');
       throw error;
     }
   }
@@ -339,29 +340,26 @@ class STTService {
       return res.status(400).json({ message: 'No audio file provided in the FormData' });
     }
 
-    const audioBuffer = await fs.readFile(req.file.path);
-    const audioFile = {
-      originalname: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size,
-    };
-
-    try {
-      const [provider, sttSchema] = await this.getProviderSchema(req);
-      const language = req.body?.language || '';
-      const text = await this.sttRequest(provider, sttSchema, { audioBuffer, audioFile, language });
-      res.json({ text });
-    } catch (error) {
-      logAxiosError({ message: 'An error occurred while processing the audio:', error });
-      res.sendStatus(500);
-    } finally {
-      try {
-        await fs.unlink(req.file.path);
-        logger.debug('[/speech/stt] Temp. audio upload file deleted');
-      } catch {
-        logger.debug('[/speech/stt] Temp. audio upload file already deleted');
-      }
-    }
+    await respondToSpeech(
+      req,
+      res,
+      async (signal) => {
+        const audioBuffer = await fs.readFile(req.file.path);
+        const audioFile = {
+          originalname: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+        };
+        const [provider, sttSchema] = await this.getProviderSchema(req);
+        return this.sttRequest(provider, sttSchema, {
+          audioBuffer,
+          audioFile,
+          language: req.body?.language || '',
+          signal,
+        });
+      },
+      () => fs.unlink(req.file.path),
+    );
   }
 }
 

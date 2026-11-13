@@ -7,7 +7,6 @@ import useGetAudioSettings from './useGetAudioSettings';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
 
-const MAX_RECORDING_MS = 10 * 60 * 1000;
 const MAX_RECORDING_BYTES = 24 * 1024 * 1024;
 const AUTO_TRANSCRIBE_SILENCE_MS = 15000;
 
@@ -55,7 +54,7 @@ const useSpeechToTextExternal = (
 ) => {
   const { showToast } = useToastContext();
   const localize = useLocalize();
-  const { speechToTextEndpoint } = useGetAudioSettings();
+  const { speechToTextEndpoint, sttManaged, maxRecordingSeconds = 600 } = useGetAudioSettings();
   const location = useLocation();
   const currentScope = `${speechToTextEndpoint}:${location.key}`;
   const scopeRef = useRef(currentScope);
@@ -164,8 +163,9 @@ const useSpeechToTextExternal = (
       session.recorder = recorder;
       const selectedLanguage =
         languageSTT.trim() ||
-        (appLanguage === 'auto' ? navigator.language : appLanguage) ||
-        navigator.language;
+        (sttManaged
+          ? ''
+          : (appLanguage === 'auto' ? navigator.language : appLanguage) || navigator.language);
       recorder.ondataavailable = ({ data }) => {
         if (!isCurrent() || !data.size) return;
         session.chunks.push(data);
@@ -255,11 +255,11 @@ const useSpeechToTextExternal = (
       session.timer = setTimeout(() => {
         if (!isCurrent()) return;
         showToast({
-          message: localize('com_ui_dictation_duration_limit'),
+          message: localize('com_ui_dictation_duration_limit', { 0: String(maxRecordingSeconds) }),
           status: 'warning',
         });
         externalStopRecording();
-      }, MAX_RECORDING_MS);
+      }, maxRecordingSeconds * 1000);
 
       if (autoTranscribeAudio && speechToText) {
         try {
@@ -312,6 +312,8 @@ const useSpeechToTextExternal = (
     languageSTT,
     localize,
     minDecibels,
+    maxRecordingSeconds,
+    sttManaged,
     processAudio,
     showToast,
     speechToText,

@@ -1,3 +1,4 @@
+import { readSpeechResponse } from './speech';
 import type { OpsAuthorization, OpsPersonalConsentInfo, OpsPersonalGrantSummary, OpsPersonalScope } from './opsPersonal';
 import type {
   MailResearchSettings,
@@ -1072,8 +1073,11 @@ export const deleteFiles = async (payload: {
 
 /* Speech */
 
-export const speechToText = (data: FormData): Promise<f.SpeechToTextResponse> => {
-  return request.postMultiPart(endpoints.speechToText(), data);
+export const speechToText = async (data: FormData): Promise<f.SpeechToTextResponse> => {
+  const response = await request.authenticatedFetch(endpoints.speechToText(), {
+    method: 'POST', body: data, headers: { Accept: 'text/event-stream, application/json' },
+  });
+  return readSpeechResponse(response);
 };
 
 export const textToSpeech = (data: FormData): Promise<ArrayBuffer> => {

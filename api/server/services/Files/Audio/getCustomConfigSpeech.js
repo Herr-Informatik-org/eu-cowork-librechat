@@ -1,3 +1,8 @@
+const {
+  getSpeechConfiguration,
+  managedWhisperEnabled,
+  whisperRecordingLimit,
+} = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
 const { getAppConfig } = require('~/server/services/Config');
 
@@ -23,24 +28,33 @@ async function getCustomConfigSpeech(req, res) {
         tenantId: req.user?.tenantId,
       }));
 
-    if (!appConfig) {
+    const speech = getSpeechConfiguration(appConfig?.speech);
+    if (!appConfig && !speech) {
       return res.status(200).send({
         message: 'not_found',
       });
     }
 
-    const sttExternal = !!appConfig.speech?.stt;
-    const ttsExternal = !!appConfig.speech?.tts;
+    const sttExternal = !!speech?.stt;
+    const ttsExternal = !!speech?.tts;
     let settings = {
       sttExternal,
       ttsExternal,
+      sttManaged: managedWhisperEnabled(),
+      ...(managedWhisperEnabled()
+        ? {
+            sttModel: 'Whisper large-v3-turbo',
+            sttMaxRecordingSeconds: whisperRecordingLimit(),
+            speechToText: true,
+          }
+        : {}),
     };
 
-    if (!appConfig.speech?.speechTab) {
+    if (!speech?.speechTab) {
       return res.status(200).send(settings);
     }
 
-    const speechTab = appConfig.speech.speechTab;
+    const speechTab = speech.speechTab;
 
     if (speechTab.advancedMode !== undefined) {
       settings.advancedMode = speechTab.advancedMode;

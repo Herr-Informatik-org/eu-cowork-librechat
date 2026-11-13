@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-13 — Lokale Whisper-Diktate über die native Speech-API
+
+- Verwaltete Spracherkennung nutzt ausschliesslich Whisper large-v3-turbo. Die
+  Kundeneinstellung gewinnt gegenüber alten Browser-Vorgaben; TTS bleibt erhalten.
+- Diktate laufen nach manuellem Stopp weiter bis zum vollständigen Ergebnis.
+  SSE-Lebenszeichen halten die authentifizierte Anfrage während der Berechnung offen.
+- Text und Kennzahlen bleiben unverändert im Ergebnis, bestehender Eingabetext bleibt
+  erhalten. Aufnahmegrenzen, Warteschlangenfehler und Verbindungsabbrüche werden behandelt.
+- API-Schlüssel und interne Adressen werden nicht an den Browser ausgegeben.
+
+
 ## 2026-11-13 — Diktate erhalten und Aufnahme zuverlässig beenden
 
 - Browser-Diktate laufen unabhängig von der Automatik im fortlaufenden Modus.
