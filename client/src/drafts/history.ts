@@ -182,7 +182,6 @@ export function trackDraftSubmission(owner: string, id: string, messageId: strin
   if (pendingSubmissions.size >= 256)
     pendingSubmissions.delete(pendingSubmissions.keys().next().value!);
   pendingSubmissions.set(messageId, { owner, id, snapshot: JSON.stringify(draft) });
-  selectChatDraft(owner, null);
 }
 
 export function finishDraftSubmission(messageId: string, persisted: boolean) {
