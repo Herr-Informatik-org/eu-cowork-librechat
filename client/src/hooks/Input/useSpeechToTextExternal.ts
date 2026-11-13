@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRecoilValue } from 'recoil';
+import { dataService } from 'librechat-data-provider';
+import LivePreview from './dictation/LivePreview';
 import { useLocation } from 'react-router-dom';
 import { useToastContext } from '@librechat/client';
 import { useSpeechToTextMutation } from '~/data-provider';
@@ -21,6 +23,10 @@ type RecordingSession = {
   context?: AudioContext;
   frame?: number;
   timer?: ReturnType<typeof setTimeout>;
+  preview?: LivePreview;
+  startedAt?: number;
+  clock?: ReturnType<typeof setInterval>;
+  fallbackPreview?: string;
 };
 
 let recordingOwner: RecordingSession | null = null;
@@ -30,6 +36,9 @@ function releaseOwner(session: RecordingSession) {
 }
 
 function releaseMicrophone(session: RecordingSession) {
+  session.preview?.cancel();
+  session.preview = undefined;
+  if (session.clock !== undefined) clearInterval(session.clock);
   if (session.timer !== undefined) clearTimeout(session.timer);
   if (session.frame !== undefined) cancelAnimationFrame(session.frame);
   session.context?.close().catch(() => undefined);
@@ -65,6 +74,11 @@ const useSpeechToTextExternal = (
   callbacksRef.current = { setText, onTranscriptionComplete, onRecordingStart };
   const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [previewText, setPreviewText] = useState('');
+  const [previewDelayed, setPreviewDelayed] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [levels, setLevels] = useState<number[]>(Array(14).fill(0));
 
   const minDecibels = useRecoilValue(store.decibelValue);
   const autoSendText = useRecoilValue(store.autoSendText);
@@ -85,6 +99,11 @@ const useSpeechToTextExternal = (
     clearAutoSend();
     const session = sessionRef.current;
     sessionRef.current = null;
+    setPreviewText('');
+    setPreviewDelayed(false);
+    setIsFinalizing(false);
+    setIsListening(false);
+    setIsLoading(false);
     if (!session) return;
     session.cancelled = true;
     releaseOwner(session);
@@ -118,6 +137,7 @@ const useSpeechToTextExternal = (
     setIsListening(false);
     if (session.recorder && session.recorder.state !== 'inactive') {
       setIsLoading(true);
+      setIsFinalizing(true);
       session.recorder.stop();
     } else {
       session.cancelled = true;
@@ -145,6 +165,10 @@ const useSpeechToTextExternal = (
     sessionRef.current = session;
     recordingOwner = session;
     setIsLoading(true);
+    setPreviewText('');
+    setPreviewDelayed(false);
+    setElapsedSeconds(0);
+    setLevels(Array(14).fill(0));
     const isCurrent = () =>
       !session.cancelled && sessionRef.current === session && session.scope === scopeRef.current;
 
@@ -183,6 +207,7 @@ const useSpeechToTextExternal = (
         if (!isCurrent()) return;
         setIsListening(false);
         setIsLoading(true);
+        setIsFinalizing(true);
         const type = recorder.mimeType || mimeType || session.chunks[0]?.type || 'audio/webm';
         const audio = new Blob(session.chunks, { type });
         session.chunks = [];
@@ -212,7 +237,7 @@ const useSpeechToTextExternal = (
           }
           callbacksRef.current.setText(text);
           const { autoSendText: delay, speechToText: enabled } = autoSendRef.current;
-          if (enabled && Number.isFinite(delay) && delay >= 0) {
+          if (!sttManaged && enabled && Number.isFinite(delay) && delay >= 0) {
             autoSendTimerRef.current = setTimeout(() => {
               autoSendTimerRef.current = null;
               if (session.scope === scopeRef.current && !session.cancelled) {
@@ -222,8 +247,13 @@ const useSpeechToTextExternal = (
           }
         } catch {
           if (isCurrent()) {
+            if (session.fallbackPreview) callbacksRef.current.setText(session.fallbackPreview);
             showToast({
-              message: localize('com_ui_dictation_failed'),
+              message: localize(
+                session.fallbackPreview
+                  ? 'com_ui_dictation_preview_saved'
+                  : 'com_ui_dictation_failed',
+              ),
               status: 'error',
             });
           }
@@ -232,6 +262,7 @@ const useSpeechToTextExternal = (
             sessionRef.current = null;
             releaseOwner(session);
             setIsLoading(false);
+            setIsFinalizing(false);
           }
         }
       };
@@ -250,6 +281,42 @@ const useSpeechToTextExternal = (
       });
       callbacksRef.current.onRecordingStart?.();
       recorder.start(250);
+      session.startedAt = performance.now();
+      session.clock = setInterval(() => {
+        if (isCurrent() && !session.stopping)
+          setElapsedSeconds(
+            Math.floor((performance.now() - (session.startedAt ?? performance.now())) / 1000),
+          );
+      }, 250);
+      if (sttManaged) {
+        session.preview = new LivePreview({
+          stream,
+          mimeType,
+          intervalMs: 4000,
+          transcribe: async (audio, signal) => {
+            const form = new FormData();
+            const extension = audio.type.includes('mp4')
+              ? 'm4a'
+              : audio.type.includes('ogg')
+                ? 'ogg'
+                : 'webm';
+            form.append('audio', audio, `preview.${extension}`);
+            if (selectedLanguage) form.append('language', selectedLanguage);
+            const result = await dataService.speechToText(form, { signal });
+            return result.text || '';
+          },
+          onText: (text) => {
+            if (isCurrent() && !session.stopping) {
+              session.fallbackPreview = text;
+              setPreviewText(text);
+            }
+          },
+          onDelayed: (value) => {
+            if (isCurrent() && !session.stopping) setPreviewDelayed(value);
+          },
+        });
+        session.preview.start();
+      }
       setIsLoading(false);
       setIsListening(true);
       session.timer = setTimeout(() => {
@@ -261,20 +328,32 @@ const useSpeechToTextExternal = (
         externalStopRecording();
       }, maxRecordingSeconds * 1000);
 
-      if (autoTranscribeAudio && speechToText) {
+      if (sttManaged || (autoTranscribeAudio && speechToText)) {
         try {
           const context = new AudioContext();
           session.context = context;
+          if (typeof context.resume === 'function') void context.resume().catch(() => undefined);
           const analyser = context.createAnalyser();
           analyser.minDecibels = minDecibels;
           context.createMediaStreamSource(stream).connect(analyser);
           const samples = new Uint8Array(analyser.frequencyBinCount);
           let lastSound = Date.now();
+          let lastMeter = 0;
           const detectSound = () => {
             if (!isCurrent() || session.stopping) return;
             analyser.getByteFrequencyData(samples);
             if (samples.some((value) => value > 0)) lastSound = Date.now();
-            if (Date.now() - lastSound > AUTO_TRANSCRIBE_SILENCE_MS) {
+            if (sttManaged && Date.now() - lastMeter >= 100) {
+              lastMeter = Date.now();
+              const level = Math.min(
+                1,
+                Math.sqrt(
+                  samples.reduce((sum, value) => sum + (value / 255) ** 2, 0) / samples.length,
+                ) * 2,
+              );
+              setLevels((before) => [...before.slice(1), level]);
+            }
+            if (!sttManaged && Date.now() - lastSound > AUTO_TRANSCRIBE_SILENCE_MS) {
               externalStopRecording();
               return;
             }
@@ -322,6 +401,11 @@ const useSpeechToTextExternal = (
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (sttManaged && event.code === 'Escape' && sessionRef.current) {
+        event.preventDefault();
+        cancelRecording();
+        return;
+      }
       if (
         event.repeat ||
         !event.shiftKey ||
@@ -336,9 +420,27 @@ const useSpeechToTextExternal = (
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [externalStartRecording, externalStopRecording, speechToTextEndpoint]);
+  }, [
+    externalStartRecording,
+    externalStopRecording,
+    speechToTextEndpoint,
+    sttManaged,
+    cancelRecording,
+  ]);
 
-  return { isListening, isLoading, externalStartRecording, externalStopRecording };
+  return {
+    isListening,
+    isLoading,
+    isFinalizing,
+    externalStartRecording,
+    externalStopRecording,
+    cancelRecording,
+    previewText,
+    previewDelayed,
+    elapsedSeconds,
+    levels,
+    liveDictation: sttManaged,
+  };
 };
 
 export default useSpeechToTextExternal;

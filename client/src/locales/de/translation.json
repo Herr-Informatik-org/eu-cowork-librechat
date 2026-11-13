@@ -2579,5 +2579,13 @@
   "com_ui_pdf_intake_skipped": "PDF konnte lokal nicht sicher gelesen werden und wurde ausgelassen. Der Chat läuft weiter; bitte eine unverschlüsselte PDF oder einen Textauszug bereitstellen.",
   "com_auth_security_center": "Anmeldeschutz und Passkeys",
   "com_auth_security_setup_hint": "Schützen Sie Ihr Konto mit Authenticator oder Passkey. Richten Sie den Schutz nach Abschluss laufender Antworten ein.",
-  "com_auth_security_wait": "Bitte zuerst laufende Antworten und Aufträge abschliessen."
+  "com_auth_security_wait": "Bitte zuerst laufende Antworten und Aufträge abschliessen.",
+  "com_ui_dictation_elapsed": "Aufnahmedauer",
+  "com_ui_dictation_cancel": "Aufnahme verwerfen",
+  "com_ui_dictation_finish": "Diktat übernehmen",
+  "com_ui_dictation_preview_waiting": "Ich höre zu …",
+  "com_ui_dictation_preview_live": "Live-Vorschau · der fertige Text folgt nach dem Stoppen",
+  "com_ui_dictation_preview_delayed": "Vorschau verzögert · die Aufnahme läuft weiter",
+  "com_ui_dictation_finalizing": "Die vollständige Aufnahme wird finalisiert …",
+  "com_ui_dictation_preview_saved": "Die abschliessende Erkennung ist fehlgeschlagen. Die Live-Vorschau bleibt als Entwurf erhalten; bitte prüfen."
 }

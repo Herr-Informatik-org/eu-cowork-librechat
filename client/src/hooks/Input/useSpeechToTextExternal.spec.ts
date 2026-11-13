@@ -3,6 +3,11 @@ import useSpeechToTextExternal from './useSpeechToTextExternal';
 
 const mockToast = jest.fn();
 const mockProcessAudio = jest.fn();
+const mockPreviewAudio = jest.fn();
+let mockManaged = false;
+jest.mock('librechat-data-provider', () => ({
+  dataService: { speechToText: (...args: unknown[]) => mockPreviewAudio(...args) },
+}));
 const mockLocalize = jest.fn((key: string) => key);
 jest.mock('~/hooks', () => ({ useLocalize: () => mockLocalize }));
 let mockLocation = 'first';
@@ -30,7 +35,10 @@ jest.mock('@librechat/client', () => ({ useToastContext: () => ({ showToast: moc
 jest.mock('~/data-provider', () => ({
   useSpeechToTextMutation: () => ({ mutateAsync: mockProcessAudio }),
 }));
-jest.mock('./useGetAudioSettings', () => () => ({ speechToTextEndpoint: 'external' }));
+jest.mock('./useGetAudioSettings', () => () => ({
+  speechToTextEndpoint: 'external',
+  sttManaged: mockManaged,
+}));
 
 class FakeRecorder {
   static instances: FakeRecorder[] = [];
@@ -99,6 +107,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   FakeRecorder.instances = [];
   mockLocation = 'first';
+  mockManaged = false;
+  mockPreviewAudio.mockResolvedValue({ text: 'Eine vorläufige Vorschau.' });
   Object.assign(mockSettings, {
     autoSendText: -1,
     languageSTT: '',
@@ -382,5 +392,65 @@ describe('server dictation recording lifecycle', () => {
     expect(hook.result.current.isLoading).toBe(false);
     expect(hook.result.current.isListening).toBe(false);
     expect(mockProcessAudio).not.toHaveBeenCalled();
+  });
+});
+
+describe('managed live preview', () => {
+  it('keeps preview out of the form and uses the complete primary recording for the final text', async () => {
+    mockManaged = true;
+    const hook = mount();
+    await act(async () => {
+      await hook.result.current.externalStartRecording();
+    });
+    expect(mockGetUserMedia).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      jest.advanceTimersByTime(6000);
+      await Promise.resolve();
+    });
+    expect(mockPreviewAudio).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.previewText).toBe('Eine vorläufige Vorschau.');
+    expect(hook.setText).not.toHaveBeenCalled();
+    expect(FakeRecorder.instances[0].state).toBe('recording');
+    act(() => hook.result.current.externalStopRecording());
+    await drainStop();
+    expect(mockProcessAudio).toHaveBeenCalledTimes(1);
+    expect(hook.setText).toHaveBeenCalledWith('Guten Tag. Der Betrag ist 1’234.50 Franken.');
+    expect(hook.complete).not.toHaveBeenCalled();
+    hook.unmount();
+  });
+  it('shows elapsed time even if the sound analyser is unavailable', async () => {
+    mockManaged = true;
+    Object.defineProperty(window, 'AudioContext', { configurable: true, value: undefined });
+    const hook = mount();
+    await act(async () => {
+      await hook.result.current.externalStartRecording();
+    });
+    act(() => {
+      jest.advanceTimersByTime(3250);
+    });
+    expect(hook.result.current.elapsedSeconds).toBe(3);
+    expect(hook.result.current.isListening).toBe(true);
+    act(() => hook.result.current.cancelRecording());
+    expect(hook.setText).not.toHaveBeenCalled();
+    hook.unmount();
+  });
+  it('preserves a provisional draft with an explicit warning if final recognition fails', async () => {
+    mockManaged = true;
+    mockProcessAudio.mockRejectedValue(new Error('temporarily unavailable'));
+    const hook = mount();
+    await act(async () => {
+      await hook.result.current.externalStartRecording();
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(6000);
+      await Promise.resolve();
+    });
+    act(() => hook.result.current.externalStopRecording());
+    await drainStop();
+    expect(hook.setText).toHaveBeenCalledWith('Eine vorläufige Vorschau.');
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'com_ui_dictation_preview_saved' }),
+    );
+    hook.unmount();
   });
 });

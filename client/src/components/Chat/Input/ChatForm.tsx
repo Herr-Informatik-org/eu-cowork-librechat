@@ -41,6 +41,8 @@ import PlanBar from '~/components/Chat/Plan';
 import PromptsCommand from './PromptsCommand';
 import SkillsCommand from './SkillsCommand';
 import AudioRecorder from './AudioRecorder';
+import DictationPreview from './DictationPreview';
+import type { DictationStatus } from './AudioRecorder';
 import CollapseChat from './CollapseChat';
 import QuoteButton from './QuoteButton';
 import StreamAudio from './StreamAudio';
@@ -94,6 +96,13 @@ const ChatForm = memo(function ChatForm({
   useFocusChatEffect(textAreaRef);
   const localize = useLocalize();
 
+  const [dictation, setDictation] = useState<DictationStatus>({
+    active: false,
+    processing: false,
+    text: '',
+    delayed: false,
+  });
+  const dictationBusy = dictation.active || dictation.processing;
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [, setIsScrollable] = useState(false);
   const [visualRowCount, setVisualRowCount] = useState(1);
@@ -481,7 +490,7 @@ const ChatForm = memo(function ChatForm({
           steering={steering}
           getText={() => methods.getValues('text')}
           onConsumed={() => methods.reset()}
-          disabled={filesLoading}
+          disabled={filesLoading || dictationBusy}
         />
       );
     }
@@ -512,6 +521,7 @@ const ChatForm = memo(function ChatForm({
           return;
         }
         setPrivacyError(false);
+        if (dictationBusy) return;
         // Answer mode: composer text answers the paused run instead of
         // starting a new turn (submitText resets the composer itself).
         // Dismissing the popover restores normal sends.
@@ -670,7 +680,12 @@ const ChatForm = memo(function ChatForm({
                         : undefined
                     }
                   >
+                    {dictationBusy && (
+                      <DictationPreview status={dictation} existingText={textValue || ''} />
+                    )}
                     <TextareaAutosize
+                      hidden={dictationBusy}
+                      readOnly={dictationBusy}
                       {...registerProps}
                       ref={(e) => {
                         ref(e);
@@ -716,6 +731,7 @@ const ChatForm = memo(function ChatForm({
                       className={cn(
                         baseClasses,
                         removeFocusRings,
+                        dictationBusy && 'hidden',
                         'scrollbar-hover transition-[max-height] duration-200 disabled:cursor-not-allowed',
                       )}
                     />
@@ -765,6 +781,7 @@ const ChatForm = memo(function ChatForm({
                 {SpeechToText && (
                   <AudioRecorder
                     methods={methods}
+                    onDictationStatus={setDictation}
                     ask={submitMessage}
                     disabled={disableInputs || isNotAppendable}
                     isSubmitting={isSubmitting}
@@ -778,7 +795,7 @@ const ChatForm = memo(function ChatForm({
                         steering={steering}
                         getText={() => methods.getValues('text')}
                         onConsumed={() => methods.reset()}
-                        disabled={filesLoading}
+                        disabled={filesLoading || dictationBusy}
                       />
                     </div>
                   )}
@@ -792,6 +809,7 @@ const ChatForm = memo(function ChatForm({
                             control={methods.control}
                             hasImageAttachments={hasImageAttachments}
                             disabled={
+                              dictationBusy ||
                               filesLoading ||
                               disableInputs ||
                               isNotAppendable ||

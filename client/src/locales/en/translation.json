@@ -2995,5 +2995,13 @@
   "com_ui_pdf_intake_skipped": "PDF could not be safely read locally and was omitted. Chat continues; provide an unencrypted PDF or a text extract.",
   "com_auth_security_center": "Sign-in protection and passkeys",
   "com_auth_security_setup_hint": "Protect your account with an authenticator or passkey. Finish running responses before setup.",
-  "com_auth_security_wait": "Please finish running responses and tasks first."
+  "com_auth_security_wait": "Please finish running responses and tasks first.",
+  "com_ui_dictation_elapsed": "Recording duration",
+  "com_ui_dictation_cancel": "Discard recording",
+  "com_ui_dictation_finish": "Finish dictation",
+  "com_ui_dictation_preview_waiting": "Listening …",
+  "com_ui_dictation_preview_live": "Live preview · final text follows after stopping",
+  "com_ui_dictation_preview_delayed": "Preview delayed · recording continues",
+  "com_ui_dictation_finalizing": "Finalizing the complete recording …",
+  "com_ui_dictation_preview_saved": "Final transcription failed. The live preview was kept as a draft; please review it."
 }

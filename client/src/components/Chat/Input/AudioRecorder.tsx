@@ -1,5 +1,5 @@
-import { memo, useCallback, useRef } from 'react';
-import { MicOff } from 'lucide-react';
+import { memo, useCallback, useEffect, useRef } from 'react';
+import { MicOff, Check, X } from 'lucide-react';
 import { useToastContext, TooltipAnchor, ListeningIcon, Spinner } from '@librechat/client';
 import type { useChatFormContext } from '~/Providers';
 import type { TAskFunction } from '~/common';
@@ -7,16 +7,25 @@ import { useLocalize, useSpeechToText } from '~/hooks';
 import { globalAudioId } from '~/common';
 import { cn } from '~/utils';
 
+export type DictationStatus = {
+  active: boolean;
+  processing: boolean;
+  text: string;
+  delayed: boolean;
+};
+
 export default memo(function AudioRecorder({
   disabled,
   ask,
   methods,
   isSubmitting,
+  onDictationStatus,
 }: {
   disabled: boolean;
   ask: TAskFunction;
   methods: ReturnType<typeof useChatFormContext>;
   isSubmitting: boolean;
+  onDictationStatus?: (status: DictationStatus) => void;
 }) {
   const { setValue, reset, getValues } = methods;
   const localize = useLocalize();
@@ -68,11 +77,36 @@ export default memo(function AudioRecorder({
     existingTextRef.current = getValues('text') || '';
   }, [getValues]);
 
-  const { isListening, isLoading, startRecording, stopRecording } = useSpeechToText(
-    setText,
-    onTranscriptionComplete,
-    captureExistingText,
-  );
+  const {
+    isListening,
+    isLoading,
+    startRecording,
+    stopRecording,
+    cancelRecording,
+    previewText = '',
+    previewDelayed = false,
+    elapsedSeconds = 0,
+    levels = [],
+    liveDictation = false,
+    isFinalizing = false,
+  } = useSpeechToText(setText, onTranscriptionComplete, captureExistingText);
+
+  useEffect(() => {
+    onDictationStatus?.({
+      active: liveDictation && !!isListening,
+      processing: liveDictation && !!isFinalizing,
+      text: previewText,
+      delayed: previewDelayed,
+    });
+  }, [
+    onDictationStatus,
+    liveDictation,
+    isListening,
+    isLoading,
+    isFinalizing,
+    previewText,
+    previewDelayed,
+  ]);
 
   const handleStartRecording = async () => {
     await startRecording();
@@ -91,6 +125,53 @@ export default memo(function AudioRecorder({
     }
     return <ListeningIcon className="stroke-text-secondary" />;
   };
+
+  if (liveDictation && (isListening || isLoading)) {
+    const elapsed = `${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`;
+    return (
+      <div className="flex items-center gap-2 text-text-secondary" data-testid="dictation-controls">
+        <time
+          dateTime={`PT${elapsedSeconds}S`}
+          aria-label={localize('com_ui_dictation_elapsed')}
+          className="text-xs tabular-nums"
+        >
+          {elapsed}
+        </time>
+        <div
+          aria-hidden="true"
+          className="flex h-6 items-center gap-[2px]"
+          data-testid="dictation-waveform"
+        >
+          {levels.map((level, index) => (
+            <span
+              key={index}
+              className="w-[2px] rounded-full bg-text-secondary transition-[height] duration-100 motion-reduce:transition-none"
+              style={{ height: `${2 + Math.round(level * 20)}px` }}
+            />
+          ))}
+        </div>
+        {isLoading && <Spinner className="size-4" />}
+        <button
+          type="button"
+          onClick={cancelRecording}
+          aria-label={localize('com_ui_dictation_cancel')}
+          className="flex size-8 items-center justify-center rounded-lg hover:bg-surface-hover"
+        >
+          <X className="size-4" />
+        </button>
+        {isListening && (
+          <button
+            type="button"
+            onClick={handleStopRecording}
+            aria-label={localize('com_ui_dictation_finish')}
+            className="flex size-8 items-center justify-center rounded-lg bg-surface-secondary text-text-primary hover:bg-surface-hover"
+          >
+            <Check className="size-4" />
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <TooltipAnchor

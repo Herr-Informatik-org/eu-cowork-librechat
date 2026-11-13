@@ -1072,9 +1072,15 @@ export const deleteFiles = async (payload: {
 
 /* Speech */
 
-export const speechToText = async (data: FormData): Promise<f.SpeechToTextResponse> => {
+export const speechToText = async (
+  data: FormData,
+  options: { signal?: AbortSignal } = {},
+): Promise<f.SpeechToTextResponse> => {
   const response = await request.authenticatedFetch(endpoints.speechToText(), {
-    method: 'POST', body: data, headers: { Accept: 'text/event-stream, application/json' },
+    method: 'POST',
+    body: data,
+    headers: { Accept: 'text/event-stream, application/json' },
+    ...(options.signal ? { signal: options.signal } : {}),
   });
   return readSpeechResponse(response);
 };

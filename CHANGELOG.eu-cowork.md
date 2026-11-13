@@ -1,5 +1,17 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-13 — Live-Diktate mit Vorschau und Aufnahmeanzeige
+
+- Lokale Whisper-Diktate zeigen vorläufigen grauen Text, die verstrichene
+  Aufnahmezeit und einen Mikrofonpegel. Abbrechen und Fertigstellen sind getrennt.
+- Kurze vollständige Audioteile liefern die Vorschau. Die durchgehende Aufnahme
+  bleibt erhalten und ersetzt nach dem Stopp die Vorschau durch das Endergebnis.
+- Chatwechsel und Abbruch verwerfen verspätete Ergebnisse. Vorschaufehler beenden
+  die Aufnahme nicht; vorhandener Eingabetext bleibt erhalten.
+- Geprüft mit 70 Client-Tests, Typprüfung, Produktionsbuild und echten
+  Chrome-MediaRecorder-Dateien einschliesslich Decodierung im Sprachcontainer.
+
+
 ## 2026-11-13 — Lokale Whisper-Diktate über die native Speech-API
 
 - Verwaltete Spracherkennung nutzt ausschliesslich Whisper large-v3-turbo. Die
