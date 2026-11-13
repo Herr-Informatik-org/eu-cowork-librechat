@@ -9,6 +9,8 @@
   Browser gebunden. Temporäre Chats und ausgeschaltete Entwurfsspeicherung werden
   berücksichtigt. Fehlender Speicherplatz bricht den Wechsel ab und erhält den Text.
 - Kontowechsel trennt Entwürfe; fehlende Anhänge werden vor dem Senden gemeldet.
+- Ein gesendeter Entwurf bleibt bis zur bestätigten Serverantwort als Rückkehrstand
+  erhalten. Sendefehler und zwischenzeitliche Bearbeitungen löschen ihn nicht.
 
 ## 2026-11-12 — Verbindlicher Anmeldeschutz und E-Mail-Übernahme
 
