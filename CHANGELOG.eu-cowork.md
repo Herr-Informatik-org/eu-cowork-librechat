@@ -1,5 +1,15 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-13 — Ungesendete neue Chats im Verlauf behalten
+
+- Beim Start eines weiteren neuen Chats bleiben Text, Dateiverweise und Modellauswahl
+  als fortsetzbarer Entwurf im Verlauf erhalten. Wieder geöffnete Entwürfe behalten
+  beim Bearbeiten ihre Identität; laufende Antworten werden nicht angehalten.
+- Die Ablage folgt der bestehenden lokalen Entwurfsspeicherung und ist an Konto und
+  Browser gebunden. Temporäre Chats und ausgeschaltete Entwurfsspeicherung werden
+  berücksichtigt. Fehlender Speicherplatz bricht den Wechsel ab und erhält den Text.
+- Kontowechsel trennt Entwürfe; fehlende Anhänge werden vor dem Senden gemeldet.
+
 ## 2026-11-12 — Verbindlicher Anmeldeschutz und E-Mail-Übernahme
 
 - Lokale Konten richten vor dem ersten Zugriff Authenticator oder einen Passkey/FIDO2
