@@ -12,15 +12,15 @@ interface EngineSTTDropdownProps {
 const EngineSTTDropdown: React.FC<EngineSTTDropdownProps> = ({ external }) => {
   const localize = useLocalize();
   const [, setEngineSTT] = useRecoilState<string>(store.engineSTT);
-  const { speechToTextEndpoint } = useGetAudioSettings();
+  const { speechToTextEndpoint, sttManaged } = useGetAudioSettings();
   const speechToText = useRecoilValue(store.speechToText);
 
-  const endpointOptions = external
-    ? [
-        { value: 'browser', label: localize('com_nav_browser') },
-        { value: 'external', label: localize('com_nav_external') },
-      ]
-    : [{ value: 'browser', label: localize('com_nav_browser') }];
+  let endpointOptions = [{ value: 'browser', label: localize('com_nav_browser') }];
+  if (sttManaged) {
+    endpointOptions = [{ value: 'external', label: 'Whisper large-v3-turbo' }];
+  } else if (external) {
+    endpointOptions.push({ value: 'external', label: localize('com_nav_external') });
+  }
 
   const handleSelect = (value: string) => {
     setEngineSTT(value);
@@ -39,7 +39,7 @@ const EngineSTTDropdown: React.FC<EngineSTTDropdownProps> = ({ external }) => {
         testId="EngineSTTDropdown"
         className="z-50"
         aria-labelledby={labelId}
-        disabled={!speechToText}
+        disabled={!speechToText || sttManaged}
       />
     </div>
   );

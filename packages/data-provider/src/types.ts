@@ -819,7 +819,30 @@ export type TGetRandomPromptsRequest = {
   skip: number;
 };
 
-export type TCustomConfigSpeechResponse = { [key: string]: string };
+export type TCustomConfigSpeechResponse = {
+  message?: string;
+  sttExternal?: boolean;
+  ttsExternal?: boolean;
+  sttManaged?: boolean;
+  sttModel?: string;
+  sttMaxRecordingSeconds?: number;
+  speechToText?: boolean;
+  textToSpeech?: boolean;
+  engineSTT?: string;
+  engineTTS?: string;
+  languageSTT?: string;
+  languageTTS?: string;
+  autoTranscribeAudio?: boolean;
+  autoSendText?: number;
+  decibelValue?: number;
+  conversationMode?: boolean;
+  advancedMode?: boolean;
+  cacheTTS?: boolean;
+  voice?: string;
+  cloudBrowserVoices?: boolean;
+  automaticPlayback?: boolean;
+  playbackRate?: number;
+};
 
 export type TUserTermsResponse = {
   termsAccepted: boolean;

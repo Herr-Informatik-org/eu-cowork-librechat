@@ -37,10 +37,15 @@ export default function useSpeechSettingsInit(isAuthenticated: boolean) {
   useEffect(() => {
     if (!isAuthenticated || !data || data.message === 'not_found') return;
 
-    logger.log('Initializing speech settings from config:', data);
+    if (data.sttManaged && localStorage.getItem('whisperDefaultsVersion') !== '1') {
+      setters.autoSendText(-1);
+      setters.autoTranscribeAudio(false);
+      setters.speechToText(true);
+      localStorage.setItem('whisperDefaultsVersion', '1');
+    }
 
     Object.entries(data).forEach(([key, value]) => {
-      if (key === 'sttExternal' || key === 'ttsExternal') return;
+      if (key === 'sttExternal' || key === 'ttsExternal' || key.startsWith('stt')) return;
 
       if (localStorage.getItem(key) !== null) return;
 

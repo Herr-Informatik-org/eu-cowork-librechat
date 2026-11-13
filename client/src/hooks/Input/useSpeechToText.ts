@@ -1,3 +1,5 @@
+import { useToastContext } from '@librechat/client';
+import { useLocalize } from '~/hooks';
 import useSpeechToTextBrowser from './useSpeechToTextBrowser';
 import useSpeechToTextExternal from './useSpeechToTextExternal';
 import useGetAudioSettings from './useGetAudioSettings';
@@ -12,7 +14,9 @@ const useSpeechToText = (
   stopRecording: () => void | Promise<void>;
   startRecording: () => void | Promise<void>;
 } => {
-  const { speechToTextEndpoint } = useGetAudioSettings();
+  const { speechToTextEndpoint, isSpeechConfigLoading, retrySpeechConfig } = useGetAudioSettings();
+  const { showToast } = useToastContext();
+  const localize = useLocalize();
   const externalSpeechToText = speechToTextEndpoint === 'external';
 
   const {
@@ -30,11 +34,19 @@ const useSpeechToText = (
   } = useSpeechToTextExternal(setText, onTranscriptionComplete, onRecordingStart);
 
   const isListening = externalSpeechToText ? speechIsListeningExternal : speechIsListeningBrowser;
-  const isLoading = externalSpeechToText ? speechIsLoadingExternal : speechIsLoadingBrowser;
+  const isLoading =
+    isSpeechConfigLoading ||
+    (externalSpeechToText ? speechIsLoadingExternal : speechIsLoadingBrowser);
 
-  const startRecording = externalSpeechToText
-    ? startSpeechRecordingExternal
-    : startSpeechRecordingBrowser;
+  const startRecording = () => {
+    if (speechToTextEndpoint === 'unavailable') {
+      showToast({ message: localize('com_ui_speech_config_unavailable'), status: 'error' });
+      void retrySpeechConfig();
+      return;
+    }
+    if (isSpeechConfigLoading) return;
+    return externalSpeechToText ? startSpeechRecordingExternal() : startSpeechRecordingBrowser();
+  };
   const stopRecording = externalSpeechToText
     ? stopSpeechRecordingExternal
     : stopSpeechRecordingBrowser;
