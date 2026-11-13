@@ -4,6 +4,8 @@
 
 - Die Vorschau beginnt mit einer frühen Momentaufnahme und überarbeitet fortlaufend
   denselben Textabschnitt, statt erst vollständige Viersekundenblöcke abzuwarten.
+- Bei CPU-Rückstau erhält das aktuellste Audio Vorrang. MP4-Vorschauen warten auf
+  vollständige kurze Container; die finale durchgehende Aufnahme bleibt erhalten.
 - Die gemessene Mikrofonlautstärke steuert eine logarithmische Pegelanzeige. Der
   AudioContext wird beim Klick entsperrt und über eine stumme Ausgabe aktiv gehalten.
 - Zusätzliche Statuszeilen entfallen. Kursiver Text kennzeichnet die Vorschau; nach

@@ -103,9 +103,11 @@ export default class LivePreview {
         publish();
         this.later(update, this.options.intervalMs ?? 1500);
       };
-      this.later(update, this.options.firstUpdateMs ?? 1200);
-      const length = this.options.windowMs ?? 10000;
-      this.later(() => this.record(), length - (this.options.overlapMs ?? 1000));
+      const progressive = !/mp4|m4a/.test(recorder.mimeType);
+      if (progressive) this.later(update, this.options.firstUpdateMs ?? 1200);
+      const length = this.options.windowMs ?? (progressive ? 10000 : 2500);
+      const overlap = this.options.overlapMs ?? (progressive ? 2000 : 500);
+      this.later(() => this.record(), length - overlap);
       this.later(() => {
         if (recorder.state !== 'inactive') recorder.stop();
       }, length);
@@ -151,11 +153,10 @@ export default class LivePreview {
       if (!this.cancelled) this.options.onDelayed(true);
     } finally {
       this.request = undefined;
-      const next = this.pending.values().next().value as Snapshot | undefined;
-      if (next && !this.cancelled) {
-        this.pending.delete(next.window);
-        this.enqueue(next);
-      }
+      const latestWindow = Math.max(...this.pending.keys());
+      const next = this.pending.get(latestWindow);
+      this.pending.clear();
+      if (next && !this.cancelled) this.enqueue(next);
     }
   }
 }
