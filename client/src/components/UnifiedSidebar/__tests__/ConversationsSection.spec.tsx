@@ -1,4 +1,5 @@
 import React from 'react';
+jest.mock('~/drafts/DraftHistory', () => () => null);
 import { DndProvider } from 'react-dnd';
 import { BrowserRouter } from 'react-router-dom';
 import { HTML5Backend } from 'react-dnd-html5-backend';
