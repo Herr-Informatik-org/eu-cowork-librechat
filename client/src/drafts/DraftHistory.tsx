@@ -4,6 +4,7 @@ import { Constants, LocalStorageKeys } from 'librechat-data-provider';
 import { FilePenLine, Trash2 } from 'lucide-react';
 import { useAuthContext, useNewConvo } from '~/hooks';
 import { encodeBase64 } from '~/utils/drafts';
+import { requestChatFocus } from '~/utils/focus';
 import store from '~/store';
 import {
   ChatDraft,
@@ -58,7 +59,13 @@ export default function DraftHistory({
     };
   }, [owner, enabled]);
   const open = (draftId: string) => {
-    if (!owner || !requestDraftArchive()) return;
+    if (!owner) return;
+    if (activeDraftId(owner) === draftId && window.location.pathname === '/c/new') {
+      requestChatFocus();
+      toggleNav();
+      return;
+    }
+    if (!requestDraftArchive()) return;
     try {
       const draft = readChatDraft(owner, draftId);
       if (!draft) return;

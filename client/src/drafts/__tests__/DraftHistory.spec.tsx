@@ -57,3 +57,13 @@ test('deletion requires the user’s explicit confirmation', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Entwurf löschen' }));
   expect(readChatDraft('alice', draft.id)).toBeNull();
 });
+
+test('selecting the already open draft keeps the composer and avoids another new-chat reset', () => {
+  saveChatDraft('alice', { text: 'Aktueller Entwurf', fileIds: [] });
+  render(<DraftHistory toggleNav={jest.fn()} />);
+  const button = screen.getByRole('button', { name: /Aktueller Entwurf/ });
+  fireEvent.click(button);
+  expect(mockNewConversation).toHaveBeenCalledTimes(1);
+  fireEvent.click(button);
+  expect(mockNewConversation).toHaveBeenCalledTimes(1);
+});
