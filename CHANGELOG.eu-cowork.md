@@ -1,5 +1,12 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-13 — Geführte Quellenanbindung und Wissensraum-Verwaltung
+
+- Microsoft-Einrichtung und persönliche Identitätsbindung verwenden PKCE, kurzlebige browsergebundene Zustände und eine erneute native Konto-/Rollenprüfung.
+- Private Datei-Uploads, Quellenfilter, Textvorschau, erneut geprüfte Downloads und Raumverwaltung ergänzen den internen Pilot.
+- Teamfreigaben verwenden den nativen Ressourcendialog. Öffentliche Wissensraum-Freigaben bleiben gesperrt.
+- Lokale native Vertragsprüfungen, Browserprüfung und durchgängige Tests mit isoliertem Parser bestanden. Echte Microsoft-/Windows-Abnahme bleibt separat erforderlich.
+
 ## 2026-11-12 — Interner Wissensraum-Pilot mit nativen Rechten
 
 - Wissensräume verwenden bestehende Anmeldung, Dateisuche-Berechtigung, Ressourcen-ACLs und Verbrauchserfassung. Öffentliche Freigaben sind ausgeschlossen.

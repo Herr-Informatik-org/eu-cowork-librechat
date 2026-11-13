@@ -183,7 +183,7 @@ export function createSharePolicyMiddleware({ getRoleByName, hasCapability }: Sh
       }
 
       const { user, resourceType, resourcePerms } = result;
-      const canShare = resourcePerms[Permissions.SHARE] === true;
+      const canShare = resourcePerms[resourceType === ResourceType.NOTEBOOK ? Permissions.USE : Permissions.SHARE] === true;
 
       if (!canShare) {
         logger.warn(`[checkShareAccess][${user.id}] User denied SHARE for ${resourceType}`);
@@ -224,7 +224,7 @@ export function createSharePolicyMiddleware({ getRoleByName, hasCapability }: Sh
       }
 
       const { user, resourceType, resourcePerms } = result;
-      const canSharePublic = resourcePerms[Permissions.SHARE_PUBLIC] === true;
+      const canSharePublic = resourceType !== ResourceType.NOTEBOOK && resourcePerms[Permissions.SHARE_PUBLIC] === true;
 
       if (!canSharePublic) {
         logger.warn(

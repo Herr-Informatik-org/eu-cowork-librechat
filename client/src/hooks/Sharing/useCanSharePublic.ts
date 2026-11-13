@@ -21,5 +21,5 @@ export const useCanSharePublic = (resourceType: ResourceType): boolean => {
     permissionType: permissionType as PermissionTypes,
     permission: Permissions.SHARE_PUBLIC,
   });
-  return hasAccess;
+  return resourceType!==ResourceType.NOTEBOOK && hasAccess;
 };

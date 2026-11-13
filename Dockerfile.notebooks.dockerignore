@@ -15,6 +15,7 @@
 !api/server/notebooks.js
 !api/server/routes/
 !api/server/routes/notebooks.js
+!api/server/routes/accessPermissions.js
 !api/server/services/
 !api/server/services/PermissionService.js
 !client/

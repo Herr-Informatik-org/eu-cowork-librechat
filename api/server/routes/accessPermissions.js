@@ -81,6 +81,8 @@ const checkResourcePermissionAccess = (requiredPermission) => (req, res, next) =
       resourceIdParam: 'resourceId',
       idResolver: findMCPServerByObjectId,
     });
+  } else if (resourceType === ResourceType.NOTEBOOK) {
+    middleware = canAccessResource({ resourceType: ResourceType.NOTEBOOK, requiredPermission, resourceIdParam: 'resourceId' });
   } else if (resourceType === ResourceType.SKILL) {
     middleware = canAccessResource({
       resourceType: ResourceType.SKILL,

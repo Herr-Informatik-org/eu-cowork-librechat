@@ -39,6 +39,13 @@ async function start() {
   app.use(capabilityContextMiddleware);
   app.get('/health', (_req, res) => res.json({ ready: true, role: 'notebooks', build: process.env.BUILD_COMMIT }));
   app.get('/api/notebooks/app', (_req, res) => res.set('Cache-Control','no-store').sendFile(path.join(config.paths.dist,'index.html')));
+  app.use('/api/notebooks/agent', express.json({limit:'1900kb'}), require('@librechat/api').createNotebookWindowsRouter());
+  app.use('/api/notebooks/microsoft', require('@librechat/api').createNotebookMicrosoftRouter({getUserById:require('~/models').getUserById}));
+  app.use('/api/notebooks/permissions', (req,res,next)=>{
+    if(!req.path.startsWith('/notebook/')) return res.sendStatus(404);
+    if(!['GET','HEAD'].includes(req.method) && (req.get('sec-fetch-site')==='cross-site' || (req.get('origin') && req.get('origin')!==process.env.DOMAIN_CLIENT))) return res.sendStatus(403);
+    next();
+  },express.json({limit:'128kb'}),require('./routes/accessPermissions'));
   app.use('/api/notebooks', notebooks);
   app.use('/notebooks-assets', express.static(config.paths.dist, { immutable: true, maxAge: '1y', fallthrough: false }));
   app.get('/wissensraeume', (_req, res) => {

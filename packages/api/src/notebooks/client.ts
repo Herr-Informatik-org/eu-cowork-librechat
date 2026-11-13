@@ -28,7 +28,7 @@ export async function notebookRequest<S extends ZodType>(
 ): Promise<output<S>> {
   if (!notebooksEnabled()) throw new NotebookError(404, 'Wissensräume sind nicht aktiviert.');
   const base = process.env.NOTEBOOKS_URL ?? '';
-  if (!/^http:\/\/notebooks:[0-9]+$/.test(base))
+  if (!/^http:\/\/notebooks(?:-next)?:[0-9]+$/.test(base))
     throw new NotebookError(503, 'Der Wissensraumdienst ist nicht eingerichtet.');
   const secret = readFileSync(process.env.NOTEBOOKS_KEY_FILE ?? '', 'utf8').trim();
   if (secret.length < 32) throw new NotebookError(503, 'Der Wissensraumschlüssel fehlt.');
@@ -81,9 +81,11 @@ export async function notebookRequest<S extends ZodType>(
     }
     const text = Buffer.concat(parts).toString('utf8');
     if (!response.ok) {
+      let detail:string|undefined;
+      try { const value=JSON.parse(text);const candidate=value.detail ?? value.error;if(typeof candidate==='string' && candidate.length<=500 && !/[\x00-\x1f]/.test(candidate))detail=candidate; } catch {}
       throw new NotebookError(
         response.status >= 500 ? 503 : response.status,
-        'Die Operation ist nicht freigegeben oder kann gerade nicht sicher abgeschlossen werden. Quelle und Prüfstand kontrollieren.',
+        detail ?? 'Die Operation ist nicht freigegeben oder kann gerade nicht sicher abgeschlossen werden. Quelle und Prüfstand kontrollieren.',
       );
     }
     return schema.parse(JSON.parse(text));

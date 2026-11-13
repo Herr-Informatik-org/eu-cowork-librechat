@@ -5,6 +5,7 @@ COPY --chown=node:node packages/data-provider/dist ./packages/data-provider/dist
 COPY --chown=node:node packages/data-schemas/dist ./packages/data-schemas/dist
 COPY --chown=node:node api/server/notebooks.js ./api/server/notebooks.js
 COPY --chown=node:node api/server/routes/notebooks.js ./api/server/routes/notebooks.js
+COPY --chown=node:node api/server/routes/accessPermissions.js ./api/server/routes/accessPermissions.js
 COPY --chown=node:node api/server/services/PermissionService.js ./api/server/services/PermissionService.js
 COPY --chown=node:node client/dist ./client/dist
 ARG NOTEBOOKS_SOURCE_COMMIT

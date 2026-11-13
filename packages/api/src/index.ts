@@ -92,3 +92,5 @@ export * from './opsPersonal';
 export * from './notebooks/client';
 export * from './notebooks/router';
 export * from './notebooks/model';
+
+export * from './notebooks/microsoft';

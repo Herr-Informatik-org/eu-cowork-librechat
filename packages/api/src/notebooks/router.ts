@@ -11,6 +11,7 @@ import { notebookModelSelection } from './model';
 type NotebookRequest = ServerRequest & { params: Record<string, string> };
 const id = z.string().regex(/^[a-f0-9]{24}$/);
 const sourceId = z.string().uuid();
+const externalIdentity=z.string().regex(/^([0-9a-fA-F-]{36}|S-1-[0-9-]{3,180})$/);
 const zone = z.enum(['lokal', 'schweiz', 'europa', 'global']);
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 const jsonValue: z.ZodType<JsonValue> = z.lazy(() => z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonValue), z.record(jsonValue)]));
@@ -120,10 +121,10 @@ export function createNotebooksRouter(deps: NotebookDependencies): Router {
     const roomId = id.parse(req.params.id);
     res.json(await notebookRequest(await actor(req, roomId), '/rooms/'+roomId, 'GET', room));
   }));
-  for (const suffix of ['documents', 'history'] as const) {
+  for (const suffix of ['documents', 'history','sources'] as const) {
     router.get('/rooms/:id/'+suffix, handle(async (req, res) => {
       const roomId = id.parse(req.params.id);
-      res.json(await notebookRequest(await actor(req, roomId), `/rooms/${roomId}/${suffix}`, 'GET', json));
+      res.json(await notebookRequest(await actor(req, roomId), `/rooms/${roomId}/${suffix}`+(suffix==='documents' && req.query.after ? '?after='+sourceId.parse(req.query.after) : ''), 'GET', json));
     }));
   }
   router.post('/rooms/:id/tickets/:ticket/access', handle(async (req, res) => {
@@ -136,15 +137,29 @@ export function createNotebooksRouter(deps: NotebookDependencies): Router {
     const input = z.object({ name: z.string().min(1).max(150), text: z.string().min(1).max(500000), dataClass: z.enum(['gesperrt','lokal','schweiz','europa','offen']) }).strict().parse(req.body);
     res.json(await notebookRequest(await actor(req, roomId), `/rooms/${roomId}/upload`, 'POST', json, input));
   }));
+  router.post('/rooms/:id/sources/:sourceId/microsoft',handle(async(req,res)=>{
+    const roomId=id.parse(req.params.id), source=sourceId.parse(req.params.sourceId);
+    res.json(await notebookRequest(await actor(req,roomId),`/rooms/${roomId}/sources/${source}/microsoft`,'POST',z.object({url:z.string().url()}),{}));
+  }));
+  router.post('/rooms/:id/file', handle(async (req, res) => {
+    const roomId = id.parse(req.params.id);
+    const input = z.object({ name:z.string().min(1).max(150),contentBase64:z.string().min(4).max(1000000),dataClass:z.enum(['gesperrt','lokal','schweiz','europa','offen']) }).strict().parse(req.body);
+    res.json(await notebookRequest(await actor(req,roomId),`/rooms/${roomId}/file`,'POST',json,input));
+  }));
+  router.post('/rooms/:id/rename', handle(async (req,res) => {
+    const roomId=id.parse(req.params.id);
+    const input=z.object({name:z.string().trim().min(1).max(100)}).strict().parse(req.body);
+    res.json(await notebookRequest(await actor(req,roomId),`/rooms/${roomId}/rename`,'POST',json,input));
+  }));
   router.post('/rooms/:id/query', handle(async (req, res) => {
     const roomId = id.parse(req.params.id);
-    const input = z.object({ query: z.string().min(1).max(2000), answer: z.boolean().default(false), modelSpec: z.string().min(1).max(120).optional() }).strict().parse(req.body);
+    const input = z.object({ query: z.string().min(1).max(2000), answer: z.boolean().default(false), modelSpec: z.string().min(1).max(120).optional(), sourceIds:z.array(sourceId).max(50).optional() }).strict().parse(req.body);
     const selected = notebookModelSelection(req, input.modelSpec);
-    const localQuery = () => notebookRequest(actorValue, `/rooms/${roomId}/query`, 'POST', queryResultSchema, { query: input.query, zone: 'lokal', limit: 8 });
+    const localQuery = () => notebookRequest(actorValue, `/rooms/${roomId}/query`, 'POST', queryResultSchema, { query: input.query, zone: 'lokal', limit: 8,sourceIds:input.sourceIds });
     const actorValue = await actor(req, roomId);
     let result: NotebookQueryResult;
     try {
-      result = await notebookRequest(actorValue, `/rooms/${roomId}/query`, 'POST', queryResultSchema, { query: input.query, zone: input.answer ? selected.zone : 'lokal', limit: 8 });
+      result = await notebookRequest(actorValue, `/rooms/${roomId}/query`, 'POST', queryResultSchema, { query: input.query, zone: input.answer ? selected.zone : 'lokal', limit: 8,sourceIds:input.sourceIds });
     } catch (error) {
       if (!input.answer || !(error instanceof NotebookError) || error.status !== 403) throw error;
       result = await localQuery();
@@ -193,19 +208,58 @@ export function createNotebooksRouter(deps: NotebookDependencies): Router {
   router.get('/admin/status', handle(async (req, res) => {
     res.json(await notebookRequest(await actor(req), '/admin/status', 'GET', json));
   }));
+  router.get('/admin/microsoft/status',handle(async(req,res)=>{
+    res.json(await notebookRequest(await actor(req),'/admin/microsoft/status','GET',json));
+  }));
+  router.post('/admin/microsoft/bootstrap',handle(async(req,res)=>{
+    const input=z.union([z.object({}).strict(),z.object({tenantId:sourceId,clientId:sourceId}).strict()]).parse(req.body);
+    res.json(await notebookRequest(await actor(req),'/admin/microsoft/bootstrap','POST',json,input));
+  }));
+  router.get('/admin/windows/package',handle(async(req,res)=>{
+    res.json(await notebookRequest(await actor(req),'/admin/windows/package','GET',json));
+  }));
+  router.get('/admin/sources/:sourceId/agents',handle(async(req,res)=>{
+    const source=sourceId.parse(req.params.sourceId);
+    res.json(await notebookRequest(await actor(req),`/admin/sources/${source}/agents`,'GET',json));
+  }));
+  router.get('/rooms/:id/documents/:sourceId/preview',handle(async(req,res)=>{
+    const roomId=id.parse(req.params.id),document=sourceId.parse(req.params.sourceId),ordinal=z.coerce.number().int().min(0).max(5000).parse(req.query.ordinal ?? 0);
+    res.json(await notebookRequest(await actor(req,roomId),`/rooms/${roomId}/documents/${document}/preview?ordinal=${ordinal}`,'GET',json));
+  }));
+  router.post('/rooms/:id/answers/:sourceId/export',handle(async(req,res)=>{
+    const roomId=id.parse(req.params.id),answer=sourceId.parse(req.params.sourceId);
+    res.json(await notebookRequest(await actor(req,roomId),`/rooms/${roomId}/answers/${answer}/export`,'POST',json,{}));
+  }));
+  router.post('/admin/setup',handle(async(req,res)=>{
+    const input=z.object({name:z.string().min(1).max(100),siteUrl:z.string().url().max(2048),libraryPath:z.string().min(1).max(200).optional(),folderPath:z.string().min(1).max(1024).optional(),ceiling:z.enum(['gesperrt','lokal','schweiz','europa','offen'])}).strict().parse(req.body);
+    res.json(await notebookRequest(await actor(req),'/admin/setup','POST',json,input));
+  }));
+  router.get('/admin/sources/:sourceId/setup',handle(async(req,res)=>{
+    const source=sourceId.parse(req.params.sourceId);
+    res.json(await notebookRequest(await actor(req),`/admin/sources/${source}/setup`,'GET',json));
+  }));
+  router.post('/admin/documents/review',handle(async(req,res)=>{
+    const input=z.object({documents:z.array(z.object({id:sourceId,version:z.string().min(1).max(256)}).strict()).min(1).max(100),dataClass:z.enum(['gesperrt','lokal','schweiz','europa','offen']),preview:z.boolean().default(true)}).strict().parse(req.body);
+    res.json(await notebookRequest(await actor(req),'/admin/documents/review','POST',json,input));
+  }));
+  router.post('/admin/documents/:sourceId/retry',handle(async(req,res)=>{
+    const document=sourceId.parse(req.params.sourceId);
+    const input=z.object({expectedVersion:z.string().min(1).max(256)}).strict().parse(req.body);
+    res.json(await notebookRequest(await actor(req),`/admin/documents/${document}/retry`,'POST',json,input));
+  }));
   router.post('/admin/sources', handle(async (req, res) => {
     const input = z.object({ kind: z.enum(['sharepoint','dfs']), name: z.string().min(1).max(100), config: json }).strict().parse(req.body);
     res.status(201).json(await notebookRequest(await actor(req), '/admin/sources', 'POST', json, input));
   }));
   router.post('/admin/identities', handle(async (req, res) => {
-    const input = z.object({ sourceId, userId: id, objectId: sourceId }).strict().parse(req.body);
+    const input = z.object({ sourceId, userId: id, objectId: externalIdentity }).strict().parse(req.body);
     res.json(await notebookRequest(await actor(req), '/admin/identities', 'POST', json, input));
   }));
   router.post('/admin/sources/:sourceId/:operation', handle(async (req, res) => {
     const source = sourceId.parse(req.params.sourceId);
-    const operation = z.enum(['probe','pause','acceptance','discover','library']).parse(req.params.operation);
-    const body = operation === 'acceptance' ? json.parse(req.body) : operation === 'library' ? z.object({ driveId: z.string().min(1).max(256) }).strict().parse(req.body) : {};
-    res.json(await notebookRequest(await actor(req), `/admin/sources/${source}/${operation}`, 'POST', json, body));
+    const operation = z.enum(['probe','pause','acceptance','discover','library','setup-complete','pair','agent-approve','microsoft']).parse(req.params.operation);
+    const body = operation === 'acceptance' ? json.parse(req.body) : operation === 'library' ? z.object({ driveId: z.string().min(1).max(256),folderPath:z.string().min(1).max(1024) }).strict().parse(req.body) : operation==='setup-complete' ? z.object({tenantId:sourceId,clientId:sourceId}).strict().parse(req.body) : operation==='microsoft' ? z.object({roomId:id}).strict().parse(req.body) : operation==='agent-approve' ? z.object({agentId:sourceId,fingerprint:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(req.body) : {};
+    res.json(await notebookRequest(await actor(req,operation==='microsoft' ? (body as {roomId:string}).roomId : ''), `/admin/sources/${source}/${operation}`, 'POST', json, body));
   }));
   router.post('/admin/rooms/:id/sources', handle(async (req, res) => {
     const roomId = id.parse(req.params.id);

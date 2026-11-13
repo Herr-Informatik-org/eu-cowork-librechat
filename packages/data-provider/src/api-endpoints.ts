@@ -549,20 +549,22 @@ export const searchPrincipals = (params: q.PrincipalSearchParams) => {
   return url;
 };
 
+const permissionBase=(resourceType:ResourceType)=>`${BASE_URL}/api/${resourceType===ResourceType.NOTEBOOK ? 'notebooks/permissions' : 'permissions'}`;
+
 export const getAccessRoles = (resourceType: ResourceType) =>
-  `${BASE_URL}/api/permissions/${resourceType}/roles`;
+  `${permissionBase(resourceType)}/${resourceType}/roles`;
 
 export const getResourcePermissions = (resourceType: ResourceType, resourceId: string) =>
-  `${BASE_URL}/api/permissions/${resourceType}/${resourceId}`;
+  `${permissionBase(resourceType)}/${resourceType}/${resourceId}`;
 
 export const updateResourcePermissions = (resourceType: ResourceType, resourceId: string) =>
-  `${BASE_URL}/api/permissions/${resourceType}/${resourceId}`;
+  `${permissionBase(resourceType)}/${resourceType}/${resourceId}`;
 
 export const getEffectivePermissions = (resourceType: ResourceType, resourceId: string) =>
-  `${BASE_URL}/api/permissions/${resourceType}/${resourceId}/effective`;
+  `${permissionBase(resourceType)}/${resourceType}/${resourceId}/effective`;
 
 export const getAllEffectivePermissions = (resourceType: ResourceType) =>
-  `${BASE_URL}/api/permissions/${resourceType}/effective/all`;
+  `${permissionBase(resourceType)}/${resourceType}/effective/all`;
 
 // SharePoint Graph API Token
 export const graphToken = (scopes: string) =>
