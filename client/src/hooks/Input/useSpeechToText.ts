@@ -13,6 +13,13 @@ const useSpeechToText = (
   isListening?: boolean;
   stopRecording: () => void | Promise<void>;
   startRecording: () => void | Promise<void>;
+  cancelRecording?: () => void;
+  previewText?: string;
+  previewDelayed?: boolean;
+  elapsedSeconds?: number;
+  levels?: number[];
+  liveDictation?: boolean;
+  isFinalizing?: boolean;
 } => {
   const { speechToTextEndpoint, isSpeechConfigLoading, retrySpeechConfig } = useGetAudioSettings();
   const { showToast } = useToastContext();
@@ -31,6 +38,13 @@ const useSpeechToText = (
     isLoading: speechIsLoadingExternal,
     externalStartRecording: startSpeechRecordingExternal,
     externalStopRecording: stopSpeechRecordingExternal,
+    cancelRecording,
+    previewText,
+    previewDelayed,
+    elapsedSeconds,
+    levels,
+    liveDictation,
+    isFinalizing,
   } = useSpeechToTextExternal(setText, onTranscriptionComplete, onRecordingStart);
 
   const isListening = externalSpeechToText ? speechIsListeningExternal : speechIsListeningBrowser;
@@ -56,6 +70,17 @@ const useSpeechToText = (
     isListening,
     stopRecording,
     startRecording,
+    ...(externalSpeechToText
+      ? {
+          cancelRecording,
+          previewText,
+          previewDelayed,
+          elapsedSeconds,
+          levels,
+          liveDictation,
+          isFinalizing,
+        }
+      : {}),
   };
 };
 

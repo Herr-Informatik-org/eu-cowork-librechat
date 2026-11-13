@@ -2550,5 +2550,13 @@
   "com_ui_mail_memory_disabled": "Persönliches Brain war für diese Analyse ausgeschaltet oder nicht freigegeben.",
   "com_ui_mail_memory_empty": "Keine passenden persönlichen Erinnerungen gefunden.",
   "com_ui_mail_memory_privacy": "Wenn dein persönliches Brain eingeschaltet und freigegeben ist, erhält dieses Modell passende eigene Erinnerungen für Mailanalyse und Entwurf. Neue dauerhafte Mailregeln speicherst du ausdrücklich aus deinen eigenen Korrekturen.",
-  "com_ui_mail_rule_shortcut": "Ctrl/⌘ + Enter speichert nur deine ausdrücklich formulierte persönliche Regel. Escape schliesst diesen Bereich."
+  "com_ui_mail_rule_shortcut": "Ctrl/⌘ + Enter speichert nur deine ausdrücklich formulierte persönliche Regel. Escape schliesst diesen Bereich.",
+  "com_ui_dictation_elapsed": "Aufnahmedauer",
+  "com_ui_dictation_cancel": "Aufnahme verwerfen",
+  "com_ui_dictation_finish": "Diktat übernehmen",
+  "com_ui_dictation_preview_waiting": "Ich höre zu …",
+  "com_ui_dictation_preview_live": "Live-Vorschau · der fertige Text folgt nach dem Stoppen",
+  "com_ui_dictation_preview_delayed": "Vorschau verzögert · die Aufnahme läuft weiter",
+  "com_ui_dictation_finalizing": "Die vollständige Aufnahme wird finalisiert …",
+  "com_ui_dictation_preview_saved": "Die abschliessende Erkennung ist fehlgeschlagen. Die Live-Vorschau bleibt als Entwurf erhalten; bitte prüfen."
 }

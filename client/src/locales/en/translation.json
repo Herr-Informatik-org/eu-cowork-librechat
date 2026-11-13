@@ -2988,5 +2988,13 @@
   "com_ui_ops_personal_background_on": "Hintergrundanalyse erlaubt",
   "com_ui_ops_personal_background_off": "Nur manuell gestartete Mailaufträge",
   "com_ui_ops_personal_revoke": "Widerrufen",
-  "com_ui_ops_personal_back": "Zurück zum Chat"
+  "com_ui_ops_personal_back": "Zurück zum Chat",
+  "com_ui_dictation_elapsed": "Recording duration",
+  "com_ui_dictation_cancel": "Discard recording",
+  "com_ui_dictation_finish": "Finish dictation",
+  "com_ui_dictation_preview_waiting": "Listening …",
+  "com_ui_dictation_preview_live": "Live preview · final text follows after stopping",
+  "com_ui_dictation_preview_delayed": "Preview delayed · recording continues",
+  "com_ui_dictation_finalizing": "Finalizing the complete recording …",
+  "com_ui_dictation_preview_saved": "Final transcription failed. The live preview was kept as a draft; please review it."
 }

@@ -10,6 +10,8 @@ let mockSetText: (text: string) => void;
 let mockComplete: (text: string) => boolean | void;
 let mockOnStart: (() => void) | undefined;
 let mockIsLoading = false;
+let mockLive = false;
+const mockCancelRecording = jest.fn();
 
 const mockUseSpeechToText = jest.fn(
   (
@@ -24,6 +26,12 @@ const mockUseSpeechToText = jest.fn(
     return {
       isListening,
       isLoading: mockIsLoading,
+      liveDictation: mockLive,
+      isFinalizing: mockIsLoading,
+      elapsedSeconds: 18,
+      levels: [0, 0.4, 0.8, 0.2],
+      previewText: 'Ein vorläufiger Satz.',
+      cancelRecording: () => { mockCancelRecording(); setIsListening(false); },
       startRecording: async () => {
         mockStartRecording();
         onStart?.();
@@ -79,6 +87,8 @@ const clickMicrophone = async () => {
 
 beforeEach(() => {
   mockIsLoading = false;
+  mockLive = false;
+  mockCancelRecording.mockClear();
   mockStopRecording.mockResolvedValue(undefined);
 });
 
@@ -167,4 +177,18 @@ describe('AudioRecorder transcript composition', () => {
     renderRecorder();
     expect(screen.getByRole('button', { name: 'com_ui_use_micrphone' })).toBeDisabled();
   });
+});
+
+
+it('shows elapsed time, actual level bars and separate finish/cancel controls for managed dictation', async () => {
+  mockLive = true;
+  const recorder = renderRecorder();
+  await clickMicrophone();
+  expect(screen.getByLabelText('com_ui_dictation_elapsed')).toHaveTextContent('0:18');
+  expect(screen.getByTestId('dictation-waveform').children).toHaveLength(4);
+  expect(screen.getByTestId('dictation-waveform').children[2]).toHaveStyle({height:'18px'});
+  fireEvent.click(screen.getByRole('button',{name:'com_ui_dictation_cancel'}));
+  expect(mockCancelRecording).toHaveBeenCalledTimes(1);
+  expect(recorder.methods.getValues('text')).toBe('Bitte prüfe:');
+  expect(recorder.ask).not.toHaveBeenCalled();
 });
