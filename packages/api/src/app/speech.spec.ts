@@ -135,6 +135,7 @@ describe('native speech streaming', () => {
     const response = await fetch(url, { method: 'POST', headers: { Accept: 'text/event-stream' } });
     await response.body!.cancel();
     await ended;
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(cleanup).toHaveBeenCalledTimes(1);
   });
 });
