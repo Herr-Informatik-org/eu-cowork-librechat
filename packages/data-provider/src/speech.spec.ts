@@ -24,6 +24,20 @@ describe('speech response protocol', () => {
     );
     expect(await readSpeechResponse(response)).toEqual({ text: value });
   });
+  it('retains the detected language and excludes unrelated or invalid metadata', async () => {
+    expect(
+      await readSpeechResponse(
+        streamed(
+          'event: transcription\ndata: {"text":"Guten Tag.","language":"de","key":"private"}\n\n',
+        ),
+      ),
+    ).toEqual({ text: 'Guten Tag.', language: 'de' });
+    expect(
+      await readSpeechResponse(
+        streamed('event: transcription\ndata: {"text":"Hello.","language":"invalid-language"}\n\n'),
+      ),
+    ).toEqual({ text: 'Hello.' });
+  });
   it('accepts empty speech and older JSON responses', async () => {
     expect(
       await readSpeechResponse(streamed('event: transcription\ndata: {"text":""}\n\n')),

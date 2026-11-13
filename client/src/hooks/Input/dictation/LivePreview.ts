@@ -1,16 +1,15 @@
-/** Complete short recordings share the microphone with the untouched final recording. */
+/** Join consecutive windows while allowing each window to revise its own provisional text. */
 export function mergePreview(previous: string, next: string): string {
   const before = previous.trim().split(/\s+/).filter(Boolean);
   const after = next.trim().split(/\s+/).filter(Boolean);
   const normalize = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-  for (let count = Math.min(16, before.length, after.length); count > 0; count--) {
+  for (let count = Math.min(32, before.length, after.length); count > 0; count--) {
     if (
       before
         .slice(-count)
         .every((value, index) => normalize(value) && normalize(value) === normalize(after[index]))
-    ) {
+    )
       return [...before, ...after.slice(count)].join(' ');
-    }
   }
   return [...before, ...after].join(' ');
 }
@@ -21,17 +20,23 @@ type Options = {
   transcribe: (audio: Blob, signal: AbortSignal) => Promise<string>;
   onText: (text: string) => void;
   onDelayed: (delayed: boolean) => void;
+  firstUpdateMs?: number;
   intervalMs?: number;
+  windowMs?: number;
   overlapMs?: number;
 };
+type Snapshot = { window: number; audio: Blob };
 
 export default class LivePreview {
   private cancelled = false;
-  private text = '';
+  private nextWindow = 0;
   private recorders = new Set<MediaRecorder>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private request?: AbortController;
-  private pending?: Blob;
+  private pending = new Map<number, Snapshot>();
+  private results = new Map<number, string>();
+  private prefix = '';
+  private oldestWindow = 0;
 
   constructor(private options: Options) {}
 
@@ -42,14 +47,14 @@ export default class LivePreview {
   cancel() {
     this.cancelled = true;
     this.request?.abort();
-    this.pending = undefined;
+    this.pending.clear();
     this.timers.forEach(clearTimeout);
     this.timers.clear();
     for (const recorder of this.recorders) {
       if (recorder.state !== 'inactive') recorder.stop();
     }
     this.recorders.clear();
-    // The caller owns the shared microphone and the uninterrupted final recorder.
+    // The caller owns the microphone and the uninterrupted final recorder.
   }
 
   private later(callback: () => void, milliseconds: number) {
@@ -63,65 +68,94 @@ export default class LivePreview {
   private record() {
     if (this.cancelled) return;
     try {
+      const window = this.nextWindow++;
       const recorder = new MediaRecorder(
         this.options.stream,
         this.options.mimeType ? { mimeType: this.options.mimeType } : undefined,
       );
       const chunks: Blob[] = [];
       let bytes = 0;
+      let active = true;
       this.recorders.add(recorder);
+      const publish = () => {
+        if (this.cancelled || bytes > 2 * 1024 * 1024 || !chunks.length) return;
+        this.enqueue({
+          window,
+          audio: new Blob(chunks, {
+            type: recorder.mimeType || this.options.mimeType || 'audio/webm',
+          }),
+        });
+      };
       recorder.ondataavailable = ({ data }) => {
         if (this.cancelled || !data.size) return;
         bytes += data.size;
         if (bytes <= 2 * 1024 * 1024) chunks.push(data);
       };
-      recorder.onerror = () => {
-        this.options.onDelayed(true);
-      };
+      recorder.onerror = () => this.options.onDelayed(true);
       recorder.onstop = () => {
+        active = false;
         this.recorders.delete(recorder);
-        if (this.cancelled || bytes > 2 * 1024 * 1024 || !chunks.length) return;
-        this.enqueue(
-          new Blob(chunks, { type: recorder.mimeType || this.options.mimeType || 'audio/webm' }),
-        );
+        publish();
       };
-      recorder.start(250);
-      const interval = this.options.intervalMs ?? 6000;
-      this.later(() => this.record(), interval - (this.options.overlapMs ?? 500));
+      recorder.start(100);
+      const update = () => {
+        if (!active) return;
+        publish();
+        this.later(update, this.options.intervalMs ?? 1500);
+      };
+      this.later(update, this.options.firstUpdateMs ?? 1200);
+      const length = this.options.windowMs ?? 10000;
+      this.later(() => this.record(), length - (this.options.overlapMs ?? 1000));
       this.later(() => {
         if (recorder.state !== 'inactive') recorder.stop();
-      }, interval);
+      }, length);
     } catch {
       this.options.onDelayed(true);
     }
   }
 
-  private enqueue(audio: Blob) {
+  private enqueue(snapshot: Snapshot) {
+    if (snapshot.window < this.oldestWindow) return;
     if (this.request) {
-      if (this.pending) this.options.onDelayed(true);
-      this.pending = audio;
+      this.pending.set(snapshot.window, snapshot);
+      // Retain the newest version of each of at most two overlapping windows.
+      if (this.pending.size > 2) {
+        this.pending.delete(this.pending.keys().next().value as number);
+        this.options.onDelayed(true);
+      }
       return;
     }
-    void this.send(audio);
+    void this.send(snapshot);
   }
 
-  private async send(audio: Blob) {
+  private async send(snapshot: Snapshot) {
     const request = new AbortController();
     this.request = request;
     try {
-      const next = await this.options.transcribe(audio, request.signal);
+      const text = await this.options.transcribe(snapshot.audio, request.signal);
       if (!this.cancelled && !request.signal.aborted) {
-        this.text = mergePreview(this.text, next);
-        this.options.onText(this.text);
+        this.results.set(snapshot.window, text);
+        while (this.results.size > 3) {
+          const oldest = Math.min(...this.results.keys());
+          this.prefix = mergePreview(this.prefix, this.results.get(oldest) || '');
+          this.results.delete(oldest);
+          this.oldestWindow = oldest + 1;
+        }
+        let preview = this.prefix;
+        for (const window of [...this.results.keys()].sort((a, b) => a - b))
+          preview = mergePreview(preview, this.results.get(window) || '');
+        this.options.onText(preview);
         this.options.onDelayed(false);
       }
     } catch {
       if (!this.cancelled) this.options.onDelayed(true);
     } finally {
       this.request = undefined;
-      const pending = this.pending;
-      this.pending = undefined;
-      if (pending && !this.cancelled) this.enqueue(pending);
+      const next = this.pending.values().next().value as Snapshot | undefined;
+      if (next && !this.cancelled) {
+        this.pending.delete(next.window);
+        this.enqueue(next);
+      }
     }
   }
 }

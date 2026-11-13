@@ -44,16 +44,23 @@ class FakeRecorder {
   static instances: FakeRecorder[] = [];
   static isTypeSupported = jest.fn((type) => type === 'audio/mp4');
   state = 'inactive';
+  timer?: ReturnType<typeof setInterval>;
   mimeType = '';
   ondataavailable: ((event: { data: Blob }) => void) | null = null;
   onstop: (() => void) | null = null;
   onerror: (() => void) | null = null;
   start = jest.fn(() => {
     this.state = 'recording';
+    if (mockManaged && FakeRecorder.instances.indexOf(this) > 0)
+      this.timer = setInterval(
+        () => this.ondataavailable?.({ data: new Blob(['audio-packet']) }),
+        100,
+      );
   });
 
   stop = jest.fn(() => {
     this.state = 'inactive';
+    clearInterval(this.timer);
     setTimeout(() => {
       this.ondataavailable?.({ data: new Blob(['final-audio'], { type: this.mimeType }) });
       this.onstop?.();
@@ -79,11 +86,18 @@ class FakeAudioContext {
     return { connect: jest.fn() };
   }
 
+  createGain() {
+    return { gain: { value: 1 }, connect: jest.fn() };
+  }
+
   createAnalyser() {
     return {
       minDecibels: -45,
+      fftSize: 512,
       frequencyBinCount: 16,
       getByteFrequencyData: (data: Uint8Array) => data.fill(0),
+      connect: jest.fn(),
+      getFloatTimeDomainData: (data: Float32Array) => data.fill(0),
     };
   }
 }
@@ -404,7 +418,7 @@ describe('managed live preview', () => {
     });
     expect(mockGetUserMedia).toHaveBeenCalledTimes(1);
     await act(async () => {
-      jest.advanceTimersByTime(6000);
+      jest.advanceTimersByTime(1800);
       await Promise.resolve();
     });
     expect(mockPreviewAudio).toHaveBeenCalledTimes(1);
@@ -442,7 +456,7 @@ describe('managed live preview', () => {
       await hook.result.current.externalStartRecording();
     });
     await act(async () => {
-      jest.advanceTimersByTime(6000);
+      jest.advanceTimersByTime(1800);
       await Promise.resolve();
     });
     act(() => hook.result.current.externalStopRecording());

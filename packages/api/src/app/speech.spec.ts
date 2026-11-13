@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import express from 'express';
 import { getSpeechConfiguration, respondToSpeech, whisperRecordingLimit } from './speech';
+import type { SpeechToTextResponse } from 'librechat-data-provider';
 
 const key = crypto.randomBytes(32).toString('hex');
 const env = { WHISPER_STT_ENABLED: 'true', WHISPER_STT_API_KEY: key };
@@ -53,7 +54,7 @@ describe('native speech streaming', () => {
   let server: http.Server;
   let url: string;
   let cleanup: jest.Mock;
-  let operation: (signal: AbortSignal) => Promise<string>;
+  let operation: (signal: AbortSignal) => Promise<string | SpeechToTextResponse>;
   beforeEach(async () => {
     cleanup = jest.fn(async () => undefined);
     operation = async () => 'Grüezi. Der Betrag ist 1’234.50 Franken.';
@@ -78,6 +79,11 @@ describe('native speech streaming', () => {
     const response = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' } });
     expect(await response.json()).toEqual({ text: '' });
     expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+  it('returns detected language for provisional transcripts and filters other metadata', async () => {
+    operation = async () => ({ text: 'Guten Tag.', language: 'de', key: 'not-for-the-browser' });
+    const response = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' } });
+    expect(await response.json()).toEqual({ text: 'Guten Tag.', language: 'de' });
   });
   it('sends headers and heartbeats before the transcription completes', async () => {
     let finish!: (text: string) => void;

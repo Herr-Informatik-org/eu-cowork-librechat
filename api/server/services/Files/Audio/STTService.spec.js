@@ -3,10 +3,16 @@ jest.mock('axios');
 jest.mock('form-data');
 jest.mock('https-proxy-agent');
 jest.mock('@librechat/data-schemas', () => ({ logger: { warn: jest.fn(), error: jest.fn() } }));
-jest.mock('@librechat/api', () => ({ genAzureEndpoint: jest.fn(), logAxiosError: jest.fn() }));
+jest.mock('@librechat/api', () => ({
+  genAzureEndpoint: jest.fn(),
+  logAxiosError: jest.fn(),
+  managedWhisperEnabled: jest.fn(() => true),
+  resolveConfigSecret: jest.fn(() => null),
+  applyAxiosProxyConfig: jest.fn(),
+}));
 jest.mock('librechat-data-provider', () => ({
   extractEnvVariable: jest.fn(),
-  STTProviders: {},
+  STTProviders: { OPENAI: 'openai', AZURE_OPENAI: 'azureOpenAI' },
 }));
 jest.mock('~/server/services/Config', () => ({ getAppConfig: jest.fn() }));
 
@@ -109,5 +115,38 @@ describe('STT audio format validation with MIME normalization', () => {
     expect(isFormatAccepted('text/webm')).toBe(false);
     expect(isFormatAccepted('text/plain')).toBe(false);
     expect(isFormatAccepted('application/json')).toBe(false);
+  });
+});
+
+describe('managed incremental preview', () => {
+  const axios = require('axios');
+  const { STTService } = require('./STTService');
+  const schema = {
+    url: 'http://kisuno-whisper:9000/v1/audio/transcriptions',
+    model: 'whisper-large-v3-turbo',
+  };
+  const request = {
+    audioBuffer: Buffer.from('public-audio'),
+    audioFile: { originalname: 'public.wav', mimetype: 'audio/wav', size: 12 },
+    language: '',
+  };
+  it('passes the bounded preview flag only to managed speech and filters provider metadata', async () => {
+    axios.post.mockResolvedValue({
+      status: 200,
+      data: { text: ' Guten Tag. ', language: 'de', private: 'not-for-browser' },
+    });
+    const result = await new STTService().sttRequest('openai', schema, {
+      ...request,
+      preview: true,
+    });
+    expect(result).toEqual({ text: 'Guten Tag.', language: 'de' });
+    const [, body, options] = axios.post.mock.calls.at(-1);
+    expect(body.preview).toBe(true);
+    expect(options.proxy).toBe(false);
+    expect(options.maxRedirects).toBe(0);
+  });
+  it('keeps the legacy final-result contract', async () => {
+    axios.post.mockResolvedValue({ status: 200, data: { text: ' Fertig. ', language: 'de' } });
+    expect(await new STTService().sttRequest('openai', schema, request)).toBe('Fertig.');
   });
 });

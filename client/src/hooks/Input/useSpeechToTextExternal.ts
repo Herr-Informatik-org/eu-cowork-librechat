@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRecoilValue } from 'recoil';
 import { dataService } from 'librechat-data-provider';
 import LivePreview from './dictation/LivePreview';
+import { microphoneLevel } from './dictation/AudioLevel';
 import { useLocation } from 'react-router-dom';
 import { useToastContext } from '@librechat/client';
 import { useSpeechToTextMutation } from '~/data-provider';
@@ -27,6 +28,7 @@ type RecordingSession = {
   startedAt?: number;
   clock?: ReturnType<typeof setInterval>;
   fallbackPreview?: string;
+  detectedLanguage?: string;
 };
 
 let recordingOwner: RecordingSession | null = null;
@@ -173,6 +175,15 @@ const useSpeechToTextExternal = (
       !session.cancelled && sessionRef.current === session && session.scope === scopeRef.current;
 
     try {
+      if (sttManaged || (autoTranscribeAudio && speechToText)) {
+        try {
+          // Resume during the click gesture, before waiting for microphone permission.
+          session.context = new AudioContext();
+          void session.context.resume?.().catch(() => undefined);
+        } catch {
+          session.context = undefined;
+        }
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
         video: false,
@@ -224,7 +235,8 @@ const useSpeechToTextExternal = (
           else if (type.includes('ogg')) extension = 'ogg';
           const formData = new FormData();
           formData.append('audio', audio, `audio.${extension}`);
-          if (selectedLanguage) formData.append('language', selectedLanguage);
+          const language = selectedLanguage || session.detectedLanguage;
+          if (language) formData.append('language', language);
           const data = await processAudio(formData);
           if (!isCurrent()) return;
           const text = data.text?.trim() || '';
@@ -292,7 +304,8 @@ const useSpeechToTextExternal = (
         session.preview = new LivePreview({
           stream,
           mimeType,
-          intervalMs: 4000,
+          firstUpdateMs: 1200,
+          intervalMs: 1500,
           transcribe: async (audio, signal) => {
             const form = new FormData();
             const extension = audio.type.includes('mp4')
@@ -301,8 +314,11 @@ const useSpeechToTextExternal = (
                 ? 'ogg'
                 : 'webm';
             form.append('audio', audio, `preview.${extension}`);
-            if (selectedLanguage) form.append('language', selectedLanguage);
+            form.append('preview', 'true');
+            const language = selectedLanguage || session.detectedLanguage;
+            if (language) form.append('language', language);
             const result = await dataService.speechToText(form, { signal });
+            if (isCurrent() && result.language) session.detectedLanguage = result.language;
             return result.text || '';
           },
           onText: (text) => {
@@ -330,27 +346,33 @@ const useSpeechToTextExternal = (
 
       if (sttManaged || (autoTranscribeAudio && speechToText)) {
         try {
-          const context = new AudioContext();
+          const context = session.context ?? new AudioContext();
           session.context = context;
           if (typeof context.resume === 'function') void context.resume().catch(() => undefined);
           const analyser = context.createAnalyser();
+          analyser.fftSize = 512;
           analyser.minDecibels = minDecibels;
           context.createMediaStreamSource(stream).connect(analyser);
-          const samples = new Uint8Array(analyser.frequencyBinCount);
+          const muted = context.createGain();
+          muted.gain.value = 0;
+          analyser.connect(muted);
+          muted.connect(context.destination);
+          const samples = new Float32Array(analyser.fftSize);
+          const spectrum = new Uint8Array(analyser.frequencyBinCount);
           let lastSound = Date.now();
           let lastMeter = 0;
           const detectSound = () => {
             if (!isCurrent() || session.stopping) return;
-            analyser.getByteFrequencyData(samples);
-            if (samples.some((value) => value > 0)) lastSound = Date.now();
+            analyser.getFloatTimeDomainData(samples);
+            const level = microphoneLevel(samples);
+            if (sttManaged) {
+              if (level > 0) lastSound = Date.now();
+            } else {
+              analyser.getByteFrequencyData(spectrum);
+              if (spectrum.some((value) => value > 0)) lastSound = Date.now();
+            }
             if (sttManaged && Date.now() - lastMeter >= 100) {
               lastMeter = Date.now();
-              const level = Math.min(
-                1,
-                Math.sqrt(
-                  samples.reduce((sum, value) => sum + (value / 255) ** 2, 0) / samples.length,
-                ) * 2,
-              );
               setLevels((before) => [...before.slice(1), level]);
             }
             if (!sttManaged && Date.now() - lastSound > AUTO_TRANSCRIBE_SILENCE_MS) {
