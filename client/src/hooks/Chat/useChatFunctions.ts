@@ -1,5 +1,5 @@
 import { v4 } from 'uuid';
-import { activeDraftId, removeChatDraft, reportDraftError } from '~/drafts/history';
+import { activeDraftId, trackDraftSubmission, reportDraftError } from '~/drafts/history';
 import { cloneDeep } from 'lodash';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -723,7 +723,7 @@ export default function useChatFunctions({
       !isRegenerate
     ) {
       try {
-        removeChatDraft(user.id, originatingDraft);
+        trackDraftSubmission(user.id, originatingDraft, currentMsg.messageId);
       } catch (error) {
         reportDraftError(error);
       }

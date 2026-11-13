@@ -7,6 +7,8 @@ import {
   setChatDraftOwner,
   requestDraftArchive,
   ARCHIVE_NEW_CHAT,
+  trackDraftSubmission,
+  finishDraftSubmission,
 } from '../history';
 
 beforeEach(() => {
@@ -95,4 +97,25 @@ test('saving can veto navigation when persistence fails', () => {
   expect(requestDraftArchive()).toBe(false);
   window.removeEventListener(ARCHIVE_NEW_CHAT, prevent);
   expect(requestDraftArchive()).toBe(true);
+});
+
+test('retains the recovery draft on send errors and consumes only a server-confirmed turn', () => {
+  const draft = saveChatDraft('alice', content('Noch nicht bestätigt'))!;
+  trackDraftSubmission('alice', draft.id, 'failed-message');
+  expect(readChatDraft('alice', draft.id)).not.toBeNull();
+  finishDraftSubmission('failed-message', false);
+  expect(readChatDraft('alice', draft.id)).not.toBeNull();
+  trackDraftSubmission('alice', draft.id, 'confirmed-message');
+  finishDraftSubmission('confirmed-message', true);
+  expect(readChatDraft('alice', draft.id)).toBeNull();
+});
+test('a completed turn cannot consume a draft subsequently edited in another tab', () => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  const draft = saveChatDraft('alice', content('Gesendet'))!;
+  trackDraftSubmission('alice', draft.id, 'in-flight');
+  clock.mockReturnValue(2000);
+  saveChatDraft('alice', { ...content('Neue Bearbeitung'), id: draft.id });
+  finishDraftSubmission('in-flight', true);
+  expect(readChatDraft('alice', draft.id)?.text).toBe('Neue Bearbeitung');
+  clock.mockRestore();
 });

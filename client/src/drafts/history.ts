@@ -172,3 +172,25 @@ export function setChatDraftOwner(owner?: string | null) {
     reportDraftError(error);
   }
 }
+
+const pendingSubmissions = new Map<string, { owner: string; id: string; snapshot: string }>();
+
+/** Keep recovery drafts until the server confirms the completed turn. */
+export function trackDraftSubmission(owner: string, id: string, messageId: string) {
+  const draft = readChatDraft(owner, id);
+  if (!draft) return;
+  if (pendingSubmissions.size >= 256)
+    pendingSubmissions.delete(pendingSubmissions.keys().next().value!);
+  pendingSubmissions.set(messageId, { owner, id, snapshot: JSON.stringify(draft) });
+  selectChatDraft(owner, null);
+}
+
+export function finishDraftSubmission(messageId: string, persisted: boolean) {
+  const pending = pendingSubmissions.get(messageId);
+  pendingSubmissions.delete(messageId);
+  if (!pending || !persisted) return;
+  const draft = readChatDraft(pending.owner, pending.id);
+  // Another tab may have edited the draft while this turn was running.
+  if (draft && JSON.stringify(draft) === pending.snapshot)
+    removeChatDraft(pending.owner, pending.id);
+}
