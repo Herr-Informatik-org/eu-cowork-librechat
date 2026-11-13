@@ -49,7 +49,7 @@ function setup(consent = true, redirect = info.redirect_uri) {
     },
     approve: { mutateAsync: approve },
     revoke: { mutate: revoke },
-  } as ReturnType<typeof useOpsPersonal>);
+  } as unknown as ReturnType<typeof useOpsPersonal>);
   return render(
     <MemoryRouter
       initialEntries={[
