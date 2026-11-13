@@ -418,7 +418,7 @@ describe('managed live preview', () => {
     });
     expect(mockGetUserMedia).toHaveBeenCalledTimes(1);
     await act(async () => {
-      jest.advanceTimersByTime(1800);
+      jest.advanceTimersByTime(2800);
       await Promise.resolve();
     });
     expect(mockPreviewAudio).toHaveBeenCalledTimes(1);
@@ -456,7 +456,7 @@ describe('managed live preview', () => {
       await hook.result.current.externalStartRecording();
     });
     await act(async () => {
-      jest.advanceTimersByTime(1800);
+      jest.advanceTimersByTime(2800);
       await Promise.resolve();
     });
     act(() => hook.result.current.externalStopRecording());
