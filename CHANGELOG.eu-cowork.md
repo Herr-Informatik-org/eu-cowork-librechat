@@ -1,5 +1,17 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-13 — Frühere Diktiervorschau und sichtbarer Mikrofonpegel
+
+- Die Vorschau beginnt mit einer frühen Momentaufnahme und überarbeitet fortlaufend
+  denselben Textabschnitt, statt erst vollständige Viersekundenblöcke abzuwarten.
+- Die gemessene Mikrofonlautstärke steuert eine logarithmische Pegelanzeige. Der
+  AudioContext wird beim Klick entsperrt und über eine stumme Ausgabe aktiv gehalten.
+- Zusätzliche Statuszeilen entfallen. Kursiver Text kennzeichnet die Vorschau; nach
+  dem Stopp ersetzt die vollständige Whisper-Erkennung den Entwurf.
+- Erkannte Sprache kann für weitere Aufnahmeteile wiederverwendet werden. Kein
+  zusätzlicher externer Sprachanbieter und kein automatisches Absenden.
+
+
 ## 2026-11-13 — Live-Diktate mit Vorschau und Aufnahmeanzeige
 
 - Lokale Whisper-Diktate zeigen vorläufigen grauen Text, die verstrichene

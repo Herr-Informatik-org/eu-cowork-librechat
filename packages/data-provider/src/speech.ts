@@ -4,7 +4,12 @@ function parseTranscript(value: string): SpeechToTextResponse {
   const parsed: SpeechToTextResponse = JSON.parse(value);
   if (!parsed || typeof parsed.text !== 'string')
     throw new Error('Die Sprachantwort ist ungültig.');
-  return { text: parsed.text };
+  return {
+    text: parsed.text,
+    ...(typeof parsed.language === 'string' && /^[a-z]{2,3}$/.test(parsed.language)
+      ? { language: parsed.language }
+      : {}),
+  };
 }
 
 export async function readSpeechResponse(response: Response): Promise<SpeechToTextResponse> {

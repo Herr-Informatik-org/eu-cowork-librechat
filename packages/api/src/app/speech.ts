@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import type { TCustomConfig } from 'librechat-data-provider';
+import type { TCustomConfig, SpeechToTextResponse } from 'librechat-data-provider';
 
 export function managedWhisperEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.WHISPER_STT_ENABLED === 'true';
@@ -67,7 +67,7 @@ function errorStatus(error: object) {
 export async function respondToSpeech(
   req: Request,
   res: Response,
-  operation: (signal: AbortSignal) => Promise<string>,
+  operation: (signal: AbortSignal) => Promise<string | SpeechToTextResponse>,
   cleanup: () => Promise<void>,
   options: { heartbeatMs?: number; timeoutMs?: number } = {},
 ): Promise<void> {
@@ -80,7 +80,10 @@ export async function respondToSpeech(
   const deadline = setTimeout(disconnected, options.timeoutMs ?? 720000);
   deadline.unref();
   let heartbeat: NodeJS.Timeout | undefined;
-  const write = (event: string, value: { text: string } | { code: string; message: string }) => {
+  const write = (
+    event: string,
+    value: SpeechToTextResponse | { code: string; message: string },
+  ) => {
     if (!res.destroyed && !res.writableEnded)
       res.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`);
   };
@@ -102,10 +105,16 @@ export async function respondToSpeech(
     if (req.file && req.file.size > 24 * 1024 * 1024) {
       throw Object.assign(new Error('Die Aufnahme ist zu gross.'), { response: { status: 413 } });
     }
-    const text = await operation(controller.signal);
+    const result = await operation(controller.signal);
     if (controller.signal.aborted) return;
-    if (stream) write('transcription', { text });
-    else res.json({ text });
+    const transcript = typeof result === 'string' ? { text: result } : result;
+    if (!transcript || typeof transcript.text !== 'string')
+      throw new Error('Die Sprachantwort ist ungültig.');
+    const value: SpeechToTextResponse = { text: transcript.text };
+    if (typeof transcript.language === 'string' && /^[a-z]{2,3}$/.test(transcript.language))
+      value.language = transcript.language;
+    if (stream) write('transcription', value);
+    else res.json(value);
   } catch (error) {
     if (res.destroyed || res.writableEnded) return;
     const status = errorStatus(error instanceof Error ? error : new Error());

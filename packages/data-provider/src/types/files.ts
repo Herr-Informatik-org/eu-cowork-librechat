@@ -203,6 +203,7 @@ export type FileDownloadURLResponse = {
 
 export type SpeechToTextResponse = {
   text: string;
+  language?: string;
 };
 
 export type VoiceResponse = string[];

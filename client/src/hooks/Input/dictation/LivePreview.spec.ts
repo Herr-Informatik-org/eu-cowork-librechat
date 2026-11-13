@@ -4,15 +4,21 @@ class Recorder {
   static all: Recorder[] = [];
   state = 'inactive';
   mimeType = 'audio/webm;codecs=opus';
+  timer?: ReturnType<typeof setInterval>;
   ondataavailable?: (event: { data: Blob }) => void;
   onstop?: () => void;
   onerror?: () => void;
   start() {
     this.state = 'recording';
+    this.timer = setInterval(
+      () => this.ondataavailable?.({ data: new Blob(['audio-packet']) }),
+      100,
+    );
   }
   stop() {
     this.state = 'inactive';
-    this.ondataavailable?.({ data: new Blob(['complete-segment']) });
+    clearInterval(this.timer);
+    this.ondataavailable?.({ data: new Blob(['last-packet']) });
     this.onstop?.();
   }
   constructor() {
@@ -21,9 +27,8 @@ class Recorder {
 }
 const trackStop = jest.fn();
 const stream = { getTracks: () => [{ stop: trackStop }] } as unknown as MediaStream;
-const flush = async () => {
-  await Promise.resolve();
-  await Promise.resolve();
+const advance = async (milliseconds: number) => {
+  await jest.advanceTimersByTimeAsync(milliseconds);
 };
 
 beforeEach(() => {
@@ -36,7 +41,7 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-it('joins overlapping words without losing Swiss names or numerical punctuation', () => {
+it('joins overlapping windows without changing numerical punctuation', () => {
   expect(mergePreview('Treffen in Zürich.', 'Zürich, um 15:30 Uhr.')).toBe(
     'Treffen in Zürich. um 15:30 Uhr.',
   );
@@ -44,21 +49,34 @@ it('joins overlapping words without losing Swiss names or numerical punctuation'
     'Betrag 1’234.50 Neue Rechnung 2’345.60',
   );
 });
-it('produces complete overlapping segments while leaving the shared microphone running', async () => {
+it('sends an early cumulative snapshot while the recorder is still running', async () => {
   const transcribe = jest.fn().mockResolvedValue('Guten Tag.');
   const onText = jest.fn();
   const preview = new LivePreview({ stream, transcribe, onText, onDelayed: jest.fn() });
   preview.start();
-  jest.advanceTimersByTime(5500);
-  expect(Recorder.all.filter((value) => value.state === 'recording')).toHaveLength(2);
-  jest.advanceTimersByTime(500);
-  await flush();
+  await advance(1300);
   expect(transcribe).toHaveBeenCalledTimes(1);
   expect(onText).toHaveBeenCalledWith('Guten Tag.');
+  expect(Recorder.all[0].state).toBe('recording');
   expect(trackStop).not.toHaveBeenCalled();
   preview.cancel();
 });
-it('bounds preview requests and discards queued or stale results after cancellation', async () => {
+it('revises the same window instead of duplicating its earlier partial text', async () => {
+  const transcribe = jest
+    .fn()
+    .mockResolvedValueOnce('Heute ist')
+    .mockResolvedValueOnce('Heute ist Freitag.');
+  const onText = jest.fn();
+  const preview = new LivePreview({ stream, transcribe, onText, onDelayed: jest.fn() });
+  preview.start();
+  await advance(2800);
+  expect(onText).toHaveBeenLastCalledWith('Heute ist Freitag.');
+  expect((transcribe.mock.calls[1][0] as Blob).size).toBeGreaterThan(
+    (transcribe.mock.calls[0][0] as Blob).size,
+  );
+  preview.cancel();
+});
+it('bounds requests and discards queued or stale results after cancellation', async () => {
   let resolve!: (text: string) => void;
   const transcribe = jest.fn(
     (_audio: Blob, _signal: AbortSignal) =>
@@ -69,19 +87,18 @@ it('bounds preview requests and discards queued or stale results after cancellat
   const onText = jest.fn();
   const preview = new LivePreview({ stream, transcribe, onText, onDelayed: jest.fn() });
   preview.start();
-  jest.advanceTimersByTime(24000);
-  await flush();
+  await advance(24000);
   expect(transcribe).toHaveBeenCalledTimes(1);
   const signal = transcribe.mock.calls[0][1] as AbortSignal;
   preview.cancel();
   expect(signal.aborted).toBe(true);
   resolve('Ein verspätetes Ergebnis.');
-  await flush();
+  await advance(0);
   expect(onText).not.toHaveBeenCalled();
   expect(transcribe).toHaveBeenCalledTimes(1);
   expect(Recorder.all.every((value) => value.state === 'inactive')).toBe(true);
 });
-it('degrades a failed preview without ending microphone capture', async () => {
+it('keeps the microphone running when recognition fails', async () => {
   const onDelayed = jest.fn();
   const preview = new LivePreview({
     stream,
@@ -90,10 +107,9 @@ it('degrades a failed preview without ending microphone capture', async () => {
     onDelayed,
   });
   preview.start();
-  jest.advanceTimersByTime(6000);
-  await flush();
+  await advance(1400);
   expect(onDelayed).toHaveBeenCalledWith(true);
   expect(trackStop).not.toHaveBeenCalled();
-  expect(Recorder.all.some((value) => value.state === 'recording')).toBe(true);
+  expect(Recorder.all[0].state).toBe('recording');
   preview.cancel();
 });

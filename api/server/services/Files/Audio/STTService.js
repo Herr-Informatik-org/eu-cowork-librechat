@@ -288,7 +288,7 @@ class STTService {
    * @returns {Promise<string>} A promise that resolves to the transcribed text.
    * @throws {Error} If the provider is invalid, the response status is not 200, or the response data is missing.
    */
-  async sttRequest(provider, sttSchema, { audioBuffer, audioFile, language, signal }) {
+  async sttRequest(provider, sttSchema, { audioBuffer, audioFile, language, signal, preview = false }) {
     const strategy = this.providerStrategies[provider];
     if (!strategy) {
       throw new Error('Invalid provider');
@@ -311,6 +311,7 @@ class STTService {
 
     if (managedWhisperEnabled()) {
       options.proxy = false;
+      if (preview === true) data.preview = true;
     } else {
       applyAxiosProxyConfig(options, url);
     }
@@ -326,7 +327,12 @@ class STTService {
         throw new Error('Missing data in response from the STT API');
       }
 
-      return response.data.text.trim();
+      const text = response.data.text.trim();
+      if (managedWhisperEnabled() && preview === true) {
+        const language = response.data.language;
+        return { text, ...(typeof language === 'string' && /^[a-z]{2,3}$/.test(language) ? { language } : {}) };
+      }
+      return text;
     } catch (error) {
       logger.warn('Die Spracherkennung hat die Anfrage nicht abgeschlossen.');
       throw error;
@@ -360,6 +366,7 @@ class STTService {
           audioBuffer,
           audioFile,
           language: req.body?.language || '',
+          preview: managedWhisperEnabled() && req.body?.preview === 'true',
           signal,
         });
       },
