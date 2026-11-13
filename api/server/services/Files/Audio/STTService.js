@@ -6,6 +6,7 @@ const { logger } = require('@librechat/data-schemas');
 const {
   genAzureEndpoint,
   getSpeechConfiguration,
+  managedWhisperEnabled,
   respondToSpeech,
   applyAxiosProxyConfig,
   resolveConfigSecret,
@@ -308,7 +309,11 @@ class STTService {
 
     const options = { headers, signal, timeout: 700000, maxRedirects: 0 };
 
-    applyAxiosProxyConfig(options, url);
+    if (managedWhisperEnabled()) {
+      options.proxy = false;
+    } else {
+      applyAxiosProxyConfig(options, url);
+    }
 
     try {
       const response = await axios.post(url, data, options);
