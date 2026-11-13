@@ -53,6 +53,7 @@ import { WorkModeSwitch } from './WorkMode';
 import Mention from './Mention';
 import store from '~/store';
 import { hasReadyImageAttachments } from '~/utils/imageAttachments';
+import useCurrentChatDraft from '~/drafts/useCurrentChatDraft';
 import './composer.css';
 
 interface ChatFormProps {
@@ -189,6 +190,17 @@ const ChatForm = memo(function ChatForm({
     // swap to the answer's own key, and the conversation draft is restored
     // when the question resolves.
     draftId: answerMode.draftId,
+  });
+
+  useCurrentChatDraft({
+    index,
+    conversation,
+    isSubmitting,
+    isTemporary,
+    files,
+    setFiles,
+    textAreaRef,
+    answerDraftId: answerMode.draftId,
   });
 
   const { submitMessage, submitPrompt } = useSubmitMessage();

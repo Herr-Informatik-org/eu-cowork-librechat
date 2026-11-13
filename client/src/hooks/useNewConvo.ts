@@ -43,6 +43,7 @@ import { useApplyModelSpecEffects } from './Agents';
 import { usePauseGlobalAudio } from './Audio';
 import { useHasAccess } from '~/hooks';
 import store from '~/store';
+import { requestDraftArchive, finishDraftNavigation } from '~/drafts/history';
 
 const useNewConvo = (index = 0) => {
   const navigate = useNavigate();
@@ -67,6 +68,7 @@ const useNewConvo = (index = 0) => {
   const assistantsListMap = useAssistantListMap();
   const { pauseGlobalAudio } = usePauseGlobalAudio(index);
   const saveDrafts = useRecoilValue<boolean>(store.saveDrafts);
+  const draftOwner = useRecoilValue(store.user)?.id;
   const resetBadges = useResetChatBadges();
 
   const { mutateAsync } = useDeleteFilesMutation({
@@ -88,6 +90,7 @@ const useNewConvo = (index = 0) => {
         keepAddedConvos?: boolean,
         disableFocus?: boolean,
         _disableParams?: boolean,
+        restoredDraftId?: string,
       ) => {
         const modelsConfig = modelsData ?? modelsQuery.data;
         const { endpoint = null } = conversation;
@@ -245,6 +248,9 @@ const useNewConvo = (index = 0) => {
         const getParams = (nextConversation: TConversation) => {
           const nextParams = new URLSearchParams(searchParams);
           nextParams.delete('projectId');
+          nextParams.delete('draft');
+          if (restoredDraftId && nextConversation.conversationId === Constants.NEW_CONVO)
+            nextParams.set('draft', restoredDraftId);
           if (
             nextConversation.conversationId === Constants.NEW_CONVO &&
             nextConversation.chatProjectId
@@ -297,6 +303,7 @@ const useNewConvo = (index = 0) => {
       buildDefault = true,
       keepAddedConvos = false,
       disableParams,
+      restoreDraftId,
     }: {
       template?: Partial<TConversation>;
       preset?: Partial<TPreset>;
@@ -305,7 +312,20 @@ const useNewConvo = (index = 0) => {
       disableFocus?: boolean;
       keepAddedConvos?: boolean;
       disableParams?: boolean;
+      restoreDraftId?: string;
     } = {}) {
+      if (
+        index === 0 &&
+        !restoreDraftId &&
+        !modelsData &&
+        Object.keys(_template).every((key) => key === 'chatProjectId') &&
+        !_preset &&
+        !disableFocus
+      ) {
+        if (!requestDraftArchive()) return;
+        if (draftOwner) finishDraftNavigation(draftOwner);
+      }
+
       pauseGlobalAudio();
       if (!saveBadgesState) {
         resetBadges();
@@ -385,9 +405,12 @@ const useNewConvo = (index = 0) => {
         keepAddedConvos,
         disableFocus,
         disableParams,
+        restoreDraftId,
       );
     },
     [
+      index,
+      draftOwner,
       files,
       setFiles,
       saveDrafts,

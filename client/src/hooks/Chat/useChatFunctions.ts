@@ -1,4 +1,5 @@
 import { v4 } from 'uuid';
+import { activeDraftId, removeChatDraft, reportDraftError } from '~/drafts/history';
 import { cloneDeep } from 'lodash';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -295,6 +296,7 @@ export default function useChatFunctions({
       overrideQueuedMessageOrigin,
     } = {},
   ) => {
+    const originatingDraft = activeDraftId(user?.id);
     text = text.trim();
     if (isSubmitting) {
       return false;
@@ -714,6 +716,18 @@ export default function useChatFunctions({
       setMessages([...submissionMessages, currentMsg, initialResponse]);
     }
 
+    if (
+      originatingDraft &&
+      user?.id &&
+      immutableConversation?.conversationId === Constants.NEW_CONVO &&
+      !isRegenerate
+    ) {
+      try {
+        removeChatDraft(user.id, originatingDraft);
+      } catch (error) {
+        reportDraftError(error);
+      }
+    }
     beginConversationActivity(submission);
     setSubmission(submission);
     logger.dir('message_stream', submission, { depth: null });

@@ -32,6 +32,7 @@ import useTimeout from './useTimeout';
 import store from '~/store';
 import { setConversationActivityUser } from '~/store/activity';
 import { setLocalFolderUser } from '~/localFolders/store';
+import { setChatDraftOwner } from '~/drafts/history';
 
 const AuthContext = (import.meta.hot?.data?.__AuthContext ??
   createContext<TAuthContext | undefined>(undefined)) as React.Context<TAuthContext | undefined>;
@@ -75,6 +76,7 @@ const AuthContextProvider = ({
         const { token, isAuthenticated, user, redirect } = userContext;
         setConversationActivityUser(isAuthenticated ? user?.id : null);
         setLocalFolderUser(isAuthenticated ? user?.id : null);
+        setChatDraftOwner(isAuthenticated ? user?.id : null);
         setUser(user);
         setToken(token);
         setTokenHeader(token);
