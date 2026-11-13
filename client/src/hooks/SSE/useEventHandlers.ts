@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { v4 } from 'uuid';
+import { finishDraftSubmission, reportDraftError } from '~/drafts/history';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSetRecoilState, useRecoilCallback } from 'recoil';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
@@ -676,6 +677,18 @@ export default function useEventHandlers({
         conversationId: data.conversation?.conversationId,
       });
       const { requestMessage, responseMessage, conversation, runMessages } = data;
+      try {
+        finishDraftSubmission(
+          submission.userMessage.messageId,
+          !!conversation?.conversationId &&
+            !!responseMessage &&
+            !responseMessage.error &&
+            !(data as Record<string, unknown>).earlyAbort,
+        );
+      } catch (error) {
+        reportDraftError(error);
+      }
+
       const {
         messages,
         conversation: submissionConvo,
@@ -924,6 +937,8 @@ export default function useEventHandlers({
 
   const errorHandler = useCallback(
     ({ data, submission }: { data?: TResData; submission: EventSubmission }) => {
+      finishDraftSubmission(submission.userMessage?.messageId ?? '', false);
+
       failConversationActivity(submission);
       const { messages, userMessage, initialResponse } = submission;
       setCompleted((prev) => new Set(prev.add(initialResponse.messageId)));
