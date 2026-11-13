@@ -9,6 +9,8 @@ import {
   ARCHIVE_NEW_CHAT,
   trackDraftSubmission,
   finishDraftSubmission,
+  selectChatDraft,
+  activeDraftId,
 } from '../history';
 
 beforeEach(() => {
@@ -101,9 +103,11 @@ test('saving can veto navigation when persistence fails', () => {
 
 test('retains the recovery draft on send errors and consumes only a server-confirmed turn', () => {
   const draft = saveChatDraft('alice', content('Noch nicht bestätigt'))!;
+  selectChatDraft('alice', draft.id);
   trackDraftSubmission('alice', draft.id, 'failed-message');
   expect(readChatDraft('alice', draft.id)).not.toBeNull();
   finishDraftSubmission('failed-message', false);
+  expect(activeDraftId('alice')).toBe(draft.id);
   expect(readChatDraft('alice', draft.id)).not.toBeNull();
   trackDraftSubmission('alice', draft.id, 'confirmed-message');
   finishDraftSubmission('confirmed-message', true);
