@@ -37,6 +37,7 @@ export interface SecurityConfig {
   rpName: string;
   origins: string[];
   storage?: { token: string; user: string };
+  browserSession?: boolean;
 }
 export const digest = (value: string): string => createHash('sha256').update(value).digest('hex');
 export const opaque = (): string => randomBytes(32).toString('base64url');

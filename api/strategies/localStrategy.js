@@ -1,6 +1,5 @@
 const bcrypt = require('bcryptjs');
 const { logger } = require('@librechat/data-schemas');
-const { errorsToString } = require('librechat-data-provider');
 const { Strategy: PassportLocalStrategy } = require('passport-local');
 const {
   isEnabled,
@@ -13,39 +12,23 @@ const { loginSchema } = require('./validators');
 
 // Unix timestamp for 2024-06-07 15:20:18 Eastern Time
 const verificationEnabledTimestamp = 1717788018;
-
-async function validateLoginRequest(req) {
-  const { error } = loginSchema.safeParse(req.body);
-  return error ? errorsToString(error.errors) : null;
-}
+const invalidCredentialsMessage = 'E-Mail oder Passwort stimmt nicht.';
 
 async function passportLogin(req, email, password, done) {
   try {
-    const validationError = await validateLoginRequest(req);
-    if (validationError) {
+    if (!loginSchema.safeParse(req.body).success) {
       logError('Passport Local Strategy - Validation Error', { email: req.body?.email });
       logger.error(`[Login] [Login failed] [Username: ${email}] [Request-IP: ${req.ip}]`);
-      return done(null, false, { message: validationError });
+      return done(null, false, { message: invalidCredentialsMessage });
     }
 
     const user = await findUser({ email: email.trim() }, '+password');
-    if (!user || isSupportServiceIdentity(user)) {
-      logError('Passport Local Strategy - User Not Found', { email });
+    const interactiveUser = user && !isSupportServiceIdentity(user) ? user : null;
+    const isMatch = await comparePassword(interactiveUser, password, { compare: bcrypt.compare });
+    if (!interactiveUser || !isMatch) {
+      logError('Lokale Anmeldung: ungültige Zugangsdaten', { email });
       logger.error(`[Login] [Login failed] [Username: ${email}] [Request-IP: ${req.ip}]`);
-      return done(null, false, { message: 'Email does not exist.' });
-    }
-
-    if (!user.password) {
-      logError('Passport Local Strategy - User has no password', { email });
-      logger.error(`[Login] [Login failed] [Username: ${email}] [Request-IP: ${req.ip}]`);
-      return done(null, false, { message: 'Email does not exist.' });
-    }
-
-    const isMatch = await comparePassword(user, password, { compare: bcrypt.compare });
-    if (!isMatch) {
-      logError('Passport Local Strategy - Password does not match', { isMatch });
-      logger.error(`[Login] [Login failed] [Username: ${email}] [Request-IP: ${req.ip}]`);
-      return done(null, false, { message: 'Incorrect password.' });
+      return done(null, false, { message: invalidCredentialsMessage });
     }
 
     const emailEnabled = checkEmailConfig();

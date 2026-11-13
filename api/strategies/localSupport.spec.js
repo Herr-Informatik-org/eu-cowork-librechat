@@ -29,5 +29,7 @@ test('refuses a service identity even if somebody added a password', async () =>
     done,
   );
   expect(done).toHaveBeenCalledWith(null, false, expect.any(Object));
-  expect(comparePassword).not.toHaveBeenCalled();
+  expect(comparePassword).toHaveBeenCalledWith(null, 'candidate', {
+    compare: expect.any(Function),
+  });
 });

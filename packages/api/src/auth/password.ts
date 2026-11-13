@@ -1,25 +1,21 @@
 interface UserWithPassword {
   password?: string;
-  [key: string]: unknown;
 }
+
+/** Synthetic cost-10 bcrypt hash; it never authorizes an account. */
+const DUMMY_PASSWORD_HASH = '$2a$10$iV/Miupwby8SbMXjclypVOeCcyJvfSnxDywGnsXgmmfGiKzytMMkm';
 
 export interface ComparePasswordDeps {
   compare: (candidatePassword: string, hash: string) => Promise<boolean>;
 }
 
-/** Compares a candidate password against a user's hashed password. */
+/** Performs hash work for missing credentials without allowing the dummy to authenticate. */
 export async function comparePassword(
-  user: UserWithPassword,
+  user: UserWithPassword | null | undefined,
   candidatePassword: string,
   deps: ComparePasswordDeps,
 ): Promise<boolean> {
-  if (!user) {
-    throw new Error('No user provided');
-  }
-
-  if (!user.password) {
-    throw new Error('No password, likely an email first registered via Social/OIDC login');
-  }
-
-  return deps.compare(candidatePassword, user.password);
+  const passwordHash = user?.password;
+  const matched = await deps.compare(candidatePassword, passwordHash || DUMMY_PASSWORD_HASH);
+  return !!passwordHash && matched;
 }

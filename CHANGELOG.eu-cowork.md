@@ -6,7 +6,7 @@
   Kundeneinstellung gewinnt gegenüber alten Browser-Vorgaben; TTS bleibt erhalten.
 - Diktate laufen nach manuellem Stopp weiter bis zum vollständigen Ergebnis.
   SSE-Lebenszeichen halten die authentifizierte Anfrage während der Berechnung offen.
-- Text und Kennzahlen bleiben unverändert im Ergebnis, bestehender Eingabetext bleibt
+- Der erkannte Text wird unverändert übertragen; bestehender Eingabetext bleibt
   erhalten. Aufnahmegrenzen, Warteschlangenfehler und Verbindungsabbrüche werden behandelt.
 - API-Schlüssel und interne Adressen werden nicht an den Browser ausgegeben.
 
@@ -36,6 +36,28 @@
 - Kontowechsel trennt Entwürfe; fehlende Anhänge werden vor dem Senden gemeldet.
 - Ein gesendeter Entwurf bleibt bis zur bestätigten Serverantwort als Rückkehrstand
   erhalten. Sendefehler und zwischenzeitliche Bearbeitungen löschen ihn nicht.
+## 2026-11-12 — Anmeldehärtung und reduzierte Logintexte
+
+- Fehlgeschlagene Passwortanmeldungen liefern denselben Fehlertext. Auch fehlende
+  Konten und Konten ohne lokales Passwort durchlaufen bcrypt-Arbeit, ohne damit
+  eine Anmeldung zu erlauben.
+- Der gemeinsame Prüfkern unterstützt optional serverseitige Browsersitzungen.
+  Native Passwort-, Authenticator-, Passkey/FIDO2- und Recovery-Abläufe bleiben erhalten.
+- Die Anmeldeseite zeigt nur Logo, Eingaben und Aktionen; zusätzliche Begrüssungs-
+  und Fussnotentexte entfallen. MFA-Einrichtungs- und Fehlerhinweise bleiben sichtbar.
+- Regressionen belegen die bereits bestehende Entwertung alter Access-/Refresh-
+  Nachweise nach Passwortänderung sowie den Erhalt vorhandener Faktoren.
+
+
+## 2026-11-12 — Kisuno-Anmeldung und sichere Wiederherstellung
+
+- Einheitliche Anmeldeseite mit Kisuno-Logo, Blauverlauf, hellem und dunklem
+  Erscheinungsbild sowie kompakter Darstellung auf Mobilgeräten.
+- Die Betreiberkonsole erreicht nach dem Passwort wieder die erstmalige
+  MFA-Einrichtung. Ein JavaScript-Abbruch bei der Linkentfernung ist behoben.
+- Ohne eingerichteten Mailversand gibt die Passwort-Wiederherstellung keinen
+  Reset-Link an anonyme Aufrufer zurück und erzeugt keine Reset-Tokens.
+
 
 ## 2026-11-12 — Verbindlicher Anmeldeschutz und E-Mail-Übernahme
 

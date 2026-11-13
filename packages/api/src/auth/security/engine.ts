@@ -60,7 +60,8 @@ export interface SecurityDependencies {
     assurance: Assurance,
     req: Request,
     res: Response,
-  ): Promise<{ token: string; user: object }>;
+  ): Promise<{ token?: string; session?: boolean; csrfToken?: string; user: object }>;
+  authenticateSession?(req: Request): Promise<{ user: SecurityAccount; proof: Assurance }>;
   admin(user: SecurityAccount): Promise<boolean>;
   audit?(user: SecurityAccount, action: string): Promise<void>;
 }
@@ -160,6 +161,18 @@ export function createSecurityEngine(deps: SecurityDependencies): {
       if (!stored || disabled(user) || versionOf(user!) !== p.version) throw failure();
       return { user: user!, pending: { nonce: p.nonce, tokenPurpose: p.tokenPurpose } };
     }
+    if (config.browserSession) {
+      if (!deps.authenticateSession) throw failure();
+      const session = await deps.authenticateSession(req);
+      if (
+        disabled(session.user) ||
+        !validAssurance(session.proof, session.user) ||
+        (fresh && session.proof.verifiedAt < Date.now() - 300_000)
+      ) {
+        throw failure('Bitte für diese Sicherheitsänderung erneut mit 2FA oder Passkey anmelden.');
+      }
+      return { user: session.user, proof: session.proof };
+    }
     const raw = (req.get('authorization') || '').replace(/^Bearer /, '');
     let p: jwt.JwtPayload;
     try {
@@ -225,6 +238,7 @@ export function createSecurityEngine(deps: SecurityDependencies): {
       manage: req.query.manage === '1',
       email: typeof req.query.email === 'string' ? req.query.email : '',
       storage: config.storage,
+      browserSession: config.browserSession,
     });
     res.set({
       'Cache-Control': 'no-store',

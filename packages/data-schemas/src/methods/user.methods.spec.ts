@@ -315,6 +315,69 @@ describe('User Methods - Database Tests', () => {
   });
 
   describe('updateUser', () => {
+    test('password changes atomically invalidate assurance and cached users while preserving enrolled factors', async () => {
+      enableAuthUserDocCache();
+      const user = await User.create({
+        email: 'reset-assurance@example.invalid',
+        provider: 'local',
+        password: 'synthetic-old-password-hash',
+        securityVersion: 4,
+        securityEnrolled: true,
+        twoFactorEnabled: true,
+        totpSecret: 'synthetic-encrypted-totp',
+        pendingTotpSecret: 'synthetic-pending-totp',
+        pendingTotpExpires: new Date(Date.now() + 60_000),
+        backupCodes: [{ codeHash: 'synthetic-recovery-hash', used: false, usedAt: null }],
+      });
+      const userId = user._id.toString();
+      const indexKey = `${AUTH_USER_DOC_BY_ID_PREFIX}:${userId}`;
+      const cacheEntries = new Map<string, string[] | { securityVersion: number }>([
+        [indexKey, ['cached-user-before-reset']],
+        ['cached-user-before-reset', { securityVersion: 4 }],
+      ]);
+      const cache = {
+        get: jest.fn(async (key: string) => cacheEntries.get(key)),
+        set: jest.fn().mockResolvedValue(undefined),
+        delete: jest.fn(async (key: string) => cacheEntries.delete(key)),
+      };
+      const methodsWithCache = createUserMethods(mongoose, { getCache: () => cache });
+
+      const updated = await methodsWithCache.updateUser(userId, {
+        password: 'synthetic-new-password-hash',
+      });
+      const stored = await User.findById(userId)
+        .select('+password +totpSecret +backupCodes +pendingTotpSecret +pendingTotpExpires')
+        .lean();
+
+      expect(updated?.securityVersion).toBe(5);
+      expect(stored?.securityVersion).toBe(5);
+      expect(stored?.password).toBe('synthetic-new-password-hash');
+      expect(stored?.securityEnrolled).toBe(true);
+      expect(stored?.twoFactorEnabled).toBe(true);
+      expect(stored?.totpSecret).toBe('synthetic-encrypted-totp');
+      expect(stored?.backupCodes).toEqual([
+        { codeHash: 'synthetic-recovery-hash', used: false, usedAt: null },
+      ]);
+      expect(stored?.pendingTotpSecret).toBeUndefined();
+      expect(stored?.pendingTotpExpires).toBeUndefined();
+      expect(cacheEntries.has(indexKey)).toBe(false);
+      expect(cacheEntries.has('cached-user-before-reset')).toBe(false);
+    });
+
+    test('password changes increment a legacy assurance version without changing factors', async () => {
+      const user = await User.create({
+        email: 'legacy-reset-assurance@example.invalid',
+        provider: 'local',
+      });
+
+      const updated = await methods.updateUser(user._id.toString(), {
+        password: 'synthetic-new-password-hash',
+      });
+
+      expect(updated?.securityVersion).toBe(1);
+      expect(updated?.twoFactorEnabled).toBe(false);
+    });
+
     test('should update user fields', async () => {
       const user = await User.create({
         name: 'Original Name',
