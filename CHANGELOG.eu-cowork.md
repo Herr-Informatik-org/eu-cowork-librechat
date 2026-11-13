@@ -1,5 +1,19 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-13 — Diktate erhalten und Aufnahme zuverlässig beenden
+
+- Browser-Diktate laufen unabhängig von der Automatik im fortlaufenden Modus.
+  Bestätigter Text, Zwischenresultate und vorhandene Entwürfe bleiben zusammen.
+- Start und Stop sind getrennt und wiederholbar; Chatwechsel und Seitenverlassen
+  verhindern verspätete Texte und geben das Mikrofon frei. Automatisches Senden
+  berücksichtigt neue Sprache und abgelehnte Nachrichtenübergaben.
+- Der vorhandene Server-Recorder wartet auf das letzte Audiostück, begrenzt lange
+  Aufnahmen und schliesst Streams sowie AudioContext. Die bewusst aktivierte
+  Pausenautomatik wartet 15 Sekunden, manuelle Aufnahme endet über den Knopf.
+- Konfiguration erlaubt Browser- und Server-Recorder; bisherige Providerwerte
+  bleiben als kompatible Bezeichnungen für den Server-Recorder erhalten.
+- Kein automatischer Anbieterwechsel und keine zusätzliche Textnachbearbeitung.
+
 ## 2026-11-13 — Ungesendete neue Chats im Verlauf behalten
 
 - Beim Start eines weiteren neuen Chats bleiben Text, Dateiverweise und Modellauswahl
