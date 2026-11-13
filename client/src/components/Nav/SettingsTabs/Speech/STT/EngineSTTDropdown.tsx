@@ -3,6 +3,7 @@ import { Dropdown } from '@librechat/client';
 import { useRecoilState, useRecoilValue } from 'recoil';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
+import useGetAudioSettings from '~/hooks/Input/useGetAudioSettings';
 
 interface EngineSTTDropdownProps {
   external: boolean;
@@ -10,7 +11,8 @@ interface EngineSTTDropdownProps {
 
 const EngineSTTDropdown: React.FC<EngineSTTDropdownProps> = ({ external }) => {
   const localize = useLocalize();
-  const [engineSTT, setEngineSTT] = useRecoilState<string>(store.engineSTT);
+  const [, setEngineSTT] = useRecoilState<string>(store.engineSTT);
+  const { speechToTextEndpoint } = useGetAudioSettings();
   const speechToText = useRecoilValue(store.speechToText);
 
   const endpointOptions = external
@@ -30,7 +32,7 @@ const EngineSTTDropdown: React.FC<EngineSTTDropdownProps> = ({ external }) => {
     <div className="flex items-center justify-between">
       <div id={labelId}>{localize('com_nav_engine')}</div>
       <Dropdown
-        value={engineSTT}
+        value={speechToTextEndpoint}
         onChange={handleSelect}
         options={endpointOptions}
         sizeClasses="w-[180px]"
