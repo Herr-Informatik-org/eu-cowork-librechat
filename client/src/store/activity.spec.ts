@@ -1,3 +1,4 @@
+import { ContentTypes, ErrorTypes } from 'librechat-data-provider';
 import type { TMessage, TSubmission } from 'librechat-data-provider';
 import {
   setViewedConversation,
@@ -26,6 +27,33 @@ const submission = (clientRequestId = 'request', conversationId = 'chat') =>
     userMessage: { ...message, messageId: 'user', isCreatedByUser: true },
     initialResponse: message,
   }) as TSubmission;
+
+test('a controlled work pause remains in the flow until the user starts the next request', () => {
+  const paused: TMessage = {
+    ...message,
+    unfinished: true,
+    error: true,
+    content: [
+      {
+        type: ContentTypes.ERROR,
+        error: JSON.stringify({
+          type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+          status: 'incomplete',
+          reason: 'cost_limit',
+        }),
+      },
+    ],
+  };
+  beginConversationActivity(submission());
+  finishConversationActivity(submission(), { final: true, responseMessage: paused });
+  setViewedConversation('chat');
+  expect(getConversationActivity('chat')).toMatchObject({ state: 'needs-input', stage: 'waiting' });
+  expect(getLiveConversationIds()).not.toContain('chat');
+  beginConversationActivity(submission('decision'), 'chat', false);
+  expect(getConversationActivity('chat')).toMatchObject({ state: 'waiting', runId: 'decision' });
+  finishConversationActivity(submission(), { final: true, responseMessage: paused });
+  expect(getConversationActivity('chat')?.runId).toBe('decision');
+});
 
 beforeEach(() => {
   sessionStorage.clear();

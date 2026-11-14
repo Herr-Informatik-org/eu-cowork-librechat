@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { Pause } from 'lucide-react';
 import type { ConversationActivity } from '~/store/activity';
 import { useConversationActivity } from './useActivity';
 import { isTerminalActivity } from '~/store/activity';
@@ -51,11 +52,13 @@ function ActivityStatusBadge({
   const activity = badgeActivity(conversationId, observed, active);
   if (!activity) return null;
   const label = localize(activityLabel(activity));
-  const Icon = activityIcons[activity.state];
+  const paused = activity.state === 'needs-input' && activity.stage === 'waiting';
+  const Icon = paused ? Pause : activityIcons[activity.state];
   return (
     <span
       className={cn('chat-activity-badge', compact && 'chat-activity-badge-compact', className)}
       data-state={activity.state}
+      data-paused={paused || undefined}
       title={label}
     >
       <Icon className="chat-activity-icon" aria-hidden="true" />

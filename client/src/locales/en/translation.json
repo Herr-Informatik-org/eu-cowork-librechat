@@ -3004,5 +3004,10 @@
   "com_error_work_review": "Auftrag pausiert: Der nächste Schritt benötigt eine persönliche Prüfung. Bestätigte Änderungen werden nicht wiederholt.",
   "com_error_work_paused": "Auftrag pausiert, noch nicht vollständig erledigt. Der Fortschritt ist gespeichert. Mit einer neuen Nachricht «Weiter» können die offenen Schritte kontrolliert fortgesetzt werden.",
   "com_error_work_control_unavailable": "Auftrag pausiert: Die Kostenkontrolle ist derzeit nicht verfügbar. Es wurde kein neuer Modellaufruf gestartet. Bestätigte Änderungen bleiben erhalten.",
-  "com_ui_work_cost_reserved": "Noch vorgemerkt oder ungeklärt: Auftrag {{0}} USD · Tag {{1}} USD"
+  "com_ui_work_cost_reserved": "Noch vorgemerkt oder ungeklärt: Auftrag {{0}} USD · Tag {{1}} USD",
+  "com_nav_chat_debug": "Debugmodus",
+  "com_nav_chat_debug_info": "Zeigt Kosteninformationen und technische Details zu Pausen in diesem Browser. Die Kostenlimits bleiben unabhängig von dieser Anzeige wirksam.",
+  "com_ui_work_pause_debug": "Debugdetails zur Pause",
+  "com_ui_activity_work_paused": "Pausiert – wartet auf deine Entscheidung",
+  "com_ui_activity_decide": "Entscheiden"
 }

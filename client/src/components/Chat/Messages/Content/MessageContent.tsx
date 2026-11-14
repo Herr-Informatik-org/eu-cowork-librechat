@@ -1,9 +1,12 @@
 import { memo, Suspense, useMemo } from 'react';
 import { useRecoilValue } from 'recoil';
+import { useAtomValue } from 'jotai';
 import { DelayedRender } from '@librechat/client';
 import type { TMessage } from 'librechat-data-provider';
 import type { TMessageContentProps, TDisplayProps } from '~/common';
 import Error from '~/components/Messages/Content/Error';
+import { chatDebugAtom } from '~/store/chatDebug';
+import { isWorkPauseText, isWorkPauseMessage } from '~/utils/workPause';
 import { useMessageContext } from '~/Providers';
 import MarkdownLite from './MarkdownLite';
 import EditMessage from './EditMessage';
@@ -78,6 +81,17 @@ export const ErrorMessage = ({
   message,
   className = '',
 }: Pick<TDisplayProps, 'text' | 'className'> & { message?: TMessage }) => {
+  const debug = useAtomValue(chatDebugAtom);
+  const localize = useLocalize();
+  if (isWorkPauseText(text)) {
+    if (debug !== true) return null;
+    return (
+      <details className={cn('my-2 text-xs text-text-secondary', className)}>
+        <summary className="cursor-pointer">{localize('com_ui_work_pause_debug')}</summary>
+        <Error text={text} />
+      </details>
+    );
+  }
   if (text === ERROR_CONNECTION_TEXT) {
     return <ConnectionError message={message} />;
   }
@@ -127,12 +141,15 @@ const DisplayMessage = ({ text, isCreatedByUser, message, showCursor }: TDisplay
   );
 };
 
-export const UnfinishedMessage = ({ message }: { message: TMessage }) => (
-  <ErrorMessage
-    message={message}
-    text="The response is incomplete; it's either still processing, was cancelled, or censored. Refresh or try a different prompt."
-  />
-);
+export const UnfinishedMessage = ({ message }: { message: TMessage }) => {
+  if (isWorkPauseMessage(message)) return null;
+  return (
+    <ErrorMessage
+      message={message}
+      text="The response is incomplete; it's either still processing, was cancelled, or censored. Refresh or try a different prompt."
+    />
+  );
+};
 
 const MessageContent = ({
   text,

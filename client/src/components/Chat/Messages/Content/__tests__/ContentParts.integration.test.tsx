@@ -174,7 +174,7 @@ describe('ContentParts integration: MCP image hoist and grouping', () => {
     isLatestMessage: true,
   };
 
-  it('keeps existing text, tool output and files visible beside a budget-stop notice', () => {
+  it('keeps existing text, tool output and files visible while the pause banner is hidden', () => {
     renderContentParts({
       ...baseProps,
       content: [
@@ -192,7 +192,7 @@ describe('ContentParts integration: MCP image hoist and grouping', () => {
     });
 
     expect(screen.getByText('Die Prüfung hat bereits Ergebnisse geliefert.')).toBeInTheDocument();
-    expect(screen.getByText('com_error_agent_work_budget_exceeded')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByTestId('attachment-group')).toHaveAttribute('data-count', '1');
   });
 

@@ -42,6 +42,12 @@ describe('liveActivityLabel', () => {
     );
     expect(liveActivityLabel({ ...base, state: 'done' }, 60_000)).toBe('com_ui_activity_done');
   });
+
+  it('keeps a controlled pause visible as a decision regardless of elapsed time', () => {
+    expect(liveActivityLabel({ ...base, state: 'needs-input', stage: 'waiting' }, 3600000)).toBe(
+      'com_ui_activity_work_paused',
+    );
+  });
 });
 
 describe('useHeld', () => {

@@ -1,5 +1,9 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## CWV01: Ruhige Arbeitsanzeige (2026-11-14)
+
+Kosten, Reservierungen und Kostenwarnungen erscheinen im Chat nur bei eingeschaltetem Debugmodus unter Einstellungen → Chat. Kontrollierte Pausen stehen im Ablauf als Entscheidung aus und bleiben auch nach Neuladen erkennbar; die zusätzliche rote Pausenmeldung entfällt. Technische Fehler bleiben sichtbar. Grenzen, Berechtigungen und Schreibnachweise bleiben wirksam.
+
 
 ## CWV01: Sichere und begrenzte Arbeit (2026-11-14)
 

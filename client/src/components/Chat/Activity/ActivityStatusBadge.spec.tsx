@@ -53,6 +53,12 @@ test('compact input requests retain their text label and distinct state', () => 
   expect(screen.getByText('com_ui_activity_needs_input')).toHaveClass('sr-only');
 });
 
+test('a controlled pause has a persistent neutral decision label', () => {
+  observed.mockReturnValue({ ...activity('needs-input'), stage: 'waiting' });
+  render(<ActivityStatusBadge conversationId="chat" active={false} />);
+  expect(screen.getByTitle('com_ui_activity_work_paused')).toHaveAttribute('data-paused', 'true');
+});
+
 test('an ended backend job cannot leave a stale running badge or invent success', () => {
   observed.mockReturnValue(activity('running'));
   const { container } = render(<ActivityStatusBadge conversationId="chat" active={false} />);

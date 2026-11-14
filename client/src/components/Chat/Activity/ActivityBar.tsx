@@ -1,5 +1,5 @@
 import { useRecoilValue } from 'recoil';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, Pause } from 'lucide-react';
 import type { ConversationActivity } from '~/store/activity';
 import type { TranslationKeys } from '~/hooks';
 import { getToolDisplayLabel } from '~/utils/toolLabels';
@@ -81,7 +81,8 @@ function ActivityRow({ activity }: { activity: ConversationActivity }) {
     return null;
   }
 
-  const Icon = activityIcons[activity.state];
+  const paused = activity.state === 'needs-input' && activity.stage === 'waiting';
+  const Icon = paused ? Pause : activityIcons[activity.state];
   const label = localize(labelKey);
   const tool =
     active && activity.stage === 'tool' && activity.tool
@@ -94,6 +95,7 @@ function ActivityRow({ activity }: { activity: ConversationActivity }) {
     <div
       className="chat-activity-bar mx-auto w-full max-w-3xl px-4 py-2"
       data-state={activity.state}
+      data-paused={paused || undefined}
       data-fading={fading && sinceUpdate >= FINISHED_FADE_MS ? 'true' : undefined}
     >
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
@@ -125,7 +127,7 @@ function ActivityRow({ activity }: { activity: ConversationActivity }) {
           className="chat-activity-action"
           onClick={() => document.getElementById('prompt-textarea')?.focus()}
         >
-          {localize('com_ui_activity_answer')}
+          {localize(paused ? 'com_ui_activity_decide' : 'com_ui_activity_answer')}
           <ArrowDown className="size-3" aria-hidden="true" />
         </button>
       )}

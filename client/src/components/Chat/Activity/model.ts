@@ -2,6 +2,7 @@ import { ContentTypes } from 'librechat-data-provider';
 import type { TMessage } from 'librechat-data-provider';
 import type { ConversationActivity, BackgroundActivityUpdate } from '~/store/activity';
 import { findLiveAskUserQuestion } from '~/utils/approval';
+import { isWorkPauseMessage } from '~/utils/workPause';
 
 export function activityFromMessages(messages: TMessage[], responseId?: string) {
   const question = findLiveAskUserQuestion(messages);
@@ -13,6 +14,8 @@ export function activityFromMessages(messages: TMessage[], responseId?: string) 
   if (!latest || latest.isCreatedByUser)
     return { state: 'waiting', stage: 'waiting', messageId: responseId } as const;
   const messageId = latest.messageId;
+  if (isWorkPauseMessage(latest))
+    return { state: 'needs-input', stage: 'waiting', messageId } as const;
   for (let i = (latest.content?.length ?? 0) - 1; i >= 0; i--) {
     const part = latest.content?.[i];
     if (!part) continue;
@@ -56,7 +59,10 @@ export function outcomeFromMessages(messages: TMessage[]): BackgroundActivityUpd
 
 export function activityLabel(activity: ConversationActivity) {
   if (activity.state === 'done') return 'com_ui_activity_done' as const;
-  if (activity.state === 'needs-input') return 'com_ui_activity_needs_input' as const;
+  if (activity.state === 'needs-input')
+    return activity.stage === 'waiting'
+      ? ('com_ui_activity_work_paused' as const)
+      : ('com_ui_activity_needs_input' as const);
   if (activity.state === 'error') return 'com_ui_activity_error' as const;
   if (activity.state === 'stopped') return 'com_ui_activity_stopped' as const;
   if (activity.stage === 'tool') return 'com_ui_activity_tool' as const;

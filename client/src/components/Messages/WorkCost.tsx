@@ -1,10 +1,13 @@
+import { useAtomValue } from 'jotai';
+import { chatDebugAtom } from '~/store/chatDebug';
 import { useLocalize } from '~/hooks';
 import { parseWorkCost } from '~/utils/workCost';
 
 export default function WorkCost({ value }: { value: unknown }) {
   const localize = useLocalize();
+  const debug = useAtomValue(chatDebugAtom);
   const summary = parseWorkCost(value);
-  if (!summary) return null;
+  if (debug !== true || !summary) return null;
   const warning = summary.warning || summary.dayUsd >= summary.dayLimitUsd;
   return (
     <div

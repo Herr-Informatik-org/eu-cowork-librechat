@@ -25,3 +25,4 @@
 .chat-activity-bar[data-fading='true'] { opacity: 0; }
 .chat-activity-label { animation: kisuno-note-in var(--kisuno-fast, 110ms) var(--kisuno-ease-out, ease-out); }
 .chat-activity-elapsed { font-variant-numeric: tabular-nums; }
+.chat-activity-bar[data-state='needs-input'][data-paused='true'], .chat-activity-badge[data-state='needs-input'][data-paused='true'] { color: var(--text-secondary); }

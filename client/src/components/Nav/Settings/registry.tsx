@@ -37,6 +37,7 @@ import { ClearChats } from '../SettingsTabs/Data/ClearChats';
 import { TokenCredits, AutoRefill } from './BillingControls';
 import SharedLinks from '../SettingsTabs/Data/SharedLinks';
 import { showThinkingAtom } from '~/store/showThinking';
+import { chatDebugAtom } from '~/store/chatDebug';
 import ProviderKeys from '../SettingsTabs/ProviderKeys';
 import Avatar from '../SettingsTabs/Account/Avatar';
 import About from '../SettingsTabs/About/About';
@@ -261,6 +262,19 @@ export const registry: SettingEntry[] = [
       localizationKey: 'com_nav_latex_parsing',
       switchId: 'latexParsing',
       hoverCardText: 'com_nav_info_latex_parsing',
+    }),
+  },
+  {
+    id: 'chatDebug',
+    tab: CHAT,
+    section: 'messages',
+    labelKey: 'com_nav_chat_debug',
+    keywords: ['debug', 'cost', 'Kosten', 'diagnostics'],
+    Component: toggleControl({
+      stateAtom: chatDebugAtom,
+      localizationKey: 'com_nav_chat_debug',
+      switchId: 'chatDebug',
+      hoverCardText: 'com_nav_chat_debug_info',
     }),
   },
   {

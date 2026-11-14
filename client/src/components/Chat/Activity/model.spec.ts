@@ -1,4 +1,4 @@
-import { ContentTypes, ToolCallTypes } from 'librechat-data-provider';
+import { ContentTypes, ToolCallTypes, ErrorTypes } from 'librechat-data-provider';
 import type { TMessage } from 'librechat-data-provider';
 import { applyPendingAction } from '~/utils/approval';
 import { activityFromMessages, outcomeFromMessages } from './model';
@@ -10,6 +10,26 @@ const response: TMessage = {
   isCreatedByUser: false,
   text: '',
 };
+
+test('a saved controlled pause is restored as a decision in the flow rather than an error', () => {
+  const paused: TMessage = {
+    ...response,
+    unfinished: true,
+    error: true,
+    content: [
+      {
+        type: ContentTypes.ERROR,
+        error: JSON.stringify({
+          type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+          status: 'incomplete',
+          reason: 'section_limit',
+        }),
+      },
+    ],
+  };
+  expect(activityFromMessages([paused])).toMatchObject({ state: 'needs-input', stage: 'waiting' });
+  expect(outcomeFromMessages([paused])).toMatchObject({ state: 'needs-input', stage: 'waiting' });
+});
 
 test('empty stream waits, reasoning thinks, text writes, and no phase invents completion', () => {
   expect(activityFromMessages([response])).toMatchObject({ state: 'waiting', stage: 'waiting' });

@@ -1,4 +1,5 @@
 import type { TMessage, TSubmission } from 'librechat-data-provider';
+import { isWorkPauseMessage } from '~/utils/workPause';
 
 export type ActivityState = 'waiting' | 'running' | 'needs-input' | 'done' | 'error' | 'stopped';
 export type ActivityStage = 'waiting' | 'thinking' | 'writing' | 'tool' | 'question';
@@ -245,10 +246,12 @@ export function finishConversationActivity(
   if (result.aborted || result.earlyAbort || response?.unfinished || !result.final)
     state = 'stopped';
   if (response?.error || result.error) state = 'error';
+  const workPaused = !result.aborted && !result.earlyAbort && isWorkPauseMessage(response);
+  if (workPaused) state = 'needs-input';
   if (conversationId !== 'new' && activities.get('new')?.runId === runId) activities.delete('new');
   publish({
     conversationId,
-    runId,
+    runId: workPaused ? `question:${response?.messageId ?? runId}` : runId,
     state,
     stage: 'waiting',
     messageId: response?.messageId,
