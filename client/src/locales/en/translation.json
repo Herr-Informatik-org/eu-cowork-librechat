@@ -1,4 +1,7 @@
 {
+  "com_ui_reply_suggestion_tab": "Tab",
+  "com_ui_reply_suggestion_accept": "Antwortvorschlag übernehmen",
+  "com_ui_reply_suggestion_hint": "Antwortvorschlag: {{0}}. Mit Tab übernehmen, danach bearbeiten und absenden. Mit Escape ausblenden.",
   "com_ui_brain_learning_title": "Lernen aus Chats",
   "com_ui_brain_learning_idle": "Für diesen Bereich liegt noch kein Lernabschluss vor.",
   "com_ui_brain_learning_running": "Brain prüft den Chat auf dauerhaft hilfreiches Wissen.",

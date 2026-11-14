@@ -27,7 +27,7 @@ export function canShowNextSteps(message: TMessage | undefined, isSubmitting: bo
   if (message.unfinished === true || message.error === true) {
     return false;
   }
-  if ((message.nextSteps?.length ?? 0) === 0) {
+  if (!message.nextSteps?.some((step) => step.kind !== 'reply')) {
     return false;
   }
   return !hasOpenQuestion(message);
@@ -81,7 +81,7 @@ function NextSteps({ message, isSubmitting }: { message?: TMessage; isSubmitting
   if (!canShowNextSteps(message, isSubmitting) || !message?.nextSteps) {
     return null;
   }
-  return <NextStepChips steps={message.nextSteps} />;
+  return <NextStepChips steps={message.nextSteps.filter((step) => step.kind !== 'reply')} />;
 }
 
 export default memo(NextSteps);

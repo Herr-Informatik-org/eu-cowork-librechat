@@ -164,7 +164,14 @@ const messageSchema: Schema<IMessage> = new Schema(
      * search, or replayed into the model's history.
      */
     nextSteps: {
-      type: [{ _id: false, text: { type: String }, needsInput: { type: Boolean } }],
+      type: [
+        {
+          _id: false,
+          text: { type: String },
+          needsInput: { type: Boolean },
+          kind: { type: String, enum: ['reply'] },
+        },
+      ],
       default: undefined,
     },
     /*

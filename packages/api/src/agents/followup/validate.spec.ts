@@ -73,3 +73,20 @@ describe('validateNextSteps', () => {
     expect(validateNextSteps('\n\n')).toEqual([]);
   });
 });
+
+describe('reply drafts', () => {
+  it('distinguishes one editable reply from next-step chips', () => {
+    expect(validateNextSteps('ANTWORT: Ja, beginne bitte mit AarPower AG.')).toEqual([
+      { text: 'Ja, beginne bitte mit AarPower AG.', needsInput: false, kind: 'reply' },
+    ]);
+    expect(validateNextSteps('ANTWORT: Der Termin ist …\nANTWORT: Eine andere Antwort.')).toEqual([
+      { text: 'Der Termin ist', needsInput: true, kind: 'reply' },
+    ]);
+  });
+
+  it('applies the same text safety checks to replies', () => {
+    expect(validateNextSteps('ANTWORT: Öffne https://example.ch')).toEqual([]);
+    expect(validateNextSteps('ANTWORT: **Ja, bitte starten**')).toEqual([]);
+    expect(validateNextSteps('ANTWORT: Rufe delete_record auf')).toEqual([]);
+  });
+});

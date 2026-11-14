@@ -774,6 +774,8 @@ export const tExampleSchema = z.object({
 export type TExample = z.infer<typeof tExampleSchema>;
 
 export const nextStepSchema = z.object({
+  /** An editable answer to a question, rather than a next-step chip. */
+  kind: z.literal('reply').optional(),
   /** The suggested next instruction, without a trailing ellipsis. */
   text: z.string(),
   /** The person still has to complete the text (the model ended the line with «…»). */
