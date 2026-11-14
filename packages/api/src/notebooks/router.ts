@@ -7,6 +7,7 @@ import type { ServerRequest } from '~/types';
 import type { NotebookActor } from './client';
 import { NotebookError, notebookRequest, notebooksEnabled } from './client';
 import { notebookModelSelection } from './model';
+import { notebookMicrosoftCookie, notebookMicrosoftCookieOptions } from './microsoft';
 
 type NotebookRequest = ServerRequest & { params: Record<string, string> };
 const id = z.string().regex(/^[a-f0-9]{24}$/);
@@ -139,7 +140,10 @@ export function createNotebooksRouter(deps: NotebookDependencies): Router {
   }));
   router.post('/rooms/:id/sources/:sourceId/microsoft',handle(async(req,res)=>{
     const roomId=id.parse(req.params.id), source=sourceId.parse(req.params.sourceId);
-    res.json(await notebookRequest(await actor(req,roomId),`/rooms/${roomId}/sources/${source}/microsoft`,'POST',z.object({url:z.string().url()}),{}));
+    const begun=await notebookRequest(await actor(req,roomId),`/rooms/${roomId}/sources/${source}/microsoft`,'POST',z.object({url:z.string().url(),cookie:z.string().regex(/^[A-Za-z0-9_-]{43}$/)}),{});
+    // The binding stays in this signed-in browser. Only the link leaves the response body.
+    res.cookie(notebookMicrosoftCookie,begun.cookie,notebookMicrosoftCookieOptions);
+    res.json({url:begun.url});
   }));
   router.post('/rooms/:id/file', handle(async (req, res) => {
     const roomId = id.parse(req.params.id);

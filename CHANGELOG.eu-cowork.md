@@ -1,5 +1,9 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-15 — Wissensräume: persönliche Microsoft-Verbindung an den Browser gebunden
+
+- Die angemeldete Sitzung setzt die Browserbindung, bevor der Anmeldelink entsteht; der Link allein genügt nicht mehr. Der öffentliche Start reicht die Bindung nur weiter und vergibt für persönliche Verbindungen keine neue.
+
 ## 2026-11-13 — Geführte Quellenanbindung und Wissensraum-Verwaltung
 
 - Microsoft-Einrichtung und persönliche Identitätsbindung verwenden PKCE, kurzlebige browsergebundene Zustände und eine erneute native Konto-/Rollenprüfung.

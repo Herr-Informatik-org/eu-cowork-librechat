@@ -87,3 +87,13 @@ test('no caller can submit a fabricated model answer',async () => {
   const {app}=setup();
   expect((await request(app).post(`/api/notebooks/rooms/${roomId}/complete`).send({answer:'fake'})).status).toBe(404);
 });
+test('personal Microsoft link keeps the browser binding out of the response body',async () => {
+  const {app}=setup('USER',1); const binding='c'.repeat(43), source='11111111-1111-4111-8111-111111111111';
+  rpc.mockResolvedValue({url:'https://kisuno.example.test/api/notebooks/microsoft/start?code='+'d'.repeat(43),cookie:binding});
+  const response=await request(app).post(`/api/notebooks/rooms/${roomId}/sources/${source}/microsoft`).send({});
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({url:'https://kisuno.example.test/api/notebooks/microsoft/start?code='+'d'.repeat(43)});
+  const cookie=String(response.headers['set-cookie']);
+  expect(cookie).toContain('__Host-kisuno-notebook-microsoft='+binding);
+  expect(cookie).toMatch(/HttpOnly/i);expect(cookie).toMatch(/Secure/i);expect(cookie).toMatch(/SameSite=Lax/i);expect(cookie).toContain('Path=/');
+});

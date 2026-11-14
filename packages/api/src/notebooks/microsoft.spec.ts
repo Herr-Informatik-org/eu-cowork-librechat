@@ -15,6 +15,12 @@ test('OAuth start refuses a redirect outside Microsoft',async()=>{
   const response=await request(app()).get('/microsoft/start?code='+opaque);
   expect(response.status).toBe(400);expect(response.headers['set-cookie']).toBeUndefined();
 });
+test('a personal connection start forwards the browser binding and issues no new one',async()=>{
+  rpc.mockResolvedValue({url:'https://login.microsoftonline.com/t/oauth2/v2.0/authorize?x=1',cookie:null});
+  const response=await request(app()).get('/microsoft/start?code='+opaque);
+  expect(response.status).toBe(303);expect(response.headers['set-cookie']).toBeUndefined();
+  expect(rpc.mock.calls[0][4]).toEqual({code:opaque,cookie:opaque});
+});
 test('a revoked administrator cannot finish Microsoft app provisioning',async()=>{
   rpc.mockResolvedValue({userId:'a'.repeat(24),purpose:'setup'});
   const response=await request(app('USER')).get('/microsoft/callback?state='+opaque+'&code=synthetic').set('Cookie','__Host-kisuno-notebook-microsoft='+opaque);

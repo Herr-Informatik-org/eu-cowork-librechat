@@ -2,11 +2,15 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { notebookRequest, notebooksEnabled } from './client';
 
+/** Set only by the signed-in Kisuno session that asks for a personal connection, never by a link. */
+export const notebookMicrosoftCookie = '__Host-kisuno-notebook-microsoft';
+export const notebookMicrosoftCookieOptions = { secure: true, httpOnly: true, sameSite: 'lax' as const, path: '/', maxAge: 600_000 };
+
 /** Public OAuth return surface: all identity and source mutations require single-use PKCE state. */
 export function createNotebookMicrosoftRouter(deps:{getUserById:(id:string)=>Promise<{role?:string}|null>}): Router {
   const router = Router();
   const actor = { id: 'microsoft_callback', role: 'USER' as const, room: '', permissions: 0 };
-  const cookieName = '__Host-kisuno-notebook-microsoft';
+  const cookieName = notebookMicrosoftCookie;
   const cookie = { secure: true, httpOnly: true, sameSite: 'lax' as const, path: '/' };
   const limits = new Map<string, { count: number; until: number }>();
   router.use((req, res, next) => {
@@ -23,10 +27,12 @@ export function createNotebookMicrosoftRouter(deps:{getUserById:(id:string)=>Pro
   router.get('/start', (req, res) => {
     void (async () => {
       const code = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(req.query.code);
-      const result = await notebookRequest(actor, '/oauth/start', 'POST', z.object({ url: z.string().url(), cookie: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }), { code });
+      // A personal connection continues only in the browser that requested it; the link alone is worthless.
+      const browser = z.string().regex(/^[A-Za-z0-9_-]{43}$/).nullable().catch(null).parse(req.cookies?.[cookieName] ?? null);
+      const result = await notebookRequest(actor, '/oauth/start', 'POST', z.object({ url: z.string().url(), cookie: z.string().regex(/^[A-Za-z0-9_-]{43}$/).nullable().optional() }), { code, cookie: browser });
       const target = new URL(result.url);
       if (target.protocol !== 'https:' || target.hostname !== 'login.microsoftonline.com') throw new Error();
-      res.cookie(cookieName, result.cookie, { ...cookie, maxAge: 600_000 });
+      if (result.cookie) res.cookie(cookieName, result.cookie, { ...cookie, maxAge: 600_000 });
       res.redirect(303, target.href);
     })().catch(() => res.status(400).type('text').send('Der Microsoft-Anmeldelink ist ungültig oder abgelaufen. Bitte im Wissensraum neu starten.'));
   });
