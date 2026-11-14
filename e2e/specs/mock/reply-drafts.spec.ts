@@ -54,3 +54,24 @@ test('preserves an existing draft, dismisses with Escape and resets on a new cha
   await page.goto(NEW_CHAT_PATH);
   await expect(ghost).toHaveCount(0);
 });
+
+test('wraps the reply on a narrow screen and accepts it with the touch button', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(NEW_CHAT_PATH);
+  await selectMockEndpoint(page, MOCK_ENDPOINTS[0]);
+  await sendMessage(page, 'E2E_COMPOSER_REPLY_DRAFT');
+  const ghost = page.getByTestId('reply-suggestion');
+  const input = page.getByTestId('text-input');
+  await expect(ghost).toBeVisible();
+  const bounds = await ghost.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: testInfo.outputPath('reply-draft-mobile.png') });
+  await ghost.getByRole('button').click();
+  await expect(input).toHaveValue('Ja, beginne bitte mit AarPower AG.');
+  await expect(input).toBeFocused();
+  await expect(ghost).toHaveCount(0);
+});
