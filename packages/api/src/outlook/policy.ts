@@ -21,8 +21,16 @@ export const OUTLOOK_TOOLS = [
   'get-shared-calendar-view',
 ] as const;
 export const OUTLOOK_HOST = 'ms365-office-mcp';
-export const outlookServerName = (): string =>
-  process.env.KISUNO_OUTLOOK_SERVER_NAME || 'kisuno-outlook';
+export const outlookServerName = (): string => {
+  const serverName = process.env.KISUNO_OUTLOOK_SERVER_NAME || 'kisuno-outlook';
+  if (
+    !/^[a-z][a-z0-9-]+$/.test(serverName) ||
+    OUTLOOK_TOOLS.some((tool) => tool.length + 5 + serverName.length > 64)
+  ) {
+    throw new Error('Der Outlook-Connectorname ist ungültig oder für die Modellwerkzeuge zu lang.');
+  }
+  return serverName;
+};
 export const isManagedOutlook = (name: string): boolean => name === outlookServerName();
 export const outlookAvailable = (): boolean =>
   process.env.KISUNO_OUTLOOK_ENABLED === 'true' && process.env.ALLOW_SHARED_LINKS === 'false';

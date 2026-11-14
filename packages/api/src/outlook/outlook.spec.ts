@@ -2,6 +2,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { isAddressAllowed } from '~/auth/domain';
 import {
+  outlookServerName,
   assertOutlookArguments,
   assertOutlookScopes,
   assertOutlookTool,
@@ -321,4 +322,18 @@ it('rechecks revoked role rights and active account bans before exposing the con
   mockUseAllowed = true;
   mockBan = { expiresAt: new Date(Date.now() + 10000) };
   await expect(managedOutlookConfig(mockUser.id)).rejects.toThrow();
+});
+
+it('keeps names accepted by model providers and rejects oversized tool names', () => {
+  const before = process.env.KISUNO_OUTLOOK_SERVER_NAME;
+  try {
+    process.env.KISUNO_OUTLOOK_SERVER_NAME = 'kisuno-outlook-amsler';
+    for (const tool of OUTLOOK_TOOLS)
+      expect(`${tool}_mcp_${outlookServerName()}`.length).toBeLessThanOrEqual(64);
+    process.env.KISUNO_OUTLOOK_SERVER_NAME = 'kisuno-outlook-samuel-amsler-ag';
+    expect(() => outlookServerName()).toThrow();
+  } finally {
+    if (before === undefined) delete process.env.KISUNO_OUTLOOK_SERVER_NAME;
+    else process.env.KISUNO_OUTLOOK_SERVER_NAME = before;
+  }
 });
