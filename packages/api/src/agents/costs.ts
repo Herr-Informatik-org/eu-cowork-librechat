@@ -44,7 +44,7 @@ interface CostDay {
   reservations: Record<string, number>;
   userId: string;
   tenantId: string;
-  expiresAt: Date;
+  expiresAt?: Date;
   prunedDay?: string;
 }
 export interface CostDependencies {
@@ -435,8 +435,9 @@ export async function reserveWorkCost(
       $set: {
         [`reservations.${reservation}`]: amount,
         [`jobs.${task}.updatedAt`]: now,
-        expiresAt: new Date(+now + 90 * 86400_000),
       },
+      // An unknown provider outcome must not disappear through idle-ledger retention.
+      $unset: { expiresAt: '' },
     },
     { writeConcern: { w: 'majority' } },
   );
@@ -476,6 +477,13 @@ export async function settleWorkCost(
     },
     { writeConcern: { w: 'majority' } },
   );
+  await deps.db
+    .collection<CostDay>(WORK_COST_DAYS)
+    .updateOne(
+      { _id: reservation.ledger, reservations: { $eq: {} } },
+      { $set: { expiresAt: new Date(+(deps.now?.() ?? new Date()) + 90 * 86400_000) } },
+      { writeConcern: { w: 'majority' } },
+    );
 }
 export function usageCost(
   usage: Usage,

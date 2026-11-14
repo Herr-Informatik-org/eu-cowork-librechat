@@ -308,6 +308,17 @@ it('prunes old settled task metadata while retaining every unresolved reservatio
   expect(row?.jobs[pending.task].reserved).toBe(1_000_000);
   expect(row?.days.d20261114.reserved).toBe(1_000_000);
   expect(row?.reservations[pending.id]).toBe(1_000_000);
+  expect(row?.expiresAt).toBeUndefined();
+});
+
+it('starts ledger retention only after every provider reservation has been settled', async () => {
+  const first = await reserveWorkCost(scope, 1_000_000, deps);
+  const second = await reserveWorkCost(scope, 1_000_000, deps);
+  await settleWorkCost(first, 0.1, deps);
+  expect((await deps.db.collection(WORK_COST_DAYS).findOne({}))?.expiresAt).toBeUndefined();
+  await settleWorkCost(second, 0.2, deps);
+  const settled = await deps.db.collection(WORK_COST_DAYS).findOne({});
+  expect(settled?.expiresAt).toEqual(new Date(+now + 90 * 86400000));
 });
 
 it('never seeds a managed generation a second time after a cross-midnight completion', async () => {
