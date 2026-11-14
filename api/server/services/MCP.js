@@ -28,6 +28,11 @@ const {
   requiresEphemeralUserConnection,
   containsGraphTokenPlaceholder,
   isProtectedMCPAlias,
+  runVerifiedOdooUpdate,
+  runOdooEffectOnce,
+  isSafeUpdateSupported,
+  pageWorkOutput,
+  buildMandatoryApproval,
 } = require('@librechat/api');
 const {
   Time,
@@ -1122,33 +1127,140 @@ function createToolInstance({
       const customUserVars =
         config?.configurable?.userMCPAuthMap?.[`${Constants.mcp_prefix}${serverName}`];
 
-      const result = await mcpManager.callTool({
-        serverName,
-        serverConfig: capturedServerConfig,
-        toolName,
-        provider,
-        toolArguments,
-        options: {
+      const invoke = (name, args, signal = derivedSignal) =>
+        mcpManager.callTool({
+          serverName,
+          serverConfig: capturedServerConfig,
+          toolName: name,
+          provider,
+          toolArguments: args,
+          options: {
+            signal,
+          },
+          user: effectiveUser,
+          requestBody: config?.configurable?.requestBody ?? capturedRequestBody,
+          requestScopedConnections:
+            config?.configurable?.requestScopedConnections ?? capturedRequestScopedConnections,
+          customUserVars,
+          flowManager,
+          tokenMethods: {
+            findToken,
+            createToken,
+            updateToken,
+            deleteTokens,
+          },
+          oauthStart,
+          oauthEnd,
+          graphTokenResolver: getGraphApiToken,
+          oboTokenResolver: exchangeOboToken,
+          oboTrustChecker: createOboTrustChecker(),
+        });
+
+      let result;
+      if (
+        process.env.KISUNO_CWV01_SAFE_WORK === 'true' &&
+        toolName === 'update_record' &&
+        isSafeUpdateSupported(toolArguments) &&
+        /^odoo(?:-|$)/i.test(serverName)
+      ) {
+        if (
+          !capturedServerConfig ||
+          isUserSourced(capturedServerConfig) ||
+          !streamId ||
+          jobCreatedAt == null ||
+          !userId
+        ) {
+          throw new Error(
+            'Dieser sichere Schreibweg benötigt den verwalteten Odoo-Connector und einen authentifizierten Webchat-Auftrag.',
+          );
+        }
+        const readName = `get_record${Constants.mcp_delimiter}${normalizeServerName(serverName)}`;
+        if (buildMandatoryApproval(approvalConfig?.mcpConfig, true).matches(readName)) {
+          throw new Error(
+            'Die Rücklesekontrolle benötigt hier eine eigene Freigabe. Es wurde nichts geschrieben.',
+          );
+        }
+        result = await runVerifiedOdooUpdate({
+          scope: {
+            userId,
+            tenantId: effectiveUser?.tenantId ?? getTenantId(),
+            conversationId: streamId,
+            taskId:
+              config?.configurable?.requestBody?.messageId ||
+              capturedRequestBody?.messageId ||
+              String(jobCreatedAt),
+          },
+          serverName,
+          input: toolArguments,
           signal: derivedSignal,
-        },
-        user: effectiveUser,
-        requestBody: config?.configurable?.requestBody ?? capturedRequestBody,
-        requestScopedConnections:
-          config?.configurable?.requestScopedConnections ?? capturedRequestScopedConnections,
-        customUserVars,
-        flowManager,
-        tokenMethods: {
-          findToken,
-          createToken,
-          updateToken,
-          deleteTokens,
-        },
-        oauthStart,
-        oauthEnd,
-        graphTokenResolver: getGraphApiToken,
-        oboTokenResolver: exchangeOboToken,
-        oboTrustChecker: createOboTrustChecker(),
-      });
+          // Verification is bounded independently of Stop; after a submitted write it must still be attempted.
+          read: (fields) =>
+            invoke(
+              'get_record',
+              {
+                model: toolArguments.model,
+                record_id: toolArguments.record_id,
+                fields,
+                intent:
+                  'Einzelprüfung und Rücklesekontrolle der ausdrücklich freigegebenen Änderung.',
+              },
+              AbortSignal.timeout(20_000),
+            ),
+          write: () => invoke(toolName, toolArguments),
+        });
+      } else if (
+        process.env.KISUNO_CWV01_SAFE_WORK === 'true' &&
+        streamId &&
+        jobCreatedAt != null &&
+        userId &&
+        /^odoo(?:-|$)/i.test(serverName) &&
+        /^(create_record|delete_record|execute_method|call_method)$/.test(toolName)
+      ) {
+        result = await runOdooEffectOnce(
+          {
+            userId,
+            tenantId: effectiveUser?.tenantId || 'cw01',
+            conversationId: streamId,
+            taskId:
+              config?.configurable?.requestBody?.messageId ||
+              capturedRequestBody?.messageId ||
+              String(jobCreatedAt),
+          },
+          serverName,
+          toolName,
+          toolArguments,
+          () => invoke(toolName, toolArguments),
+        );
+      } else {
+        result = await invoke(toolName, toolArguments);
+      }
+
+      if (
+        process.env.KISUNO_CWV01_SAFE_WORK === 'true' &&
+        streamId &&
+        jobCreatedAt != null &&
+        userId &&
+        /^(get_record|search_records|aggregate_records|list_models|list_resource_templates)$/.test(
+          toolName,
+        ) &&
+        /^odoo(?:-|$)/i.test(serverName) &&
+        Array.isArray(result) &&
+        typeof result[0] === 'string'
+      ) {
+        result = await pageWorkOutput(
+          {
+            userId,
+            tenantId: effectiveUser?.tenantId || 'cw01',
+            conversationId: streamId,
+            taskId:
+              config?.configurable?.requestBody?.messageId ||
+              capturedRequestBody?.messageId ||
+              String(jobCreatedAt),
+          },
+          `${String(jobCreatedAt)}:${serverName}:${toolName}:${toolCall?.id || toolName}:${JSON.stringify(toolArguments)}`,
+          result,
+        );
+      }
 
       if (isAssistantsEndpoint(provider) && Array.isArray(result)) {
         return result[0];

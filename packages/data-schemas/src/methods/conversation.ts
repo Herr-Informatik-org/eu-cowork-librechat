@@ -12,6 +12,7 @@ import { createTempChatExpirationDate } from '~/utils/tempChatRetention';
 import { tenantSafeBulkWrite } from '~/utils/tenantBulkWrite';
 import { isValidObjectIdString } from '~/utils/objectId';
 import { decrementTagCounts } from './conversationTag';
+import { deleteOwnedWorkData, syncOwnedWorkExpiry } from './work';
 import logger from '~/config/winston';
 
 export interface ConversationMethods {
@@ -389,6 +390,22 @@ export function createConversationMethods(
         }
       }
 
+      if (
+        process.env.KISUNO_CWV01_SAFE_WORK === 'true' &&
+        Object.prototype.hasOwnProperty.call(update, 'expiredAt')
+      ) {
+        await syncOwnedWorkExpiry(
+          mongoose.connection,
+          userId,
+          conversationId,
+          conversation.expiredAt ? new Date(conversation.expiredAt) : null,
+        ).catch((error) =>
+          logger.error(
+            '[saveConvo] Aufbewahrung der Arbeitsdaten konnte nicht aktualisiert werden',
+            error,
+          ),
+        );
+      }
       return conversation.toObject();
     } catch (error) {
       logger.error('[saveConvo] Error saving conversation', error);
@@ -779,6 +796,13 @@ export function createConversationMethods(
 
       const deleteConvoResult = await Conversation.deleteMany(userFilter);
       const deleted = deleteConvoResult.deletedCount > 0;
+      if (deleted)
+        await deleteOwnedWorkData(mongoose.connection, user, conversationIds).catch((error) =>
+          logger.error(
+            '[deleteConvos] Private Arbeitsdaten werden beim nächsten Bereinigungslauf erneut geprüft',
+            error,
+          ),
+        );
 
       /**
        * Reconcile bookmark counts from the deletion before message cleanup: if

@@ -1598,7 +1598,8 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
         /** BaseClient can add the id to savedMessageIds even when its model-layer
          * save resolved falsy. Re-save the terminal row idempotently and require
          * the returned durable row before publishing the normal FINAL. */
-        const responseIsUnfinished = terminalWasAborted || preemptIncomplete;
+        const responseIsUnfinished =
+          terminalWasAborted || preemptIncomplete || client?.safeWorkPaused === true;
         const savedResponseMessage = await saveMessage(
           reqCtx,
           {
@@ -1649,7 +1650,7 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
             requestMessage: sanitizeMessageForTransmit(userMessage),
             responseMessage: {
               ...response,
-              ...((terminalWasAborted || preemptIncomplete) && { unfinished: true }),
+              ...(responseIsUnfinished && { unfinished: true }),
             },
             ...(pendingSteers.length > 0 && { pendingSteers }),
           };

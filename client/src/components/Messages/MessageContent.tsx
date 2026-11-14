@@ -3,6 +3,7 @@ import type { TMessageProps } from '~/common';
 import { useMessageProcess, useMemoizedChatContext } from '~/hooks';
 import { areMessageRowPropsEqual } from '~/utils';
 import ContentRender from './ContentRender';
+import WorkCost from './WorkCost';
 
 const MessageContainer = React.memo(function MessageContainer({
   handleScroll,
@@ -37,6 +38,7 @@ function MessageContent(props: TMessageProps) {
     <MessageContainer handleScroll={handleScroll}>
       <div className="m-auto justify-center p-4 py-2 md:gap-6">
         <ContentRender {...props} isSubmitting={effectiveIsSubmitting} chatContext={chatContext} />
+        {!message.isCreatedByUser && <WorkCost value={message.metadata?.workCost} />}
       </div>
     </MessageContainer>
   );

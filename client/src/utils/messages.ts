@@ -603,7 +603,8 @@ export function areMessageFieldsEqual(
     (prevMsg.manualSkills?.length ?? 0) === (nextMsg.manualSkills?.length ?? 0) &&
     (prevMsg.alwaysAppliedSkills?.length ?? 0) === (nextMsg.alwaysAppliedSkills?.length ?? 0) &&
     (prevMsg.quotes?.length ?? 0) === (nextMsg.quotes?.length ?? 0) &&
-    prevMsg.nextSteps === nextMsg.nextSteps
+    prevMsg.nextSteps === nextMsg.nextSteps &&
+    prevMsg.metadata?.workCost === nextMsg.metadata?.workCost
   );
 }
 

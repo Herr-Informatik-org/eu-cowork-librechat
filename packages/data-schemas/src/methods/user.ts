@@ -1,3 +1,4 @@
+import { deleteOwnedWorkData } from './work';
 import mongoose, { FilterQuery } from 'mongoose';
 import {
   AUTH_USER_DOC_BY_ID_PREFIX,
@@ -385,6 +386,7 @@ export function createUserMethods(
         .deleteMany({ ownerId: userId });
       await mailbox.deleteOne({ _id: userId, ownerId: userId });
       const result = await User.deleteOne({ _id: userId });
+      await deleteOwnedWorkData(mongoose.connection, userId);
       // Close a connection-start race between the initial cleanup and account deletion.
       await mongoose.connection
         .collection<{ _id: string }>('eucowork_mail_credentials')

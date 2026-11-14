@@ -1,5 +1,10 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+
+## CWV01: Sichere und begrenzte Arbeit (2026-11-14)
+
+Nur nach ausdrücklicher Aktivierung: echte Anbieter-USD erfassen, Auftrags- und Tageslimits aus dem Admin-Panel atomar reservieren, Cache-Schreiben berücksichtigen und an der Schrittgrenze kostenlos geordnet pausieren. Lange Chats behalten Originalnachrichten und Einzelbelege; grosse Odoo-Ausgaben bleiben vollständig verschlüsselt nachladbar. Skills gehen ergänzendem Brain-Abruf vor. Neue Erinnerungen brauchen eigene Quellenbelege. Dauerhafte Schreibjournale verhindern das blinde Wiederholen unbekannter Odoo-Wirkungen; bekannte skalare Einzeländerungen werden frisch gelesen und zurückgelesen. Konfigurationen anderer Instanzen bleiben unverändert.
+
 ## 2026-11-13 — Frühere Diktiervorschau und sichtbarer Mikrofonpegel
 
 - Die Vorschau beginnt mit einer frühen Momentaufnahme und überarbeitet fortlaufend

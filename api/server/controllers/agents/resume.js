@@ -329,7 +329,7 @@ async function finalizeResumedTurn({
     endpoint: meta.endpoint,
     iconURL: meta.iconURL,
     model: meta.model,
-    unfinished: preemptIncomplete,
+    unfinished: preemptIncomplete || client?.safeWorkPaused === true,
     error: false,
     isCreatedByUser: false,
     user: userId,

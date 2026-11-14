@@ -319,3 +319,13 @@ export interface SubagentUpdateEvent {
   label?: string;
   timestamp: string;
 }
+export interface TWorkCostSummary {
+  requestUsd: number;
+  requestReservedUsd: number;
+  dayReservedUsd?: number;
+  dayUsd: number;
+  requestLimitUsd: number;
+  dayLimitUsd: number;
+  warning: boolean;
+  at: number;
+}

@@ -67,9 +67,10 @@ import { buildMandatoryApproval } from '~/agents/hitl/mandatory';
 import { buildChatGuidance } from '~/agents/guidance';
 import { resolveWorkModeRun } from '~/agents/workmode/run';
 import { resolveRecursionLimit, resolveSubagentMaxTurns } from '~/agents/config';
+import { isSafeWorkEnabled } from '~/agents/safeWork';
 import { installAgentWorkBudget } from '~/agents/budget';
 import { buildLangfuseConfig } from '~/langfuse/config';
-import { resolveConfigHeaders } from '~/utils/headers';
+import { resolveConfigHeaders, bindWorkCostTransport } from '~/utils/headers';
 import { applyTestRunHook } from '~/agents/testHook';
 import { isUserProvided } from '~/utils/common';
 import {
@@ -371,6 +372,7 @@ export function shouldReplayReasoningContent(
 type RunAgent = Omit<Agent, 'tools'> & {
   tools?: GenericTool[];
   brainTools?: GenericTool[];
+  workTools?: GenericTool[];
   maxContextTokens?: number;
   /** Pre-ratio context budget from initializeAgent. */
   baseContextTokens?: number;
@@ -619,6 +621,11 @@ function resolveSummarizationProvider(
     if (configOptions) {
       clientOverrides.configuration = configOptions;
     }
+    bindWorkCostTransport(
+      clientOverrides,
+      createSafeUser(headerContext.user),
+      headerContext.requestBody,
+    );
     /**
      * `model`/`modelName` on `llmConfig` default to whatever `getOpenAIConfig`
      * produces from empty modelOptions. Strip them so the user-supplied
@@ -1491,6 +1498,7 @@ export async function createRun({
         ? [createLocalFolderTool(folderGrants)]
         : []),
       ...(!isSubagent ? (agent.brainTools ?? []) : []),
+      ...(!isSubagent && agent === agents[0] ? (agent.workTools ?? []) : []),
       ...guidance.tools,
     ];
     if (directGraphTools.length > 0) {
@@ -1702,6 +1710,20 @@ export async function createRun({
       agentId,
       limit: resolveRecursionLimit(agentsEndpointConfig, agents[0]),
       resumed: resumeBudget,
+      closureScope:
+        user?.id && requestBody?.conversationId && runId
+          ? {
+              userId: user.id,
+              tenantId: tenantId ?? user.tenantId,
+              conversationId: requestBody.conversationId,
+              taskId: runId,
+            }
+          : undefined,
+      freeClosure:
+        isSafeWorkEnabled() &&
+        [Providers.OPENAI, Providers.AZURE].includes(rootAgentInput.provider) &&
+        typeof (rootAgentInput.clientOptions as { configuration?: { fetch?: unknown } })
+          .configuration?.fetch === 'function',
       readModelStep: () => {
         const metadata = run.Graph?.config?.metadata;
         if (metadata?.langgraph_node !== `agent=${agentId}`) {

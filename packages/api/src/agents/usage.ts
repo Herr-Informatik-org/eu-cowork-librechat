@@ -1,4 +1,5 @@
 import { logger } from '@librechat/data-schemas';
+import { cwv01TokenConfig } from './costs';
 import {
   inputTokensIncludesCache,
   reconcileContextUsage,
@@ -157,7 +158,11 @@ export function computeUsageCostUSD(
     context: 'message',
     conversationId: '',
     model: usage.model,
-    endpointTokenConfig,
+    endpointTokenConfig: cwv01TokenConfig(
+      endpointTokenConfig,
+      usage.model,
+      splitUsage(usage).totalInput,
+    ),
   };
   const entries =
     cacheCreation > 0 || cacheRead > 0
@@ -596,9 +601,11 @@ export async function recordCollectedUsage(
         /** Price with the producing agent's endpoint config when a resolver is
          *  provided (multi-endpoint graphs); it owns the fallback to the primary
          *  config, so `undefined` here means built-in pricing, not the batch one. */
-        endpointTokenConfig: resolveEndpointTokenConfig
-          ? resolveEndpointTokenConfig(usage)
-          : endpointTokenConfig,
+        endpointTokenConfig: cwv01TokenConfig(
+          resolveEndpointTokenConfig ? resolveEndpointTokenConfig(usage) : endpointTokenConfig,
+          usage.model ?? model,
+          splitUsage(usage).totalInput,
+        ),
         context: usageContext,
         model: usage.model ?? model,
       };

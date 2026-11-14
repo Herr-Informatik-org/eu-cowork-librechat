@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { applyWorkCostEvent } from '~/utils/workCost';
 import { v4 } from 'uuid';
 import { SSE } from 'sse.js';
 import { useSetRecoilState } from 'recoil';
@@ -149,6 +150,8 @@ export default function useSSE(
         contextHandler(data.data, { ...submission, userMessage });
       } else if (data.event === UsageEvents.ON_TOKEN_USAGE) {
         usageHandler(data.data, { ...submission, userMessage });
+      } else if (data.event === 'on_work_cost') {
+        setMessages(applyWorkCostEvent(getMessages() ?? [], data.data));
       } else if (data.event === ApprovalEvents.ON_PENDING_ACTION) {
         /** The pause card must attach to the same message state the stream
          * produced — apply any queued delta before reading the cache. */

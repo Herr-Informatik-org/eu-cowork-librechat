@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { applyWorkCostEvent } from '~/utils/workCost';
 import { v4 } from 'uuid';
 import { SSE } from 'sse.js';
 import { useQueryClient } from '@tanstack/react-query';
@@ -1634,6 +1635,10 @@ export default function useResumableSSE(
             usageHandler(data.data, { ...currentSubmission, userMessage });
             return;
           }
+          if (data.event === 'on_work_cost') {
+            setMessages(applyWorkCostEvent(getMessages() ?? [], data.data));
+            return;
+          }
 
           if (data.event === ApprovalEvents.ON_PENDING_ACTION) {
             applyPendingActionToMessages(data.data as Agents.PendingAction);
@@ -1875,6 +1880,8 @@ export default function useResumableSSE(
                   contextHandler(replayEvent.data, resumeSubmission);
                 } else if (replayEvent.event === UsageEvents.ON_TOKEN_USAGE) {
                   usageHandler(replayEvent.data, resumeSubmission);
+                } else if (replayEvent.event === 'on_work_cost') {
+                  setMessages(applyWorkCostEvent(getMessages() ?? [], replayEvent.data));
                 } else if (replayEvent.event === ApprovalEvents.ON_PENDING_ACTION) {
                   // A pause that landed after the resume snapshot must still render its
                   // controls (mirror the live handler), not fall through to stepHandler.
@@ -1906,6 +1913,8 @@ export default function useResumableSSE(
                   contextHandler(pendingEvent.data, resumeSubmission);
                 } else if (pendingEvent.event === UsageEvents.ON_TOKEN_USAGE) {
                   usageHandler(pendingEvent.data, resumeSubmission);
+                } else if (pendingEvent.event === 'on_work_cost') {
+                  setMessages(applyWorkCostEvent(getMessages() ?? [], pendingEvent.data));
                 } else if (pendingEvent.event === ApprovalEvents.ON_PENDING_ACTION) {
                   // In-memory mode can surface a pause that landed between getResumeState()
                   // and the subscription here; route it to the same handler as a live event

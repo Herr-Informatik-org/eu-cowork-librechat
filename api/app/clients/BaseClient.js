@@ -673,6 +673,7 @@ class BaseClient {
           return {};
         },
       );
+      this.userMessageSavePromise = userMessagePromise;
       this.savedMessageIds.add(userMessage.messageId);
       if (typeof opts?.getReqData === 'function') {
         opts.getReqData({
@@ -963,7 +964,7 @@ class BaseClient {
       {
         ...message,
         endpoint: options.endpoint,
-        unfinished: false,
+        unfinished: this.safeWorkPaused === true,
         user,
         ...(hasAddedConvo && { addedConvo: true }),
       },

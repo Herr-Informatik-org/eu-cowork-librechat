@@ -4,6 +4,38 @@ import type { BrainConversationMessage } from './conversation';
 import { compatibleBrainEvidence } from './conversation';
 import { containsBrainCredential } from './safety';
 import { brainAuthoredText } from './query';
+import { isSafeWorkEnabled } from '~/agents/safeWork';
+
+/** A memory command is not evidence for technical fields invented by the assistant. */
+export function hasAuthoredBrainSupport(
+  fact: BrainCandidate,
+  messages: BrainConversationMessage[],
+): boolean {
+  if (!isSafeWorkEnabled()) return true;
+  const userEvidence = (fact.evidence ?? [])
+    .flatMap((evidence) => {
+      const source = messages.find(
+        (message) => message.id === evidence.messageId && message.role === 'user',
+      );
+      return source && brainAuthoredText(source.text).includes(evidence.quote)
+        ? [evidence.quote]
+        : [];
+    })
+    .join('\n');
+  if (!userEvidence.trim()) return false;
+  const anchors = fact.text?.match(/`[^`\n]{2,160}`|\b[a-zA-Z][a-zA-Z0-9]*_[a-zA-Z0-9_]+\b/g) ?? [];
+  if (anchors.some((anchor) => !userEvidence.includes(anchor.replace(/^`|`$/g, '')))) return false;
+  const numbers = fact.text?.match(/\b\d+(?:[.,]\d+)*\b/g) ?? [];
+  if (numbers.some((number) => !userEvidence.includes(number))) return false;
+  const stripped = userEvidence
+    .replace(
+      /\b(?:bitte|merke|merk|merken|dir|das|dies|diese|im|in|brain|wie|man|es|sich|richtig|korrekt|hinterlegt|remember|this|that|please)\b/gi,
+      '',
+    )
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  return stripped.split(/\s+/).filter((word) => word.length > 2).length >= 3;
+}
 
 function storageText(value: unknown, max: number): value is string {
   return (
@@ -97,6 +129,7 @@ export function validateContextualFacts(
       }
       return hasUser;
     })
+    .filter((fact) => hasAuthoredBrainSupport(fact, messages))
     .map((fact) => qualifyBrainCandidate(fact, messages))
     .filter((fact): fact is BrainCandidate => fact !== undefined)
     .map((fact) => ({ ...fact, relatedIds: fact.relatedIds?.filter((id) => knownIds.has(id)) }));

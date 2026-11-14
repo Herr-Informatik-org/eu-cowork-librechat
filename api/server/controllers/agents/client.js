@@ -61,6 +61,12 @@ const {
   stampSteerPartMedia,
   createActivityLabelWiring,
   continueOpenPlan,
+  isSafeWorkEnabled,
+  compactWorkHistory,
+  workTools,
+  observeWorkCost,
+  saveSafeWorkTask,
+  getSafeWorkPauseReason,
   resolveNextSteps,
   resolveActivityConfig,
   getCustomEndpointConfig,
@@ -1033,13 +1039,40 @@ class AgentClient extends BaseClient {
 
   async buildMessages(messages, parentMessageId, _buildOptions, opts) {
     /** Always pass mapMethod; getMessagesForConversation applies it only to messages with addedConvo flag */
-    const orderedMessages = this.constructor.getMessagesForConversation({
+    let orderedMessages = this.constructor.getMessagesForConversation({
       messages,
       parentMessageId,
       summary: this.shouldSummarize,
       mapMethod: createMultiAgentMapper(this.options.agent, this.agentConfigs),
       mapCondition: (message) => message.addedConvo === true,
     });
+    if (isSafeWorkEnabled() && this.options.req?.user?.id && this.conversationId) {
+      const workScope = {
+        userId: this.options.req.user.id,
+        tenantId: this.options.req.user.tenantId || 'cw01',
+        conversationId: this.conversationId,
+        taskId: this.responseMessageId || this.options.req.body?.messageId || this.conversationId,
+      };
+      orderedMessages = await compactWorkHistory(orderedMessages, workScope);
+      const agent = this.options.agent;
+      agent.workTools = workTools(workScope);
+      if (!this.stopWorkCostObserver) {
+        this.stopWorkCostObserver = observeWorkCost(workScope, async (summary) => {
+          this.workCostSummary = summary;
+          const data = { messageId: this.responseMessageId, summary };
+          const streamId = this.options.req._resumableStreamId;
+          if (streamId && this.jobCreatedAt != null) {
+            await GenerationJobManager.emitChunk(
+              streamId,
+              { event: 'on_work_cost', data },
+              { expectedCreatedAt: this.jobCreatedAt },
+            );
+          } else {
+            sendEvent(this.options.res, { event: 'on_work_cost', data });
+          }
+        });
+      }
+    }
 
     let payload;
     /** @type {number | undefined} */
@@ -1585,6 +1618,21 @@ class AgentClient extends BaseClient {
         },
       });
       this.brainSession = prepared.session;
+      if (isSafeWorkEnabled() && this.brainSession) {
+        this.brainSession.options.skillFirst =
+          this.options.agent.toolRegistry?.has('skill') ||
+          this.options.agent.toolDefinitions?.some((def) => def.name === 'skill') ||
+          (this.options.agent.manualSkillPrimes?.length || 0) > 0 ||
+          (this.options.agent.alwaysApplySkillPrimes?.length || 0) > 0;
+        this.brainSession.options.hasLoadedSkill = () =>
+          (this.options.agent.manualSkillPrimes?.length || 0) > 0 ||
+          (this.options.agent.alwaysApplySkillPrimes?.length || 0) > 0 ||
+          this.contentParts?.some(
+            (part) =>
+              part?.tool_call?.name === 'skill' &&
+              (part.tool_call.output || part.tool_call.progress === 1),
+          );
+      }
       this.brainContext = prepared.context;
       attachBrainTools(this.options.agent, this.brainSession);
       return;
@@ -1857,6 +1905,18 @@ class AgentClient extends BaseClient {
 
   /** @type {sendCompletion} */
   async sendCompletion(payload, opts = {}) {
+    if (isSafeWorkEnabled() && this.userMessageSavePromise) {
+      const saved = await this.userMessageSavePromise;
+      this.userMessageSavePromise = undefined;
+      if (
+        !saved?.message?.messageId ||
+        saved?.conversation?.conversationId !== this.conversationId
+      ) {
+        throw new Error(
+          'Die Originalnachricht und ihr Chat konnten nicht sicher gespeichert werden. Es wurde keine neue Werkzeugarbeit begonnen.',
+        );
+      }
+    }
     await this.chatCompletion({
       payload,
       onProgress: opts.onProgress,
@@ -1960,6 +2020,7 @@ class AgentClient extends BaseClient {
     if (usage) {
       metadata.usage = usage;
     }
+    if (this.workCostSummary) metadata.workCost = this.workCostSummary;
     return Object.keys(metadata).length > 0 ? metadata : undefined;
   }
 
@@ -2761,6 +2822,18 @@ class AgentClient extends BaseClient {
         if (this.activityLabelsMarkedPromise != null) {
           await this.activityLabelsMarkedPromise;
         }
+        const safeWorkScope =
+          isSafeWorkEnabled() && streamId && this.jobCreatedAt != null && agents.length === 1
+            ? {
+                userId: this.options.req.user.id,
+                tenantId: this.options.req.user.tenantId || 'cw01',
+                conversationId: this.conversationId,
+                taskId: this.responseMessageId,
+              }
+            : undefined;
+        if (safeWorkScope)
+          await saveSafeWorkTask(safeWorkScope, { status: 'running', segments: 1 });
+        this.safeWorkScope = safeWorkScope;
         await run.processStream({ messages }, config, {
           callbacks: {
             [Callback.TOOL_ERROR]: logToolError,
@@ -2776,8 +2849,11 @@ class AgentClient extends BaseClient {
             contentParts: this.contentParts,
             indexOffset: this.steerOffsetState,
             signal: abortController.signal,
+            safeWork: safeWorkScope,
           });
         }
+        this.safeWorkPauseReason = getSafeWorkPauseReason(run);
+        this.safeWorkPaused = !!this.safeWorkPauseReason;
         await this.options.nextStepsSink?.flush();
 
         // HITL: if the run paused for tool approval, mark the job
@@ -2791,11 +2867,17 @@ class AgentClient extends BaseClient {
       this.options.startupTelemetry?.mark('run_input_prepared');
       await runAgents(initialMessages);
 
-      const budgetError = resolveAgentBudgetError({
-        code: hasAgentWorkBudgetExhausted(run)
-          ? ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED
-          : run?.getHaltReason?.(),
-      });
+      const budgetError = this.safeWorkPaused
+        ? JSON.stringify({
+            type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+            status: 'incomplete',
+            reason: this.safeWorkPauseReason,
+          })
+        : resolveAgentBudgetError({
+            code: hasAgentWorkBudgetExhausted(run)
+              ? ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED
+              : run?.getHaltReason?.(),
+          });
       if (budgetError) {
         budgetStopped = true;
         this.contentParts.push({ type: ContentTypes.ERROR, error: budgetError });
@@ -2870,6 +2952,13 @@ class AgentClient extends BaseClient {
           hasYouTubeVideo: this.injectedYouTubeVideo,
         });
         const budgetError = resolveAgentBudgetError(err);
+        if (budgetError && isSafeWorkEnabled()) {
+          this.safeWorkPaused = true;
+          this.safeWorkPauseReason =
+            err?.code === 'KISUNO_COST_LIMIT' ? 'cost_limit' : 'section_limit';
+          if (this.safeWorkScope)
+            await saveSafeWorkTask(this.safeWorkScope, { status: 'paused_budget', segments: 1 });
+        }
         budgetStopped = budgetError != null;
         this.contentParts.push({
           type: ContentTypes.ERROR,
@@ -2880,6 +2969,18 @@ class AgentClient extends BaseClient {
         });
       }
     } finally {
+      if (
+        this.safeWorkScope &&
+        (abortController.signal.aborted ||
+          (!budgetStopped && this.contentParts.some((part) => part.type === ContentTypes.ERROR)))
+      ) {
+        await saveSafeWorkTask(this.safeWorkScope, { status: 'blocked', segments: 1 }).catch(
+          (error) =>
+            logger.warn('[safe-work] Could not persist the paused task', { code: error?.code }),
+        );
+      }
+      this.stopWorkCostObserver?.();
+      this.stopWorkCostObserver = undefined;
       /** Capture calibration state from the run for persistence on the response message.
        *  Runs in finally so values are captured even on abort. */
       const ratio = this.run?.getCalibrationRatio() ?? 0;
@@ -3212,13 +3313,43 @@ class AgentClient extends BaseClient {
 
       // The model may pause AGAIN (another tool needs approval, or a follow-up
       // question). Re-arm the same interrupt gate so the cycle can repeat.
+      if (
+        isSafeWorkEnabled() &&
+        agents.length === 1 &&
+        !run.getInterrupt() &&
+        this.jobCreatedAt != null
+      ) {
+        await continueOpenPlan({
+          run,
+          messages: [],
+          config,
+          streamOptions: { callbacks: { [Callback.TOOL_ERROR]: logToolError } },
+          contentParts: this.contentParts,
+          indexOffset: this.steerOffsetState,
+          signal: abortController.signal,
+          safeWork: {
+            userId: this.options.req.user.id,
+            tenantId: this.options.req.user.tenantId || 'cw01',
+            conversationId: this.conversationId,
+            taskId: this.responseMessageId,
+          },
+        });
+        this.safeWorkPauseReason = getSafeWorkPauseReason(run);
+        this.safeWorkPaused = !!this.safeWorkPauseReason;
+      }
       await this.handleRunInterrupt(run, streamId);
 
-      const budgetError = resolveAgentBudgetError({
-        code: hasAgentWorkBudgetExhausted(run)
-          ? ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED
-          : run?.getHaltReason?.(),
-      });
+      const budgetError = this.safeWorkPaused
+        ? JSON.stringify({
+            type: ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED,
+            status: 'incomplete',
+            reason: this.safeWorkPauseReason,
+          })
+        : resolveAgentBudgetError({
+            code: hasAgentWorkBudgetExhausted(run)
+              ? ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED
+              : run?.getHaltReason?.(),
+          });
       if (budgetError) {
         this.contentParts.push({ type: ContentTypes.ERROR, error: budgetError });
         return;

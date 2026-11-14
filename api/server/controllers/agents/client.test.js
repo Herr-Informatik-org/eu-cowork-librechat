@@ -3778,3 +3778,49 @@ describe('AgentClient - finalizeSubagentContent', () => {
     ]);
   });
 });
+
+describe('CWV01 durable prompt before safe work', () => {
+  const previous = process.env.KISUNO_CWV01_SAFE_WORK;
+  beforeEach(() => {
+    process.env.KISUNO_CWV01_SAFE_WORK = 'true';
+  });
+  afterEach(() => {
+    if (previous === undefined) delete process.env.KISUNO_CWV01_SAFE_WORK;
+    else process.env.KISUNO_CWV01_SAFE_WORK = previous;
+  });
+  const setup = () => {
+    const client = Object.create(AgentClient.prototype);
+    client.conversationId = 'owned-chat';
+    client.contentParts = [];
+    client.chatCompletion = jest.fn(async () => {});
+    client.takeNextSteps = jest.fn();
+    client.buildResponseMetadata = jest.fn();
+    return client;
+  };
+  it('does not start model or tool work before the original prompt and owned chat are durable', async () => {
+    const saved = deferred(),
+      client = setup();
+    client.userMessageSavePromise = saved.promise;
+    const result = client.sendCompletion([]);
+    await Promise.resolve();
+    expect(client.chatCompletion).not.toHaveBeenCalled();
+    saved.resolve({
+      message: { messageId: 'original-user-message' },
+      conversation: { conversationId: 'owned-chat' },
+    });
+    await result;
+    expect(client.chatCompletion).toHaveBeenCalledTimes(1);
+    expect(client.userMessageSavePromise).toBeUndefined();
+  });
+  it('does not perform work when the prompt save failed or points at another chat', async () => {
+    for (const value of [
+      {},
+      { message: { messageId: 'user' }, conversation: { conversationId: 'other-chat' } },
+    ]) {
+      const client = setup();
+      client.userMessageSavePromise = Promise.resolve(value);
+      await expect(client.sendCompletion([])).rejects.toThrow('Originalnachricht');
+      expect(client.chatCompletion).not.toHaveBeenCalled();
+    }
+  });
+});

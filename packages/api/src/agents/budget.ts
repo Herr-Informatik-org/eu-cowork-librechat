@@ -1,8 +1,11 @@
 import type { HookCallback, HookRegistry } from '@librechat/agents';
+import type { SafeWorkScope } from './safeWork';
+import { isSafeWorkEnabled, SAFE_WORK_MAX_MS } from './safeWork';
 
 const MIN_PROACTIVE_LIMIT = 12;
 const FINALIZATION_RESERVE = 6;
 const exhaustedRuns = new WeakMap<object, AgentWorkBudget>();
+const boundedRuns = new Map<string, AgentWorkBudget>();
 
 const PLANNING_GUIDANCE =
   'Plane die Werkzeugarbeit innerhalb eines begrenzten Laufs. Prüfe zuerst das tatsächliche Schema ' +
@@ -32,6 +35,9 @@ interface AgentWorkBudget {
   exhausted: boolean;
   /** The closing guidance was given: the run should wrap up, not start new work. */
   closing: boolean;
+  reset?: () => boolean;
+  segment: number;
+  deadline?: number;
 }
 
 interface BudgetHookScope {
@@ -46,6 +52,8 @@ export interface AgentWorkBudgetOptions {
   agentId: string;
   limit: number;
   resumed?: boolean;
+  freeClosure?: boolean;
+  closureScope?: SafeWorkScope;
   /** Read the SDK's model-node metadata, never a tool-call count. */
   readModelStep: () => number | undefined;
 }
@@ -70,10 +78,25 @@ export function installAgentWorkBudget(
   options: AgentWorkBudgetOptions,
 ): ((run: object) => void) | undefined {
   const { registry, runId, agentId, limit, resumed, readModelStep } = options;
+  const closureKey = options.closureScope && budgetScopeKey(options.closureScope);
+  const freeClosure =
+    options.freeClosure === true &&
+    isSafeWorkEnabled() &&
+    closureKey != null &&
+    options.closureScope?.taskId === runId;
   if (!Number.isSafeInteger(limit) || limit < MIN_PROACTIVE_LIMIT) {
     return undefined;
   }
-  const state: AgentWorkBudget = { exhausted: false, closing: false };
+  const state: AgentWorkBudget = { exhausted: false, closing: false, segment: 1 };
+  if (freeClosure) {
+    // Only expired sections may be evicted; an active section must keep its closing guard.
+    for (const [key, previous] of boundedRuns) {
+      if (previous.deadline && Date.now() > previous.deadline + SAFE_WORK_MAX_MS) {
+        boundedRuns.delete(key);
+      }
+    }
+    boundedRuns.set(closureKey!, state);
+  }
   const warningAt = Math.floor(limit * 0.8);
   const denyAt = limit - FINALIZATION_RESERVE;
   let origin: number | undefined = resumed ? undefined : 0;
@@ -82,6 +105,20 @@ export function installAgentWorkBudget(
   let lastStep: number | undefined;
   let warned = false;
   let firstDeniedStep: number | undefined;
+  const deadline = Date.now() + SAFE_WORK_MAX_MS;
+  state.deadline = deadline;
+
+  state.reset = () => {
+    if (state.exhausted || !state.closing || state.segment >= 3) return false;
+    state.closing = false;
+    state.segment++;
+    origin = undefined;
+    carried = 0;
+    lastStep = undefined;
+    warned = false;
+    firstDeniedStep = undefined;
+    return true;
+  };
 
   const owns = (input: BudgetHookScope): boolean =>
     input.runId === runId && input.agentId == null && input.executingAgentId === agentId;
@@ -107,6 +144,33 @@ export function installAgentWorkBudget(
     if (!owns(input)) {
       return {};
     }
+    if (isSafeWorkEnabled() && Date.now() >= deadline) {
+      state.closing = true;
+      state.exhausted = true;
+      return {
+        decision: 'deny',
+        // The guarded transport ends the next model node naturally, after the tool batch settles.
+        additionalContext: 'Die Laufzeitgrenze ist erreicht. Beende diesen Abschnitt.',
+        ...(!freeClosure && {
+          preventContinuation: true,
+          stopReason: 'safe_work_time_limit',
+        }),
+        reason:
+          'Die aktive Laufzeitgrenze ist erreicht. Es werden keine neuen Änderungen begonnen.',
+      };
+    }
+    if (state.segment > 1 && !isSafeContinuationTool(input.toolName)) {
+      state.exhausted = true;
+      return {
+        decision: 'deny',
+        ...(!freeClosure && {
+          preventContinuation: true,
+          stopReason: 'safe_work_review_required',
+        }),
+        reason:
+          'Dieses Werkzeug darf nicht automatisch fortgesetzt werden. Der Auftrag bleibt für eine persönliche Prüfung angehalten.',
+      };
+    }
     const step = usedSteps();
     // A resumed pending ToolNode may run before the rebuilt graph has any
     // model metadata. Preserve its existing approval gate and hard limit.
@@ -117,7 +181,11 @@ export function installAgentWorkBudget(
       if (!warned && step >= Math.min(warningAt, denyAt - 2)) {
         warned = true;
         state.closing = true;
-        return { additionalContext: CLOSING_GUIDANCE };
+        return {
+          additionalContext: isSafeWorkEnabled()
+            ? 'Die Abschnittsgrenze nähert sich. Beende die laufende Einzelprüfung vollständig und nenne den bestätigten Zwischenstand mit offenen Schritten. Der Server entscheidet über eine kontrollierte Fortsetzung. Bereits bestätigte Schreibaktionen nicht erneut ausführen.'
+            : CLOSING_GUIDANCE,
+        };
       }
       return {};
     }
@@ -129,12 +197,13 @@ export function installAgentWorkBudget(
     return {
       decision: 'deny',
       reason: TOOL_LIMIT_GUIDANCE,
-      ...(finish && {
-        // A later MODEL step proves all earlier allowed calls settled. This
-        // entire batch is denied; no real write can be interrupted by halt.
-        preventContinuation: true,
-        stopReason: 'agent_work_budget_exceeded',
-      }),
+      ...(finish &&
+        !freeClosure && {
+          // A later MODEL step proves all earlier allowed calls settled. This
+          // entire batch is denied; no real write can be interrupted by halt.
+          preventContinuation: true,
+          stopReason: 'agent_work_budget_exceeded',
+        }),
     };
   };
 
@@ -151,4 +220,51 @@ export function installAgentWorkBudget(
   return (run): void => {
     exhaustedRuns.set(run, state);
   };
+}
+
+/** Only a completed soft-budget boundary may start a fresh bounded section. */
+export function resetAgentWorkBudget(run: object): boolean {
+  return exhaustedRuns.get(run)?.reset?.() ?? false;
+}
+/** This is a narrow continuation allowlist, never a replacement for MCP authorization. */
+export function isSafeContinuationTool(name: string): boolean {
+  return (
+    [
+      'plan_aktualisieren',
+      'brain_search',
+      'brain_context',
+      'skill',
+      'read_file',
+      'file_search',
+      'arbeitsdaten_lesen',
+      'arbeitsstand_sichern',
+    ].includes(name) ||
+    /^(get_record|search_records|list_models|list_resource_templates|aggregate_records|update_record)_mcp_odoo(?:-|$)/i.test(
+      name,
+    )
+  );
+}
+
+/** Return a deterministic, free final turn instead of cancelling a live SDK iterator. */
+function budgetScopeKey(scope: SafeWorkScope): string | undefined {
+  if (!scope.userId || !scope.conversationId || !scope.taskId) return;
+  return JSON.stringify([
+    scope.tenantId || 'cw01',
+    scope.userId,
+    scope.conversationId,
+    scope.taskId,
+  ]);
+}
+
+export function workBudgetClosure(scope: SafeWorkScope): string | undefined {
+  if (!isSafeWorkEnabled()) return;
+  const key = budgetScopeKey(scope);
+  const state = key && boundedRuns.get(key);
+  if (!state) return;
+  if (state.deadline && Date.now() >= state.deadline) {
+    state.exhausted = true;
+    state.closing = true;
+  }
+  if (!state.exhausted) return;
+  return 'Dieser Arbeitsabschnitt ist an seiner sicheren Grenze pausiert. Bereits bestätigte Einzeländerungen bleiben erhalten. Offene Schritte sind noch nicht abgeschlossen; sie dürfen nur anhand des gespeicherten Arbeitsstands fortgesetzt werden.';
 }

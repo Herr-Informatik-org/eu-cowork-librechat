@@ -77,7 +77,18 @@ const errorMessages = {
   [ErrorTypes.GOOGLE_TOOL_CONFLICT]: 'com_error_google_tool_conflict',
   [ErrorTypes.GOOGLE_VIDEO_UNPROCESSABLE]: 'com_error_google_video_unprocessable',
   [ErrorTypes.STREAM_EXPIRED]: 'com_error_stream_expired',
-  [ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED]: 'com_error_agent_work_budget_exceeded',
+  [ErrorTypes.AGENT_WORK_BUDGET_EXCEEDED]: (
+    json: TGenericError & { reason?: string },
+    localize: LocalizeFunction,
+  ) => {
+    if (json.reason === 'control_unavailable')
+      return localize('com_error_work_control_unavailable');
+    if (json.reason === 'cost_limit') return localize('com_error_work_cost_limit');
+    if (json.reason === 'uncertain_write') return localize('com_error_work_uncertain');
+    if (json.reason === 'review_required') return localize('com_error_work_review');
+    if (json.reason) return localize('com_error_work_paused');
+    return localize('com_error_agent_work_budget_exceeded');
+  },
   [ViolationTypes.BAN]:
     'Your account has been temporarily banned due to violations of our service.',
   [ViolationTypes.ILLEGAL_MODEL_REQUEST]: (json: TGenericError, localize: LocalizeFunction) => {

@@ -2,6 +2,8 @@ import type { AnthropicClientOptions } from '@librechat/agents';
 import type { IUser } from '@librechat/data-schemas';
 import type { RequestBody, RunLLMConfig } from '~/types';
 import { resolveHeaders } from './env';
+import { createWorkCostFetch } from '~/agents/costs';
+import { isSafeWorkEnabled } from '~/agents/safeWork';
 
 /** Comma-unions two header values (deduped, trimmed), e.g. `anthropic-beta`. */
 function unionCsv(a: string, b: string): string {
@@ -63,6 +65,27 @@ export function mergeHeaders(
 }
 
 type DefaultHeadersContainer = { defaultHeaders?: Record<string, string> };
+
+export function bindWorkCostTransport(
+  llmConfig: Partial<RunLLMConfig>,
+  user?: Partial<IUser> | { id: string },
+  body?: RequestBody,
+): void {
+  if (!isSafeWorkEnabled() || !llmConfig.configuration || !user?.id || !body?.conversationId)
+    return;
+  const transport = llmConfig.configuration;
+  // Unknown provider outcomes retain their reservation; do not blindly buy another generation.
+  Object.assign(llmConfig, { maxRetries: 0 });
+  transport.fetch = createWorkCostFetch(
+    transport.fetch as Parameters<typeof createWorkCostFetch>[0],
+    {
+      userId: user.id,
+      tenantId: 'tenantId' in user && typeof user.tenantId === 'string' ? user.tenantId : 'cw01',
+      conversationId: body.conversationId,
+      taskId: body.messageId || body.parentMessageId || body.conversationId,
+    },
+  ) as typeof transport.fetch;
+}
 
 /**
  * Header maps already resolved by `resolveConfigHeaders`. `resolveConfigHeaders`
@@ -127,6 +150,8 @@ export function resolveConfigHeaders({
   if (configuration?.defaultHeaders != null) {
     configuration.defaultHeaders = resolveOnce(configuration.defaultHeaders);
   }
+
+  bindWorkCostTransport(llmConfig, user, body);
 
   const clientOptions = (llmConfig as AnthropicClientOptions).clientOptions as
     | DefaultHeadersContainer

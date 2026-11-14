@@ -142,6 +142,8 @@ export interface BrainSessionOptions {
   connectionHints?: string[];
   signal?: AbortSignal;
   historical?: boolean;
+  skillFirst?: boolean;
+  hasLoadedSkill?: () => boolean;
   getBudget?: () => { remaining: number; revision: number } | undefined;
   countTokens?: (text: string) => Promise<number>;
   recallQuery?: string;
@@ -282,6 +284,19 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
     automatic = false,
     correction = false,
   ): Promise<BrainIngestResult> => {
+    if (
+      options.skillFirst &&
+      /(?:\b(?:im|in|ins|zum|den)\b.{0,45}\bskills?\b|\bskills?\b.{0,45}\b(?:merken|speichern|ergänzen|ergaenzen|anpassen)\b)/i.test(
+        options.source.text,
+      )
+    ) {
+      return {
+        nodes: [],
+        skipped: candidates.length,
+        error:
+          'Der Benutzer verlangt eine Skill-Anpassung. Lade und bearbeite den betreffenden Skill über die berechtigten Skill-Werkzeuge; speichere diesen Auftrag nicht ersatzweise im Brain.',
+      };
+    }
     if (
       (correction ? !options.canUpdate : !options.canWrite) ||
       (automatic && explicitWrite) ||
@@ -510,7 +525,17 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
 
   const tools: GenericTool[] = [
     tool(
-      async ({ query, seedIds }) => {
+      async ({ query, seedIds, missingInformation }) => {
+        if (
+          options.skillFirst &&
+          (!missingInformation?.trim() ||
+            (!options.hasLoadedSkill?.() &&
+              !/\b(brain|erinner\w*|merk\w*|vergiss|wissen über mich|weisst du über mich|wie heiss\w*|remember|forget)\b/i.test(
+                options.source.text,
+              )))
+        ) {
+          return 'Lade zuerst den passenden Skill. Nenne danach in missingInformation genau, welche Information dort fehlt. Für eine ausdrückliche persönliche Erinnerungsfrage ist kein fachfremder Skill nötig.';
+        }
         try {
           const result = await search(query, seedIds);
           return result.output;
@@ -525,6 +550,7 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
         schema: z.object({
           query: z.string().min(1).max(4000),
           seedIds: z.array(z.string()).max(30).default([]),
+          missingInformation: z.string().min(3).max(800).optional(),
         }),
       },
     ),
@@ -770,6 +796,11 @@ export function createBrainSession(options: BrainSessionOptions): BrainSession {
       return initialContext;
     },
     async initialize() {
+      if (options.skillFirst) {
+        initialContext =
+          'Persönliches Brain wird bei Bedarf nach dem passenden Skill abgerufen. Verwende brain_search nur für eine konkret benannte Informationslücke; Skill-Regeln und aktuelle Nutzeraussagen haben Vorrang.';
+        return initialContext;
+      }
       const result = await search(
         options.recallQuery ?? buildBrainRecallQuery({ text: options.source.text }),
         [],
