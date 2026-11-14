@@ -113,3 +113,16 @@ describe('NextSteps', () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+it('keeps reply drafts out of the next-step chips', () => {
+  const reply = { text: 'Ja, beginne bitte mit AarPower AG.', kind: 'reply' as const };
+  expect(canShowNextSteps(answer({ nextSteps: [reply] }), false)).toBe(false);
+  render(
+    <NextSteps
+      message={answer({ nextSteps: [reply, { text: 'Fasse zusammen' }] })}
+      isSubmitting={false}
+    />,
+  );
+  expect(screen.getByRole('button', { name: 'Fasse zusammen' })).toBeInTheDocument();
+  expect(screen.queryByText(reply.text)).not.toBeInTheDocument();
+});

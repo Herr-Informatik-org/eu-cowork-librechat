@@ -127,3 +127,30 @@ describe('resolveNextSteps', () => {
     expect(resolveNextSteps({ sink: null })).toBeUndefined();
   });
 });
+
+it('keeps a terminal question reply with an open plan, without leaking its marker', async () => {
+  const sink = createNextStepsSink();
+  const visible = textOf(
+    sink.filter(
+      delta(
+        'reply',
+        'Soll ich mit AarPower AG beginnen?\n<naechste_schritte>\nANTWORT: Ja, beginne bitte mit AarPower AG.\n</naechste_schritte>',
+      ),
+    ),
+  );
+  await sink.flush();
+  expect(visible).toBe('Soll ich mit AarPower AG beginnen?');
+  const contentParts = [
+    {
+      type: 'tool_call',
+      tool_call: {
+        name: 'plan_aktualisieren',
+        args: { schritte: [{ schritt: 'Weiterarbeiten', status: 'offen' }] },
+      },
+    },
+  ];
+  const params = { sink, contentParts };
+  expect(resolveNextSteps(params)?.[0].kind).toBe('reply');
+  expect(resolveNextSteps({ ...params, stopped: true })).toBeUndefined();
+  expect(resolveNextSteps({ ...params, paused: true })).toBeUndefined();
+});

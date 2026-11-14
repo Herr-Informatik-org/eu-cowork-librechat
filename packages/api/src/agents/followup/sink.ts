@@ -169,7 +169,8 @@ export interface ResolveNextStepsParams {
 /**
  * Next steps belong only under a complete answer of a finished turn: not after
  * a pause (question, approval), a stop, an error part, or while the visible
- * plan still has open steps after the stop reminder.
+ * plan still has open steps after the stop reminder. A reply draft may accompany
+ * a terminal question about an unfinished plan; it never resumes the run.
  */
 export function resolveNextSteps({
   sink,
@@ -184,8 +185,10 @@ export function resolveNextSteps({
   if (contentParts?.some((part) => part?.type === 'error')) {
     return undefined;
   }
+  const steps = sink.take(request);
   if (hasOpenPlanSteps(findLatestPlan(contentParts))) {
-    return undefined;
+    const replies = steps?.filter((step) => step.kind === 'reply');
+    return replies?.length ? replies : undefined;
   }
-  return sink.take(request);
+  return steps;
 }

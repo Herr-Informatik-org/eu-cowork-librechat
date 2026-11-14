@@ -56,6 +56,9 @@ import Mention from './Mention';
 import store from '~/store';
 import { hasReadyImageAttachments } from '~/utils/imageAttachments';
 import useCurrentChatDraft from '~/drafts/useCurrentChatDraft';
+import ReplySuggestion from './ReplySuggestion/ReplySuggestion';
+import useReplySuggestion from './ReplySuggestion/useReplySuggestion';
+import { questionReplyDraft } from './ReplySuggestion/reply';
 import './composer.css';
 
 interface ChatFormProps {
@@ -445,6 +448,22 @@ const ChatForm = memo(function ChatForm({
   });
 
   const textValue = useWatch({ control: methods.control, name: 'text' });
+  const replySuggestion = useReplySuggestion({
+    index,
+    conversationId,
+    text: textValue ?? '',
+    blocked:
+      disableInputs ||
+      isNotAppendable ||
+      dictationBusy ||
+      filesLoading ||
+      (isSubmitting && !answerMode.active) ||
+      addedConvo != null,
+    questionActive: answerMode.active,
+    questionDraft: questionReplyDraft(answerMode),
+    textAreaRef,
+  });
+  const replyDescriptionId = `reply-suggestion-${index}`;
 
   useEffect(() => {
     if (textAreaRef.current) {
@@ -669,7 +688,7 @@ const ChatForm = memo(function ChatForm({
               {endpoint && (
                 <div className={cn('flex', isRTL ? 'flex-row-reverse' : 'flex-row')}>
                   <div
-                    className="relative flex-1"
+                    className="relative grid flex-1"
                     style={
                       isCollapsed
                         ? {
@@ -682,6 +701,13 @@ const ChatForm = memo(function ChatForm({
                   >
                     {dictationBusy && (
                       <DictationPreview status={dictation} existingText={textValue || ''} />
+                    )}
+                    {replySuggestion.suggestion && (
+                      <ReplySuggestion
+                        text={replySuggestion.suggestion}
+                        descriptionId={replyDescriptionId}
+                        onAccept={replySuggestion.accept}
+                      />
                     )}
                     <TextareaAutosize
                       hidden={dictationBusy}
@@ -709,6 +735,9 @@ const ChatForm = memo(function ChatForm({
                         );
                       }}
                       onKeyDown={(e) => {
+                        if (replySuggestion.handleKeyDown(e)) {
+                          return;
+                        }
                         // Answer mode consumes option-navigation keys from the
                         // empty composer; everything else follows the normal path.
                         if (answerMode.handleComposerKeyDown(e)) {
@@ -717,8 +746,14 @@ const ChatForm = memo(function ChatForm({
                         handleKeyDown(e);
                       }}
                       onKeyUp={handleKeyUp}
-                      onCompositionStart={handleCompositionStart}
-                      onCompositionEnd={handleCompositionEnd}
+                      onCompositionStart={() => {
+                        replySuggestion.onCompositionStart();
+                        handleCompositionStart();
+                      }}
+                      onCompositionEnd={() => {
+                        replySuggestion.onCompositionEnd();
+                        handleCompositionEnd();
+                      }}
                       id={mainTextareaId}
                       tabIndex={0}
                       data-testid="text-input"
@@ -726,10 +761,13 @@ const ChatForm = memo(function ChatForm({
                       onFocus={handleTextareaFocus}
                       onBlur={handleTextareaBlur}
                       aria-label={localize('com_ui_message_input')}
+                      aria-describedby={replySuggestion.suggestion ? replyDescriptionId : undefined}
                       onClick={handleFocusOrClick}
                       style={{ height: 44, overflowY: 'auto' }}
                       className={cn(
                         baseClasses,
+                        '[grid-area:1/1]',
+                        replySuggestion.suggestion && '!placeholder-transparent',
                         removeFocusRings,
                         dictationBusy && 'hidden',
                         'scrollbar-hover transition-[max-height] duration-200 disabled:cursor-not-allowed',

@@ -16,7 +16,9 @@ Formuliere eine Antwort an Frau Meier: …
 - Höchstens drei Zeilen, die naheliegendste zuerst, in der Sprache der Person. Jede Zeile ist die nächste Anweisung der Person an dich: kurz (möglichst unter 60 Zeichen), im Imperativ, mit konkretem Bezug auf diese Antwort (Name, Dokument, Zeitraum, Betrag). Die Beispiele zeigen nur die Form.
 - Nur, was du mit deinen Werkzeugen und den Rechten der Person tatsächlich kannst. Nie, was eben erledigt wurde oder die Person gerade verlangt hat; keine Schritte, die nur ein Mensch erledigen kann; keine Fragen an die Person, keine Floskeln, keine Links, Pfade, IDs, Werkzeugnamen oder Formatierung.
 - Braucht ein Schritt eine Angabe, die nur die Person kennt, endet die Zeile offen mit «…».
-- Lass den Block weg, wenn es keinen sinnvollen nächsten Schritt gibt, bei einer Rückfrage an die Person und wenn du die Arbeit noch nicht abgeschlossen hast.`;
+- Lass den Block weg, wenn es keinen sinnvollen nächsten Schritt gibt und wenn du die Arbeit noch nicht abgeschlossen hast. Ausnahme: Eine abschliessende Rückfrage darf einen Antwortentwurf anbieten, auch wenn der Arbeitsplan noch offen ist.
+- Bei einer abschliessenden Frage an die Person: statt nächster Schritte genau eine Zeile mit dem Präfix ANTWORT: anbieten. Sie formuliert eine kurze mögliche Antwort der Person in deren Sprache. Beispiel: Bei «Soll ich mit AarPower AG beginnen?» lautet die Zeile «ANTWORT: Ja, beginne bitte mit AarPower AG.». Das ist nur ein bearbeitbarer Entwurf; die Person muss ihn selbst übernehmen und absenden.
+- Keine persönlichen Angaben, Termine, Zahlen, Vorlieben, Berechtigungen oder bereits erfolgte Handlungen erfinden. Bei fehlenden Angaben höchstens einen offenen Satzanfang mit «…» anbieten, sonst keinen Entwurf. Bei widersprüchlichen Optionen keine Auswahl erfinden. Nie Zugangsdaten, Zustimmung zur Datenweitergabe, Zahlungen, Löschungen oder andere folgenreiche Freigaben vorschlagen. Echte Werkzeugfreigaben bleiben im vorgesehenen Freigabedialog.`;
 
 /** Follow-up suggestions are on for the chat unless `endpoints.agents.nextSteps` is `false`. */
 export function isNextStepsEnabled(appConfig?: AppConfig): boolean {

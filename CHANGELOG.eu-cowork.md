@@ -1,5 +1,18 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-14 — Antwortentwürfe mit Tab übernehmen
+
+- Eine abschliessende Rückfrage kann eine graue mögliche Antwort im leeren Eingabefeld
+  anbieten. Tab oder der kleine Übernehmen-Knopf kopiert den Text in den normalen
+  Entwurf; erst ein weiteres bewusstes Absenden erzeugt eine Anfrage. Escape blendet
+  ihn aus. Eigene Texte, Diktate und laufende Antworten haben Vorrang.
+- Vorhandene Next-Step-Metadaten unterstützen Antwortentwürfe additiv, auch bei einem
+  noch offenen Arbeitsplan. Derselbe Modelllauf erzeugt sie ohne Zusatzanfrage.
+  Strukturierte Rückfragen verwenden ausgewählte oder ausdrücklich empfohlene
+  Einzeloptionen. Bestehende Werkzeugfreigaben bleiben unverändert.
+- Zusätzliche Prüfungen für Chat-/Zweigwechsel, IME, Shift+Tab, Entwurfsschutz,
+  Speicherung, Neuladen und Rückgängig. Für das nächste grössere Update vorbereitet.
+
 ## 2026-11-13 — Frühere Diktiervorschau und sichtbarer Mikrofonpegel
 
 - Die Vorschau beginnt mit einer frühen Momentaufnahme und überarbeitet fortlaufend

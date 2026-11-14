@@ -372,6 +372,13 @@ function quoteAssertionResponses({ messages, text }) {
 }
 
 function replyResponses(text) {
+  if (text.includes('E2E_COMPOSER_REPLY_DRAFT')) {
+    return {
+      responses: [
+        'Soll ich mit AarPower AG beginnen?\n<naechste_schritte>\nANTWORT: Ja, beginne bitte mit AarPower AG.\n</naechste_schritte>',
+      ],
+    };
+  }
   if (text.includes(MARKDOWN_REPLY_MARKER)) {
     return {
       responses: [

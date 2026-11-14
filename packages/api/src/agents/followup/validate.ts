@@ -68,6 +68,7 @@ const CONTROL = /[\u0000-\u001f\u007f]/;
 const BULLET = /^(?:[-*•–]\s*|\d{1,2}[.)]\s+)/;
 const LEADING_QUOTES = /^[«»"„“”'‹›]+/;
 const TRAILING_QUOTES = /[«»"„“”'‹›]+$/;
+const REPLY_PREFIX = /^ANTWORT:\s*/i;
 const ELLIPSIS = /\s*(?:…|\.{3})$/;
 
 /** Text for comparisons: lower case, single spaces, no punctuation at the edges. */
@@ -139,10 +140,16 @@ function cleanLine(raw: string): { text: string; needsInput: boolean } | null {
  */
 export function validateNextSteps(block: string, request = ''): TNextStep[] {
   const steps: TNextStep[] = [];
+  let reply: TNextStep | undefined;
   const seen = new Set<string>();
   for (const raw of block.split('\n')) {
-    const line = cleanLine(raw);
+    const isReply = REPLY_PREFIX.test(raw.trim());
+    const line = cleanLine(isReply ? raw.trim().replace(REPLY_PREFIX, '') : raw);
     if (!line || rejectReason(line.text, request) != null) {
+      continue;
+    }
+    if (isReply) {
+      reply ??= { ...line, kind: 'reply' };
       continue;
     }
     const key = comparable(line.text);
@@ -155,5 +162,5 @@ export function validateNextSteps(block: string, request = ''): TNextStep[] {
       break;
     }
   }
-  return steps;
+  return reply ? [reply] : steps;
 }

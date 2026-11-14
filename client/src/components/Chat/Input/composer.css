@@ -63,3 +63,23 @@
 .chat-premium-composer .artifact-options-toggle {
   border-left: 1px solid var(--border-light);
 }
+
+.chat-premium-composer .reply-suggestion {
+  grid-area: 1 / 1;
+  pointer-events: none;
+  align-self: start;
+  z-index: 1;
+  padding: 13px 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.65;
+  letter-spacing: -0.01em;
+}
+@media (min-width: 768px) {
+  .chat-premium-composer .reply-suggestion {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+}
