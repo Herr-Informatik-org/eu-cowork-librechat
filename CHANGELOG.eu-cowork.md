@@ -1,5 +1,13 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-14 — Verwaltetes Outlook-Leseprofil für den CWV02-Piloten
+
+- Persönliche Anmeldung ausschliesslich im vorhandenen MCP-Menü; keine zusätzliche Verbindungsseite.
+- Eigene und freigegebene Postfächer und Kalender mit delegierten Leserechten; keine Versand-, Schreib- oder Verzeichniswerkzeuge.
+- Native Admin-Einrichtung mit separater Entra-App, verschlüsselter Registrierungsdatei und persönlicher Kontobindung über signierten ID-Token, Nonce und Graph-Profil.
+- Frische Freigabe-, Besitzer-, App- und Generationsprüfung sowie verbindliches Audit vor jedem Abruf. Öffentliche Chatfreigaben bleiben im Pilot gesperrt.
+- Standardmässig ausgeschaltet; der gesonderte CWV02-Release schaltet nur Samuel Amsler AG zur Einrichtung frei.
+
 ## 2026-11-13 — Frühere Diktiervorschau und sichtbarer Mikrofonpegel
 
 - Die Vorschau beginnt mit einer frühen Momentaufnahme und überarbeitet fortlaufend

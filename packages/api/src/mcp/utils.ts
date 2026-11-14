@@ -310,6 +310,8 @@ export function hasRuntimeBodyPlaceholders(config: UserScopedConnectionConfig): 
     return false;
   }
 
+  if (typeof config.url === 'string' && /^http:\/\/ms365-office-mcp:3000\/mcp$/.test(config.url))
+    return true;
   return placeholderBearingFields(config).some((value) =>
     hasPlaceholder(value, RUNTIME_BODY_PLACEHOLDER_PATTERN),
   );
@@ -354,6 +356,8 @@ export function requiresEphemeralUserConnection(config: UserScopedConnectionConf
     return false;
   }
 
+  if (typeof config.url === 'string' && /^http:\/\/ms365-office-mcp:3000\/mcp$/.test(config.url))
+    return true;
   return placeholderBearingFields(config).some((value) =>
     hasPlaceholder(value, RUNTIME_BODY_PLACEHOLDER_PATTERN),
   );

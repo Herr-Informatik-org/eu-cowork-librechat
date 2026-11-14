@@ -1,3 +1,5 @@
+import { beforeOutlookRead, managedOutlookConfig, outlookAudit } from '~/outlook/runtime';
+import { isManagedOutlook, OUTLOOK_HOST, assertOutlookArguments } from '~/outlook/policy';
 import pick from 'lodash/pick';
 import { logger } from '@librechat/data-schemas';
 import { Permissions, PermissionTypes } from 'librechat-data-provider';
@@ -85,11 +87,26 @@ export class MCPManager extends UserConnectionManager {
     } & Omit<t.OAuthConnectionOptions, 'useOAuth' | 'user' | 'flowManager'>,
   ): Promise<MCPConnection> {
     const userId = args.user?.id;
+    const managed = isManagedOutlook(args.serverName)
+      ? await managedOutlookConfig(userId)
+      : undefined;
+    if (isManagedOutlook(args.serverName) && !managed)
+      throw new Error('Die Outlook-Verbindung ist nicht freigeschaltet.');
     const effectiveConfig =
-      args.serverConfig ??
+      (isManagedOutlook(args.serverName) ? managed : args.serverConfig) ??
       (userId
         ? await MCPServersRegistry.getInstance().getServerConfig(args.serverName, userId)
         : undefined);
+
+    if (
+      effectiveConfig &&
+      'url' in effectiveConfig &&
+      effectiveConfig.url &&
+      new RegExp(`^https?://${OUTLOOK_HOST}(?::[0-9]+)?(?:/|$)`, 'i').test(effectiveConfig.url) &&
+      !isManagedOutlook(args.serverName)
+    ) {
+      throw new Error('Bitte den verwalteten Outlook-Connector verwenden.');
+    }
 
     if (effectiveConfig && userId && requiresUserScopedConnection(effectiveConfig)) {
       return this.getUserConnection({
@@ -509,6 +526,11 @@ Please follow these instructions when using tools from the respective MCP server
         );
       }
 
+      if (isManagedOutlook(serverName)) {
+        if (!userId) throw new Error('Bitte persönlich bei Kisuno anmelden.');
+        assertOutlookArguments(toolArguments);
+        await beforeOutlookRead(userId, toolName);
+      }
       connection.setRequestHeaders(resolvedHeaders);
 
       const result = await connection.client.request(
@@ -526,6 +548,8 @@ Please follow these instructions when using tools from the respective MCP server
           ...options,
         },
       );
+      if (isManagedOutlook(serverName) && userId)
+        await outlookAudit(userId, `read.${toolName}`, result.isError ? 'failure' : 'success');
       const hasPersistentUserConnections =
         !!userId && (this.userConnections.get(userId)?.size ?? 0) > 0;
       if (!ephemeralConnection && hasPersistentUserConnections) {

@@ -1,3 +1,10 @@
+import { managedOutlookConfig } from '~/outlook/runtime';
+import {
+  isManagedOutlook,
+  outlookServerName,
+  outlookAvailable,
+  OUTLOOK_HOST,
+} from '~/outlook/policy';
 import { Keyv } from 'keyv';
 import { createHash } from 'crypto';
 import { logger } from '@librechat/data-schemas';
@@ -250,6 +257,9 @@ export class MCPServersRegistry {
         );
       }
     }
+    // Exempt only this tenant-local first-party endpoint; keep general SSRF protection.
+    if (outlookAvailable())
+      allowedAddresses = [...(allowedAddresses ?? []), `${OUTLOOK_HOST}:3000`];
     return {
       allowedDomains,
       allowedAddresses,
@@ -277,6 +287,7 @@ export class MCPServersRegistry {
     userId?: string,
     configServers?: Record<string, t.ParsedServerConfig>,
   ): Promise<t.ParsedServerConfig | undefined> {
+    if (isManagedOutlook(serverName)) return managedOutlookConfig(userId);
     const candidate = configServers?.[serverName];
 
     const cacheKey = this.getReadThroughCacheKey(serverName, userId);
@@ -322,7 +333,11 @@ export class MCPServersRegistry {
     role?: string,
   ): Promise<Record<string, t.ParsedServerConfig>> {
     if (configServers == null || !Object.keys(configServers).length) {
-      return filterAccessibleMCPServers(await this.getBaseServerConfigs(userId, role), userId);
+      const base = { ...(await this.getBaseServerConfigs(userId, role)) };
+      delete base[outlookServerName()];
+      const outlook = await managedOutlookConfig(userId);
+      if (outlook) base[outlookServerName()] = outlook;
+      return filterAccessibleMCPServers(base, userId);
     }
     const base = await this.getBaseServerConfigs(userId, role);
     const result: Record<string, t.ParsedServerConfig> = { ...base };
@@ -335,6 +350,9 @@ export class MCPServersRegistry {
       const baseSource = result[name]?.source;
       result[name] = baseSource ? { ...override, source: baseSource } : override;
     }
+    delete result[outlookServerName()];
+    const outlook = await managedOutlookConfig(userId);
+    if (outlook) result[outlookServerName()] = outlook;
     return filterAccessibleMCPServers(result, userId);
   }
 

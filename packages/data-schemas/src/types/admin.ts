@@ -69,6 +69,7 @@ export const AUDIT_ACTIONS = [
   'grant.assigned',
   'grant.removed',
   'mail_assistant.operation',
+  'mcp.outlook.operation',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -77,6 +78,7 @@ export const AUDIT_ACTION_CATEGORY: Record<AuditAction, AuditCategory> = {
   'grant.assigned': 'grant',
   'grant.removed': 'grant',
   'mail_assistant.operation': 'tool_call',
+  'mcp.outlook.operation': 'mcp',
 };
 
 /** Result of the audited operation. Kept first-class instead of being encoded

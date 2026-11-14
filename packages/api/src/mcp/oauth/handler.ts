@@ -1,3 +1,5 @@
+import { bindOutlookLogin } from '~/outlook/runtime';
+import { isManagedOutlook, assertOutlookScopes } from '~/outlook/policy';
 import { randomBytes } from 'crypto';
 import { logger } from '@librechat/data-schemas';
 import { OAuthMetadataSchema } from '@modelcontextprotocol/sdk/shared/auth.js';
@@ -923,6 +925,7 @@ export class MCPOAuthHandler {
 
         /** Add cryptographic state parameter to the authorization URL */
         authorizationUrl.searchParams.set('state', state);
+        if (isManagedOutlook(serverName)) authorizationUrl.searchParams.set('nonce', state);
         logger.debug(`[MCPOAuth] Added state parameter to authorization URL`);
 
         if (resourceMode === 'mcp' && resourceMetadata?.resource) {
@@ -1269,6 +1272,15 @@ export class MCPOAuthHandler {
         ),
       });
 
+      if (isManagedOutlook(metadata.serverName)) {
+        await bindOutlookLogin(
+          metadata.userId,
+          tokens,
+          metadata.state,
+          metadata.clientInfo.client_id,
+        );
+      }
+
       logger.debug('[MCPOAuth] Token exchange successful', {
         flowId,
         has_access_token: !!tokens.access_token,
@@ -1564,6 +1576,8 @@ export class MCPOAuthHandler {
     serverName: string,
     source: string,
   ): MCPOAuthTokens {
+    if (isManagedOutlook(serverName))
+      assertOutlookScopes(typeof tokens.scope === 'string' ? tokens.scope : undefined);
     const hasNewRefreshToken = !!tokens.refresh_token;
 
     logger.debug(`[MCPOAuth] Token refresh response (${source})`, {
