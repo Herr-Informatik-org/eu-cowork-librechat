@@ -4,7 +4,7 @@ import express from 'express';
 import request from 'supertest';
 import { lookup } from 'node:dns/promises';
 import type { NotebookChatDependencies } from './chat';
-import { createNotebookChatRouter } from './chat';
+import { createNotebookChatAccessRouter, createNotebookChatRouter } from './chat';
 import { NotebookError, notebookRequest } from './client';
 
 const rpc = jest.mocked(notebookRequest);
@@ -26,6 +26,7 @@ function app(overrides: Partial<NotebookChatDependencies> = {}) {
   const server = express();
   server.use(express.json());
   server.use('/internal/notebooks-mcp', createNotebookChatRouter(deps));
+  server.use('/internal/_eucowork/access', createNotebookChatAccessRouter(deps));
   return { server, deps };
 }
 const call = (args: object, user = person) => ({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'wissensraum_suchen', arguments: args } });
@@ -107,4 +108,18 @@ test('service errors become a tool message, not a crash', async () => {
   const response = await post(server, call({ frage: 'Kasse' }));
   expect(response.body.result.isError).toBe(true);
   expect(response.body.result.content[0].text).toContain('nicht erreichbar');
+});
+
+test('the chat learns per person whether the server may be shown', async () => {
+  const { server } = app();
+  const ask = (user?: string) => {
+    const pending = request(server).get('/internal/_eucowork/access');
+    return user ? pending.set('X-EUCowork-User-Id', user) : pending;
+  };
+  expect((await ask(person)).body).toEqual({ allowed: true });
+  expect((await ask()).body).toEqual({ allowed: false });
+  const denied = app({ canUse: jest.fn(async () => false) });
+  expect((await request(denied.server).get('/internal/_eucowork/access').set('X-EUCowork-User-Id', person)).body).toEqual({ allowed: false });
+  resolve.mockResolvedValue([{ address: '172.28.0.14', family: 4 }] as never);
+  expect((await ask(person)).status).toBe(403);
 });

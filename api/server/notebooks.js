@@ -47,6 +47,7 @@ async function start() {
     next();
   },express.json({limit:'128kb'}),require('./routes/accessPermissions'));
   app.use('/internal/notebooks-mcp', express.json({ limit: '256kb' }), require('@librechat/api').createNotebookChatRouter(notebooks.chatDependencies));
+  app.use('/internal/_eucowork/access', require('@librechat/api').createNotebookChatAccessRouter(notebooks.chatDependencies));
   app.use('/api/notebooks', notebooks);
   app.use('/notebooks-assets', express.static(config.paths.dist, { immutable: true, maxAge: '1y', fallthrough: false }));
   app.get('/wissensraeume', (_req, res) => {

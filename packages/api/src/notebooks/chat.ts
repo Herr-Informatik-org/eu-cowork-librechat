@@ -85,6 +85,29 @@ function format(room: Room, evidence: Evidence[], sources: SourceStatus[], notic
   return lines.join('\n');
 }
 
+/**
+ * The chat asks every server that receives its identity header whether a person may see it.
+ * Without this answer the chat hides the server from everyone.
+ */
+export function createNotebookChatAccessRouter(deps: NotebookChatDependencies): Router {
+  const router = Router();
+  router.get('/', (req, res) => {
+    void (async () => {
+      res.set('Cache-Control', 'no-store, private');
+      if (!notebooksEnabled() || process.env.NOTEBOOKS_CHAT_ENABLED === 'false') {
+        return void res.sendStatus(404);
+      }
+      if (!(await fromChat(req))) return void res.sendStatus(403);
+      const who = userId.safeParse(req.get('x-eucowork-user-id'));
+      const user = who.success ? await deps.getUserById(who.data) : null;
+      if (!user) return void res.json({ allowed: false });
+      const account = Object.assign(user, { id: who.data! }) as IUser & { id: string };
+      res.json({ allowed: await deps.canUse(account) });
+    })().catch(() => res.sendStatus(503));
+  });
+  return router;
+}
+
 /** Minimal MCP server over streamable HTTP with JSON answers: one read-only tool. */
 export function createNotebookChatRouter(deps: NotebookChatDependencies): Router {
   const router = Router();
