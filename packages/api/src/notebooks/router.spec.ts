@@ -110,3 +110,11 @@ test('folder rules are an administrator operation with a strict body',async () =
   expect(rpc.mock.calls[rpc.mock.calls.length-1]?.[4]).toEqual({path:'Administration',dataClass:'offen',excluded:false});
   expect((await request(admin.app).get(`/api/notebooks/admin/sources/${source}/folders`)).status).toBe(200);
 });
+test('the file list forwards only known filters, validated',async () => {
+  const {app}=setup('ADMIN',15); rpc.mockResolvedValue({documents:[]});
+  await request(app).get(`/api/notebooks/rooms/${roomId}/documents?status=failed&folder=${encodeURIComponent('Administration/04. Personal')}&permissions=15`);
+  expect(rpc.mock.calls[0][1]).toBe(`/rooms/${roomId}/documents?status=failed&folder=Administration%2F04.+Personal`);
+  expect((await request(app).get(`/api/notebooks/rooms/${roomId}/documents?status=alles`)).status).toBe(400);
+  expect((await request(app).get(`/api/notebooks/rooms/${roomId}/documents?folder=${encodeURIComponent('a\\b')}`)).status).toBe(400);
+  expect(rpc).toHaveBeenCalledTimes(1);
+});

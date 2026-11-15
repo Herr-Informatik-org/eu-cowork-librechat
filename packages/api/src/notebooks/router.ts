@@ -12,6 +12,17 @@ import { notebookMicrosoftCookie, notebookMicrosoftCookieOptions } from './micro
 type NotebookRequest = ServerRequest & { params: Record<string, string> };
 const id = z.string().regex(/^[a-f0-9]{24}$/);
 const sourceId = z.string().uuid();
+const documentQuery = z.object({
+  after: sourceId.optional(),
+  status: z.enum(['ready', 'running', 'waiting', 'failed', 'unsupported', 'blocked']).optional(),
+  folder: z.string().min(1).max(1024).regex(/^[^\u0000-\u001f\\:]+$/).optional(),
+});
+/** Paging and the optional indexing-state and folder filters of a room's file list. */
+function documentFilter(query: ServerRequest['query']): string {
+  const input = documentQuery.parse({ after: query.after, status: query.status, folder: query.folder });
+  const search = new URLSearchParams(Object.entries(input).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+  return search.size ? '?'+search.toString() : '';
+}
 const externalIdentity=z.string().regex(/^([0-9a-fA-F-]{36}|S-1-[0-9-]{3,180})$/);
 const zone = z.enum(['lokal', 'schweiz', 'europa', 'global']);
 const dataClass = z.enum(['gesperrt','lokal','schweiz','europa','offen']);
@@ -127,7 +138,7 @@ export function createNotebooksRouter(deps: NotebookDependencies): Router {
   for (const suffix of ['documents', 'history','sources'] as const) {
     router.get('/rooms/:id/'+suffix, handle(async (req, res) => {
       const roomId = id.parse(req.params.id);
-      res.json(await notebookRequest(await actor(req, roomId), `/rooms/${roomId}/${suffix}`+(suffix==='documents' && req.query.after ? '?after='+sourceId.parse(req.query.after) : ''), 'GET', json));
+      res.json(await notebookRequest(await actor(req, roomId), `/rooms/${roomId}/${suffix}`+(suffix==='documents' ? documentFilter(req.query) : ''), 'GET', json));
     }));
   }
   router.post('/rooms/:id/tickets/:ticket/access', handle(async (req, res) => {
