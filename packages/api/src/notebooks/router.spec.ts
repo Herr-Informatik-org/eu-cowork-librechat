@@ -97,6 +97,18 @@ test('personal Microsoft link keeps the browser binding out of the response body
   expect(cookie).toContain('__Host-kisuno-notebook-microsoft='+binding);
   expect(cookie).toMatch(/HttpOnly/i);expect(cookie).toMatch(/Secure/i);expect(cookie).toMatch(/SameSite=Lax/i);expect(cookie).toContain('Path=/');
 });
+test('queueing the failed files of a folder again is an administrator operation with a strict body',async () => {
+  const source='11111111-1111-4111-8111-111111111111';
+  const user=setup('USER',1); rpc.mockResolvedValue({queued:3});
+  expect((await request(user.app).post(`/api/notebooks/admin/sources/${source}/retry-failed`).send({path:'Administration'})).status).toBe(403);
+  const admin=setup('ADMIN',1);
+  expect((await request(admin.app).post(`/api/notebooks/admin/sources/${source}/retry-failed`).send({})).status).toBe(400);
+  expect((await request(admin.app).post(`/api/notebooks/admin/sources/${source}/retry-failed`).send({path:'Administration',state:'ready'})).status).toBe(400);
+  const queued=await request(admin.app).post(`/api/notebooks/admin/sources/${source}/retry-failed`).send({path:' Administration/Kasse '});
+  expect(queued.status).toBe(200);
+  expect(rpc.mock.calls[rpc.mock.calls.length-1]?.slice(1,2)).toEqual([`/admin/sources/${source}/retry-failed`]);
+  expect(rpc.mock.calls[rpc.mock.calls.length-1]?.[4]).toEqual({path:'Administration/Kasse'});
+});
 test('folder rules are an administrator operation with a strict body',async () => {
   const source='11111111-1111-4111-8111-111111111111';
   const user=setup('USER',1); rpc.mockResolvedValue({saved:true});

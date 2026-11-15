@@ -278,8 +278,8 @@ export function createNotebooksRouter(deps: NotebookDependencies): Router {
   }));
   router.post('/admin/sources/:sourceId/:operation', handle(async (req, res) => {
     const source = sourceId.parse(req.params.sourceId);
-    const operation = z.enum(['probe','pause','acceptance','discover','library','setup-complete','pair','agent-approve','microsoft','folders']).parse(req.params.operation);
-    const body = operation === 'acceptance' ? json.parse(req.body) : operation === 'folders' ? folderRule.parse(req.body) : operation === 'library' ? z.object({ driveId: z.string().min(1).max(256),folderPath:z.string().min(1).max(1024) }).strict().parse(req.body) : operation==='setup-complete' ? z.object({tenantId:sourceId,clientId:sourceId}).strict().parse(req.body) : operation==='microsoft' ? z.object({roomId:id}).strict().parse(req.body) : operation==='agent-approve' ? z.object({agentId:sourceId,fingerprint:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(req.body) : {};
+    const operation = z.enum(['probe','pause','acceptance','discover','library','setup-complete','pair','agent-approve','microsoft','folders','retry-failed']).parse(req.params.operation);
+    const body = operation === 'acceptance' ? json.parse(req.body) : operation === 'folders' ? folderRule.parse(req.body) : operation === 'retry-failed' ? z.object({ path: z.string().trim().min(1).max(1024) }).strict().parse(req.body) : operation === 'library' ? z.object({ driveId: z.string().min(1).max(256),folderPath:z.string().min(1).max(1024) }).strict().parse(req.body) : operation==='setup-complete' ? z.object({tenantId:sourceId,clientId:sourceId}).strict().parse(req.body) : operation==='microsoft' ? z.object({roomId:id}).strict().parse(req.body) : operation==='agent-approve' ? z.object({agentId:sourceId,fingerprint:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(req.body) : {};
     res.json(await notebookRequest(await actor(req,operation==='microsoft' ? (body as {roomId:string}).roomId : ''), `/admin/sources/${source}/${operation}`, 'POST', json, body));
   }));
   router.post('/admin/rooms/:id/sources', handle(async (req, res) => {
