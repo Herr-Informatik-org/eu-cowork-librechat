@@ -1,17 +1,17 @@
 import { mailPreviewLink, normalizeMailTrustedOrigins } from './mailLinks';
 
 const target =
-  'https://erp.rzcloud.ch/mail/view?model=sale.order&res_id=401&access_token=example#inbox';
+  'https://erp.example.test/mail/view?model=sale.order&res_id=401&access_token=example#inbox';
 const wrapped = (value: string) =>
   `https://che01.safelinks.protection.outlook.com/?url=${encodeURIComponent(value)}&data=opaque&sdata=opaque&reserved=0`;
 
 describe('mail preview ERP link boundary', () => {
   test.each([
     target,
-    'https://erp.rzcloud.ch',
-    'https://erp.rzcloud.ch/odoo/action-778/22/tasks',
-    'https://erp.rzcloud.ch/my/subscriptions/401?access_token=example',
-    'https://ERP.RZCLOUD.CH/web#id=401&model=sale.order',
+    'https://erp.example.test',
+    'https://erp.example.test/odoo/action-778/22/tasks',
+    'https://erp.example.test/my/subscriptions/401?access_token=example',
+    'https://ERP.EXAMPLE.TEST/web#id=401&model=sale.order',
   ])('preserves a direct ERP URL byte-for-byte: %s', (href) => {
     expect(mailPreviewLink(href)).toEqual({
       href,
@@ -30,38 +30,38 @@ describe('mail preview ERP link boundary', () => {
     });
   });
   test.each([
-    'http://erp.rzcloud.ch/a',
-    '//erp.rzcloud.ch/a',
+    'http://erp.example.test/a',
+    '//erp.example.test/a',
     '/mail/view?res_id=1',
     'javascript:alert(1)',
     'data:text/html,anything',
     'https://erp.odoo.ch/a',
-    'https://erp.rzcloud.ch.evil.test/a',
-    'https://evil.erp.rzcloud.ch/a',
-    'https://erp.rzcloud.ch./a',
-    'https://erp.rzcloud.ch:443/a',
-    'https://erp.rzcloud.ch:8443/a',
-    'https://erp.rzcloud.ch@evil.test/a',
-    'https://person@erp.rzcloud.ch/a',
-    'https://erp%2erzcloud.ch/a',
-    'https://erp.rzcloud.ch\\@evil.test/a',
-    'https://erp.rzcloud.ch/%5cevil',
-    ' https://erp.rzcloud.ch/a',
-    'https://erp.rzcloud.ch/a\n',
-    'https://erp.rzcloud.ch/%0a',
-    'https://erp.rzcloud.ch/%ZZ',
-    'https://erp.rzcloud.ch/\u202eevil',
-    'https://erp.rzcloud.ch/r',
-    'https://erp.rzcloud.ch/r/any-code',
-    'https://erp.rzcloud.ch/%72%2fany-code',
-    'https://erp.rzcloud.ch/%2572%252fany-code',
-    'https://erp.rzcloud.ch/a/%2e%2e/r/any-code',
-    'https://erp.rzcloud.ch//r/any-code',
-    'https://erp.rzcloud.ch/web/login?redirect=https%3A%2F%2Fevil.test',
-    'https://erp.rzcloud.ch/odoo?redirect=%2Fr%2Fevil',
-    'https://erp.rzcloud.ch/web?redirect_hostname=evil.test',
-    'https://erp.rzcloud.ch/web?Redirect_Url=evil',
-    'https://erp.rzcloud.ch/' + 'x'.repeat(16_384),
+    'https://erp.example.test.evil.test/a',
+    'https://evil.erp.example.test/a',
+    'https://erp.example.test./a',
+    'https://erp.example.test:443/a',
+    'https://erp.example.test:8443/a',
+    'https://erp.example.test@evil.test/a',
+    'https://person@erp.example.test/a',
+    'https://erp%2eexample.test/a',
+    'https://erp.example.test\\@evil.test/a',
+    'https://erp.example.test/%5cevil',
+    ' https://erp.example.test/a',
+    'https://erp.example.test/a\n',
+    'https://erp.example.test/%0a',
+    'https://erp.example.test/%ZZ',
+    'https://erp.example.test/\u202eevil',
+    'https://erp.example.test/r',
+    'https://erp.example.test/r/any-code',
+    'https://erp.example.test/%72%2fany-code',
+    'https://erp.example.test/%2572%252fany-code',
+    'https://erp.example.test/a/%2e%2e/r/any-code',
+    'https://erp.example.test//r/any-code',
+    'https://erp.example.test/web/login?redirect=https%3A%2F%2Fevil.test',
+    'https://erp.example.test/odoo?redirect=%2Fr%2Fevil',
+    'https://erp.example.test/web?redirect_hostname=evil.test',
+    'https://erp.example.test/web?Redirect_Url=evil',
+    'https://erp.example.test/' + 'x'.repeat(16_384),
     wrapped('https://evil.test/'),
     wrapped(wrapped(target)),
     wrapped(encodeURIComponent(target)),
@@ -88,7 +88,7 @@ describe('known Odoo wrapper and administrator target policy', () => {
   test.each([false, true])(
     'retains the original wrapper and exposes the inspected target: %s',
     (safeLinks) => {
-      const destination = 'https://erp.rzcloud.ch/mail/view?model=account.move&res_id=42';
+      const destination = 'https://erp.example.test/mail/view?model=account.move&res_id=42';
       const mobile = mobileWrapped(destination);
       const href = safeLinks ? wrapped(mobile) : mobile;
       expect(mailPreviewLink(href)).toEqual({
@@ -107,8 +107,8 @@ describe('known Odoo wrapper and administrator target policy', () => {
     expect(mailPreviewLink(wrapped(mobileWrapped(destination)), origins)).toMatchObject({
       destination,
     });
-    expect(mailPreviewLink('https://erp.rzcloud.ch/odoo/account.move/42', origins)).toBeUndefined();
-    expect(mailPreviewLink('https://erp.rzcloud.ch/odoo/account.move/42')).toBeDefined();
+    expect(mailPreviewLink('https://erp.example.test/odoo/account.move/42', origins)).toBeUndefined();
+    expect(mailPreviewLink('https://erp.example.test/odoo/account.move/42')).toBeDefined();
     expect(mailPreviewLink(destination, [])).toBeUndefined();
     expect(normalizeMailTrustedOrigins([...origins, 'https://portal.customer.example'])).toEqual([
       'https://portal.customer.example',
@@ -147,9 +147,9 @@ describe('known Odoo wrapper and administrator target policy', () => {
 
   test.each([
     mobileWrapped('https://evil.test/'),
-    mobileWrapped('https://erp.rzcloud.ch/r/code'),
-    mobileWrapped('https://erp.rzcloud.ch/web/login?redirect=https%3A%2F%2Fevil.test'),
-    mobileWrapped('https://erp.rzcloud.ch:443/'),
+    mobileWrapped('https://erp.example.test/r/code'),
+    mobileWrapped('https://erp.example.test/web/login?redirect=https%3A%2F%2Fevil.test'),
+    mobileWrapped('https://erp.example.test:443/'),
     mobileWrapped(target).replace('&afl=', '&afl=https%3A%2F%2Fevil.test&other='),
     mobileWrapped(target).replace('&ifl=', '&ifl=https%3A%2F%2Fevil.test&other='),
     mobileWrapped(target).replace('com.odoo.mobile', 'evil.app'),
@@ -176,7 +176,7 @@ describe('known Odoo wrapper and administrator target policy', () => {
   test('does not accept different legitimate targets across mobile fallbacks', () => {
     const href = mobileWrapped(target).replace(
       '&afl=' + encodeURIComponent(target),
-      '&afl=' + encodeURIComponent('https://erp.rzcloud.ch/odoo/account.move/12'),
+      '&afl=' + encodeURIComponent('https://erp.example.test/odoo/account.move/12'),
     );
     expect(mailPreviewLink(href)).toBeUndefined();
     expect(mailPreviewLink(wrapped(href))).toBeUndefined();

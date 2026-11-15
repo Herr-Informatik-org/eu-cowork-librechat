@@ -240,7 +240,7 @@ describe('OPS HTTP boundary', () => {
     const { app, fetcher } = setup();
     const response = await request(app)
       .post('/v1/chat/completions')
-      .set('Origin', 'https://ops.rzcloud.ch')
+      .set('Origin', 'https://ops.example.test')
       .send(payload);
     expect(response.status).toBe(403);
     expect(response.headers['cache-control']).toBe('no-store');

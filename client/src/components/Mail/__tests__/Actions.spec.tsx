@@ -265,7 +265,7 @@ test.each([
   'javascript:alert(1)',
   'https://outlook.office.com.evil.test/mail/x',
   'https://attacker@outlook.office.com/mail/x',
-  'https://erp.rzcloud.ch.evil.test/web#id=1',
+  'https://erp.example.test.evil.test/web#id=1',
   'http://outlook.office.com/mail/x',
 ])('rejects unsafe external task/draft link %s', (url) => {
   expect(safeOutlookDraftUrl(url)).toBeUndefined();

@@ -5,6 +5,8 @@ import { useOpsPersonal } from '~/data-provider/OpsPersonal';
 import useAuthRedirect from '~/routes/useAuthRedirect';
 import { useLocalize } from '~/hooks';
 
+const opsOrigin = import.meta.env.VITE_OPS_ORIGIN ?? 'https://ops.example.test';
+
 export default function OpsPersonalConnect() {
   const localize = useLocalize();
   const { isAuthenticated } = useAuthRedirect();
@@ -33,7 +35,7 @@ export default function OpsPersonalConnect() {
       ) ||
       input.response_type !== 'code' ||
       input.client_id !== 'ops' ||
-      input.redirect_uri !== 'https://ops.rzcloud.ch/functions/v1/kisuno-personal/callback' ||
+      input.redirect_uri !== `${opsOrigin}/functions/v1/kisuno-personal/callback` ||
       input.code_challenge_method !== 'S256' ||
       !input.state ||
       !input.code_challenge ||
@@ -66,7 +68,7 @@ export default function OpsPersonalConnect() {
   const follow = (target: string) => {
     const url = new URL(target);
     if (
-      url.origin !== 'https://ops.rzcloud.ch' ||
+      url.origin !== opsOrigin ||
       url.pathname !== '/functions/v1/kisuno-personal/callback' ||
       url.username ||
       url.password ||

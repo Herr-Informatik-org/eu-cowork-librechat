@@ -172,7 +172,7 @@ test('an image-loaded preview cannot restore links denied by a refreshed securit
     linksEnabled: true,
     trustedOrigins: [],
     linkCheck: { status: 'disabled', blocked: 0 },
-    html: `<img src="${png}"><a href="https://erp.rzcloud.ch/odoo">ERP</a>`,
+    html: `<img src="${png}"><a href="https://erp.example.test/odoo">ERP</a>`,
   });
   const view = mount();
   const button = screen.getByRole('button', { name: 'com_ui_mail_images_load' });

@@ -2,7 +2,7 @@ export type OpsPersonalScope = 'mail:compose' | 'skills:use' | 'brain:read' | 'm
 export interface OpsAuthorization {
   response_type: 'code';
   client_id: 'ops';
-  redirect_uri: 'https://ops.rzcloud.ch/functions/v1/kisuno-personal/callback';
+  redirect_uri: string;
   state: string;
   code_challenge: string;
   code_challenge_method: 'S256';

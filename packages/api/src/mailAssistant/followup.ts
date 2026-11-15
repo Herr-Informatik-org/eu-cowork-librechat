@@ -107,7 +107,7 @@ const normalizedTopic = (value: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 const taskUrl = (id: number) =>
-  `https://erp.rzcloud.ch/web#id=${id}&model=project.task&view_type=form`;
+  `${process.env.MAIL_ASSISTANT_ERP_ORIGIN ?? 'https://erp.example.test'}/web#id=${id}&model=project.task&view_type=form`;
 
 export interface MailFollowupService {
   settings(owner: string): Promise<{

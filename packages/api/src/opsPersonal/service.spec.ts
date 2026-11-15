@@ -90,7 +90,7 @@ function authorization() {
   const input: OpsAuthorization = {
     response_type: 'code',
     client_id: 'ops',
-    redirect_uri: 'https://ops.rzcloud.ch/functions/v1/kisuno-personal/callback',
+    redirect_uri: 'https://ops.example.test/functions/v1/kisuno-personal/callback',
     state: randomBytes(32).toString('base64url'),
     code_challenge_method: 'S256',
     code_challenge: createHash('sha256').update(verifier).digest('base64url'),
@@ -153,8 +153,8 @@ test('authorization enforces exact redirect, state, identity and S256', () => {
   const { input } = authorization();
   expect(parseOpsAuthorization(input)).toEqual(input);
   for (const delta of [
-    { redirect_uri: 'https://ops.rzcloud.ch/' },
-    { redirect_uri: 'https://ops.rzcloud.ch/evil' },
+    { redirect_uri: 'https://ops.example.test/' },
+    { redirect_uri: 'https://ops.example.test/evil' },
     { code_challenge_method: 'plain' },
     { state: 'short' },
     { ops_user_id: '../owner' },
@@ -175,10 +175,10 @@ test('invalid PKCE, OPS subject and redirect do not consume the code', async () 
   ).rejects.toThrow();
   await expect(service.exchange(g.code, g.verifier, g.input.redirect_uri, OTHER)).rejects.toThrow();
   await expect(
-    service.exchange(g.code, g.verifier, 'https://ops.rzcloud.ch/', OPS),
+    service.exchange(g.code, g.verifier, 'https://ops.example.test/', OPS),
   ).rejects.toThrow();
   await expect(
-    service.exchange(g.code, g.verifier, 'https://ops.rzcloud.ch/elsewhere', OPS),
+    service.exchange(g.code, g.verifier, 'https://ops.example.test/elsewhere', OPS),
   ).rejects.toThrow();
   expect((await g.exchange()).subject).toBe(OWNER);
 });
@@ -314,7 +314,7 @@ test('public token endpoint rejects browsers and extra identity fields', async (
   };
   await request(app())
     .post('/api/ops-personal/token')
-    .set('Origin', 'https://ops.rzcloud.ch')
+    .set('Origin', 'https://ops.example.test')
     .send(body)
     .expect(403);
   await request(app())
@@ -353,7 +353,7 @@ test('session consent requires a bearer session and validates the logged-in owne
     .expect(200);
   const callback = new URL(result.body.redirect_uri);
   expect(callback.origin + callback.pathname).toBe(
-    'https://ops.rzcloud.ch/functions/v1/kisuno-personal/callback',
+    'https://ops.example.test/functions/v1/kisuno-personal/callback',
   );
   expect(callback.searchParams.get('state')).toBe(input.state);
   expect(callback.searchParams.get('code')).toMatch(/^kopsc_/);
@@ -394,8 +394,8 @@ test('OAuth discovery is fixed and absent outside internal CWV01', async () => {
     .get('/.well-known/oauth-authorization-server')
     .expect(200);
   expect(result.body).toMatchObject({
-    issuer: 'https://cowork.herr-informatik.ch',
-    token_endpoint: 'https://cowork.herr-informatik.ch/api/ops-personal/token',
+    issuer: 'https://chat.example.test',
+    token_endpoint: 'https://chat.example.test/api/ops-personal/token',
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: ['none'],
     response_types_supported: ['code'],
@@ -427,7 +427,7 @@ test('OAuth form exchange and connection verification bind issuer, owner and OPS
     .set('X-OPS-User-ID', OPS)
     .expect(200);
   expect(info.body).toMatchObject({
-    issuer: 'https://cowork.herr-informatik.ch',
+    issuer: 'https://chat.example.test',
     subject: OWNER,
     tenant_id: 'cwv01',
     ops_user_id: OPS,
@@ -472,10 +472,10 @@ test('fixed browser origin and cross-site mutation protection are enforced', asy
   await action().set('Origin', 'https://evil.invalid').send(body).expect(403);
   await action().set('Sec-Fetch-Site', 'cross-site').send(body).expect(403);
   const response = await action()
-    .set('Origin', 'https://cowork.herr-informatik.ch')
+    .set('Origin', 'https://chat.example.test')
     .send(body)
     .expect(200);
-  expect(response.body.redirect_uri).toMatch(/^https:\/\/ops\.rzcloud\.ch\//);
+  expect(response.body.redirect_uri).toMatch(/^https:\/\/ops\.example\.test\//);
 });
 test('unverified email, foreign tenant and invalid expiry fail closed', async () => {
   const t = await (await grant()).exchange();

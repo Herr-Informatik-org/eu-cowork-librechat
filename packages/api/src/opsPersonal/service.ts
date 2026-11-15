@@ -13,8 +13,11 @@ import type {
   OpsPersonalTokens,
 } from './types';
 
-export const OPS_PERSONAL_ISSUER = 'https://cowork.herr-informatik.ch';
-export const OPS_PERSONAL_REDIRECT = 'https://ops.rzcloud.ch/functions/v1/kisuno-personal/callback';
+/** Instance addresses; the defaults are placeholders, a deployment sets both. */
+export const OPS_PERSONAL_ISSUER = process.env.OPS_PERSONAL_ISSUER ?? 'https://chat.example.test';
+export const OPS_PERSONAL_REDIRECT =
+  process.env.OPS_PERSONAL_REDIRECT ??
+  'https://ops.example.test/functions/v1/kisuno-personal/callback';
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const SAFE_STATE = /^[A-Za-z0-9_-]{43,128}$/;
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/;

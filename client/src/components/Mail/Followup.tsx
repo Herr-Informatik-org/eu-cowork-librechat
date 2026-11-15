@@ -19,7 +19,7 @@ export function safeOdooTaskUrl(value?: string): string | undefined {
   try {
     const url = new URL(value);
     if (
-      url.origin === 'https://erp.rzcloud.ch' &&
+      url.origin === (import.meta.env.VITE_ERP_ORIGIN ?? 'https://erp.example.test') &&
       !url.username &&
       !url.password &&
       (url.pathname === '/web' || url.pathname.startsWith('/odoo/'))

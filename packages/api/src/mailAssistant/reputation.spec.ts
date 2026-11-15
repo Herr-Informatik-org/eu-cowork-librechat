@@ -59,7 +59,7 @@ describe('local mail-link reputation feed', () => {
   test('performs no request until explicit startup and never requests a user target', async () => {
     const f = fixture();
     expect(f.download).not.toHaveBeenCalled();
-    expect(f.reputation.check('https://erp.rzcloud.ch/private?access_token=never-submit')).toBe(
+    expect(f.reputation.check('https://erp.example.test/private?access_token=never-submit')).toBe(
       'unavailable',
     );
     expect(f.reputation.status()).toMatchObject({
@@ -72,7 +72,7 @@ describe('local mail-link reputation feed', () => {
       'known_threat',
     );
     expect(f.reputation.check('https://sub.phishing1.example/path')).toBe('known_threat');
-    expect(f.reputation.check('https://erp.rzcloud.ch/private?access_token=never-submit')).toBe(
+    expect(f.reputation.check('https://erp.example.test/private?access_token=never-submit')).toBe(
       'not_listed',
     );
     expect(f.reputation.check('https://phishing1.example.evil.test/')).toBe('not_listed');
@@ -119,7 +119,7 @@ describe('local mail-link reputation feed', () => {
   ])('rejects unverifiable, old or future embedded source date: %s', async (modified) => {
     const f = fixture({ body: data('', modified) });
     expect(await f.reputation.refresh()).toMatchObject({ ready: false, reason: 'refresh_failed' });
-    expect(f.reputation.check('https://erp.rzcloud.ch/')).toBe('unavailable');
+    expect(f.reputation.check('https://erp.example.test/')).toBe('unavailable');
   });
 
   test('requires unique date and count metadata before indicator data', async () => {
@@ -147,7 +147,7 @@ describe('local mail-link reputation feed', () => {
     expect(await f.reputation.refresh()).toMatchObject({ ready: true, refreshedAt: initialTime });
     f.setTime(initialTime + MAIL_REPUTATION_MAX_AGE + 1);
     expect(await f.reputation.refresh()).toMatchObject({ ready: false, reason: 'stale' });
-    expect(f.reputation.check('https://erp.rzcloud.ch/')).toBe('unavailable');
+    expect(f.reputation.check('https://erp.example.test/')).toBe('unavailable');
   });
 
   test('rejects source rollback while retaining the existing newer snapshot', async () => {
@@ -252,7 +252,7 @@ describe('local mail-link reputation feed', () => {
       const pending = f.reputation.refresh();
       await jest.advanceTimersByTimeAsync(30_001);
       expect(await pending).toMatchObject({ ready: false, reason: 'refresh_failed' });
-      expect(f.reputation.check('https://erp.rzcloud.ch/')).toBe('unavailable');
+      expect(f.reputation.check('https://erp.example.test/')).toBe('unavailable');
       expect(f.download.mock.calls[0][1]?.signal?.aborted).toBe(true);
       f.download.mockResolvedValue(
         new Response(new Uint8Array(data()), { headers: { 'content-type': 'text/plain' } }),

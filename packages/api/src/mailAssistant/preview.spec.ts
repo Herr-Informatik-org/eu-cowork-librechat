@@ -96,7 +96,7 @@ describe('isolated mail HTML preview', () => {
     expect(init.headers.Prefer).toContain('outlook.body-content-type="html"');
   });
   test('enables only validated ERP anchors through the deployment policy and makes no link request', async () => {
-    const href = 'https://erp.rzcloud.ch/mail/view?model=sale.order&amp;res_id=4';
+    const href = 'https://erp.example.test/mail/view?model=sale.order&amp;res_id=4';
     const { graph, request } = setup(
       `<a href="${href}" target="_top" ping="https://tracker.test" download onclick="alert(1)">Abonnement ansehen</a><a href="https://evil.test">Blocked</a>`,
       true,
@@ -104,7 +104,7 @@ describe('isolated mail HTML preview', () => {
     const result = await graph.preview('mail');
     expect(result.linksEnabled).toBe(true);
     expect(result.html).toContain(
-      'href="https://erp.rzcloud.ch/mail/view?model=sale.order&amp;res_id=4"',
+      'href="https://erp.example.test/mail/view?model=sale.order&amp;res_id=4"',
     );
     expect(result.html).toContain('target="_blank"');
     expect(result.html).toContain('rel="noopener noreferrer"');
@@ -115,7 +115,7 @@ describe('isolated mail HTML preview', () => {
   });
   test('keeps approved ERP links inert without deployment opt-in', async () => {
     const { graph } = setup(
-      '<a href="https://erp.rzcloud.ch/odoo" data-links-enabled="true">ERP</a>',
+      '<a href="https://erp.example.test/odoo" data-links-enabled="true">ERP</a>',
     );
     const result = await graph.preview('mail');
     expect(result.linksEnabled).toBe(false);
@@ -124,9 +124,9 @@ describe('isolated mail HTML preview', () => {
   });
   test('preserves only a valid existing Safe Links wrapper and strips active content with links enabled', () => {
     const href =
-      'https://che01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ferp.rzcloud.ch%2Fmail%2Fview%3Fres_id%3D4&amp;reserved=0';
+      'https://che01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ferp.example.test%2Fmail%2Fview%3Fres_id%3D4&amp;reserved=0';
     const result = sanitizeMailPreview(
-      `<a href="${href}">ERP</a><a href="https://erp.rzcloud.ch/r/code">Redirect</a><script>alert(1)</script><img src="https://erp.rzcloud.ch/pixel"><iframe src="https://erp.rzcloud.ch"></iframe><form action="https://erp.rzcloud.ch"><button>Submit</button></form>`,
+      `<a href="${href}">ERP</a><a href="https://erp.example.test/r/code">Redirect</a><script>alert(1)</script><img src="https://erp.example.test/pixel"><iframe src="https://erp.example.test"></iframe><form action="https://erp.example.test"><button>Submit</button></form>`,
       new Map(),
       true,
     );
@@ -422,11 +422,11 @@ describe('tenant link policy and local reputation in mail previews', () => {
     const policy = checkedPolicy();
     const f = fixture(
       async () => policy,
-      '<a href="https://customer.example/tasks/12">Allowed</a><a href="https://erp.rzcloud.ch/odoo">Not configured</a>',
+      '<a href="https://customer.example/tasks/12">Allowed</a><a href="https://erp.example.test/odoo">Not configured</a>',
     );
     const preview = await f.graph.preview('mail');
     expect(preview.html).toContain('href="https://customer.example/tasks/12"');
-    expect(preview.html).not.toContain('href="https://erp.rzcloud.ch');
+    expect(preview.html).not.toContain('href="https://erp.example.test');
     expect(preview.html).toContain('customer.example in neuem Tab');
     expect(preview).toMatchObject({
       linksEnabled: true,
@@ -443,10 +443,10 @@ describe('tenant link policy and local reputation in mail previews', () => {
     expect(String(f.fetch.mock.calls[0][0])).toMatch(/^https:\/\/graph.microsoft.com\//);
   });
   test('preserves nested Odoo and Safe Links while checking only the final URL locally', async () => {
-    const destination = 'https://erp.rzcloud.ch/mail/view?model=account.move&res_id=12';
+    const destination = 'https://erp.example.test/mail/view?model=account.move&res_id=12';
     const wrapper = `https://redirect-url.email/?link=${encodeURIComponent(destination)}&apn=com.odoo.mobile&afl=${encodeURIComponent(destination)}&ibi=com.odoo.mobile&ifl=${encodeURIComponent(destination)}`;
     const href = `https://che01.safelinks.protection.outlook.com/?url=${encodeURIComponent(wrapper)}&data=opaque&sdata=opaque&reserved=0`;
-    const policy = checkedPolicy(['https://erp.rzcloud.ch']);
+    const policy = checkedPolicy(['https://erp.example.test']);
     const f = fixture(async () => policy, `<a href="${href.replace(/&/g, '&amp;')}">Invoice</a>`);
     expect((await f.graph.preview('mail')).html).toContain(`href="${href.replace(/&/g, '&amp;')}"`);
     expect(policy.check).toHaveBeenCalledWith(destination);
@@ -481,7 +481,7 @@ describe('tenant link policy and local reputation in mail previews', () => {
   test('failed policy read preserves readable content but blocks all links', async () => {
     const f = fixture(async () => {
       throw new Error('private details');
-    }, '<p>Readable</p><a href="https://erp.rzcloud.ch/odoo">Blocked</a>');
+    }, '<p>Readable</p><a href="https://erp.example.test/odoo">Blocked</a>');
     const preview = await f.graph.preview('mail');
     expect(preview.html).toContain('<p>Readable</p>');
     expect(preview.html).not.toMatch(/<a|href=|private details/);

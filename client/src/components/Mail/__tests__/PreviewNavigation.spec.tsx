@@ -14,7 +14,7 @@ import {
 jest.mock('~/hooks', () => ({ useLocalize: () => (key: string) => key }));
 
 const wrapped =
-  'https://che01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ferp.rzcloud.ch%2Fmail%2Fview%3Fres_id%3D4&reserved=0';
+  'https://che01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ferp.example.test%2Fmail%2Fview%3Fres_id%3D4&reserved=0';
 const allowed = [mailPreviewLink(wrapped)!];
 const token = '123456-234567-345678-456789';
 
@@ -22,7 +22,7 @@ function Harness({
   documentToken = token,
   links = allowed,
   enabled = true,
-  trustedOrigins = ['https://erp.rzcloud.ch'],
+  trustedOrigins = ['https://erp.example.test'],
 }: {
   documentToken?: string;
   links?: MailPreviewLink[];
@@ -66,7 +66,7 @@ test('a current opaque frame opens a dialog with the original Safe Links URL onl
   render(<Harness />);
   dispatchLink();
   expect(screen.getByRole('dialog')).toBeInTheDocument();
-  expect(screen.getByText('erp.rzcloud.ch', { selector: 'strong' })).toBeInTheDocument();
+  expect(screen.getByText('erp.example.test', { selector: 'strong' })).toBeInTheDocument();
   expect(screen.getByText('com_ui_mail_link_safelinks')).toBeInTheDocument();
   const link = screen.getByRole('link');
   expect(link).toHaveAttribute('href', wrapped);
@@ -95,7 +95,7 @@ test.each([
 
 test('ignores foreign windows, nonopaque origins and absent message sources', () => {
   render(<Harness />);
-  dispatchLink(undefined, 'https://erp.rzcloud.ch');
+  dispatchLink(undefined, 'https://erp.example.test');
   dispatchLink(undefined, 'null', window);
   dispatchLink(undefined, 'null', null);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -135,7 +135,7 @@ test('mail changes and revoked policies immediately remove the dialog and stale 
 test('removes a changed mapping without treating the old index as a new approval', () => {
   const { rerender } = render(<Harness />);
   dispatchLink();
-  rerender(<Harness links={[mailPreviewLink('https://erp.rzcloud.ch/other')!]} />);
+  rerender(<Harness links={[mailPreviewLink('https://erp.example.test/other')!]} />);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 

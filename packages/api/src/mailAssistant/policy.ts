@@ -26,7 +26,7 @@ export function createMailSecurityPolicy(
 ): MailSecurityPolicyStore {
   const defaults =
     env.MAIL_ASSISTANT_INSTANCE === 'cw01' && env.MAIL_ASSISTANT_ERP_LINKS_ENABLED === 'true'
-      ? ['https://erp.rzcloud.ch']
+      ? [env.MAIL_ASSISTANT_ERP_ORIGIN ?? 'https://erp.example.test']
       : [];
   async function read(): Promise<MailSecurityPolicy> {
     const stored = await collection().findOne({ _id: policyKey });

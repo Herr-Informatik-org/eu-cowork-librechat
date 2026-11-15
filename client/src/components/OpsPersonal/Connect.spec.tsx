@@ -17,7 +17,7 @@ const info = {
   response_type: 'code',
   scope: 'mail:compose skills:use brain:read mail:background',
   client_id: 'ops',
-  redirect_uri: 'https://ops.rzcloud.ch/functions/v1/kisuno-personal/callback',
+  redirect_uri: 'https://ops.example.test/functions/v1/kisuno-personal/callback',
   state: 's'.repeat(43),
   code_challenge: 'c'.repeat(43),
   code_challenge_method: 'S256',
@@ -63,7 +63,7 @@ function setup(consent = true, redirect = info.redirect_uri) {
   );
 }
 beforeEach(() => {
-  approve.mockReset().mockResolvedValue({ redirect_uri: 'https://ops.rzcloud.ch/?code=blocked' });
+  approve.mockReset().mockResolvedValue({ redirect_uri: 'https://ops.example.test/?code=blocked' });
   revoke.mockReset();
 });
 it('requires explicit optional consent and preserves the fixed redirect', async () => {
@@ -89,7 +89,7 @@ it('requires explicit optional consent and preserves the fixed redirect', async 
   );
 });
 it('rejects the former root callback before requesting consent', () => {
-  setup(true, 'https://ops.rzcloud.ch/');
+  setup(true, 'https://ops.example.test/');
   expect(useOpsPersonal).toHaveBeenLastCalledWith(null);
   expect(screen.getByRole('alert')).toHaveTextContent(mockTranslations.com_ui_ops_personal_error);
 });

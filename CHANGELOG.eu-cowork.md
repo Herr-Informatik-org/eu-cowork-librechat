@@ -162,7 +162,7 @@
 ## 2026-10-28 — Gezielte ERP-Links in der Mailvorschau auf CWV01
 
 - Nur mit `MAIL_ASSISTANT_ERP_LINKS_ENABLED=true` auf der freigegebenen CW01-Instanz
-  bleiben HTTPS-Links zu genau `erp.rzcloud.ch` anklickbar. Bestehende Microsoft
+  bleiben HTTPS-Links zu genau `erp.example.test` anklickbar. Bestehende Microsoft
   Safe Links bleiben erhalten, wenn ihr eingebettetes Ziel ebenfalls dieser Host ist.
 - Server und Browser prüfen dieselbe begrenzte Linkregel. Bekannte Weiterleitungswege,
   fremde Hosts, uneindeutige URLs und aktive Mailinhalte bleiben gesperrt. Es findet

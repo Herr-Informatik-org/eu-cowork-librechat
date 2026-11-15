@@ -1139,8 +1139,8 @@ describe('runtime mail link reputation opt-in', () => {
     const linkPolicy = (await configuredPolicy(f))!;
     const policy = await linkPolicy();
     expect(policy.status).toBe('unavailable');
-    expect(policy.trustedOrigins).toEqual(['https://erp.rzcloud.ch']);
-    expect(policy.check('https://erp.rzcloud.ch/')).toBe('unavailable');
+    expect(policy.trustedOrigins).toEqual(['https://erp.example.test']);
+    expect(policy.check('https://erp.example.test/')).toBe('unavailable');
     expect((await linkPolicy()).status).toBe('unavailable');
     expect(request).toHaveBeenCalledTimes(1);
   });

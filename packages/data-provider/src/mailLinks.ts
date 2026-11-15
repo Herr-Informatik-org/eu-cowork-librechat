@@ -1,4 +1,4 @@
-const erpOrigin = 'https://erp.rzcloud.ch';
+const erpOrigin = 'https://erp.example.test';
 const safeLinksHost = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.safelinks\.protection\.outlook\.com$/;
 const odooRedirectHost = 'redirect-url.email';
 const maxUrlLength = 16_384;

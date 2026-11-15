@@ -91,9 +91,9 @@ describe('opaque mail preview frame', () => {
   });
   test('revalidates ERP links and replaces all navigation privileges with fixed new-tab attributes', () => {
     const wrapped =
-      'https://che01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ferp.rzcloud.ch%2Fmail%2Fview%3Fres_id%3D4&reserved=0';
+      'https://che01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ferp.example.test%2Fmail%2Fview%3Fres_id%3D4&reserved=0';
     const output = createMailPreviewDocument(
-      `<a href="https://erp.rzcloud.ch/odoo" target="_top" rel="opener" ping="https://tracker.test" download onclick="alert(1)">ERP</a><a href="${wrapped}">Safe Links</a><a href="https://evil.test">Blocked</a><a href="https://erp.rzcloud.ch/r/code">Redirect</a><a href="javascript:alert(1)">Script</a>`,
+      `<a href="https://erp.example.test/odoo" target="_top" rel="opener" ping="https://tracker.test" download onclick="alert(1)">ERP</a><a href="${wrapped}">Safe Links</a><a href="https://evil.test">Blocked</a><a href="https://erp.example.test/r/code">Redirect</a><a href="javascript:alert(1)">Script</a>`,
       true,
     );
     const doc = parse(output!);
@@ -103,7 +103,7 @@ describe('opaque mail preview frame', () => {
       expect(anchor.getAttribute('target')).toBe('_blank');
       expect(anchor.getAttribute('rel')).toBe('noopener noreferrer');
       expect(anchor.getAttribute('referrerpolicy')).toBe('no-referrer');
-      expect(anchor.getAttribute('title')).toContain('erp.rzcloud.ch');
+      expect(anchor.getAttribute('title')).toContain('erp.example.test');
     }
     expect(anchors[1].getAttribute('href')).toBe(wrapped);
     expect(doc.body.innerHTML).not.toMatch(
@@ -117,7 +117,7 @@ describe('opaque mail preview frame', () => {
         title="ERP Mail"
         text="Fallback"
         preview={{
-          html: '<a href="https://erp.rzcloud.ch/odoo">ERP</a><img src="https://erp.rzcloud.ch/pixel"><script>alert(1)</script><form action="https://erp.rzcloud.ch"><input name="x"></form>',
+          html: '<a href="https://erp.example.test/odoo">ERP</a><img src="https://erp.example.test/pixel"><script>alert(1)</script><form action="https://erp.example.test"><input name="x"></form>',
           blockedImages: 1,
           truncated: false,
           warnings: [],
@@ -129,7 +129,7 @@ describe('opaque mail preview frame', () => {
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
     expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
     const doc = parse(frame.getAttribute('srcdoc')!);
-    expect(doc.body.querySelector('a')?.getAttribute('href')).toBe('https://erp.rzcloud.ch/odoo');
+    expect(doc.body.querySelector('a')?.getAttribute('href')).toBe('https://erp.example.test/odoo');
     expect(doc.body.querySelector('form,input,[src],[onclick]')).toBeNull();
     expect(doc.body.querySelectorAll('script')).toHaveLength(1);
     expect(doc.body.querySelector('script')?.textContent).not.toContain('alert(1)');
@@ -140,7 +140,7 @@ describe('opaque mail preview frame', () => {
   test('mail-supplied attributes cannot enable links without the separate server flag', () => {
     const doc = parse(
       createMailPreviewDocument(
-        '<a href="https://erp.rzcloud.ch/odoo" data-links-enabled="true">ERP</a>',
+        '<a href="https://erp.example.test/odoo" data-links-enabled="true">ERP</a>',
       )!,
     );
     expect(doc.body.querySelector('a,[href],[data-links-enabled]')).toBeNull();
@@ -175,7 +175,7 @@ describe('opaque mail preview frame', () => {
 
 test('enforces exact per-instance origins and explicit deny-all without restoring stripped links', () => {
   const input =
-    '<a href="https://erp.customer.example/task/1">Customer</a><a href="https://erp.rzcloud.ch/odoo">Internal</a><a data-href="https://erp.customer.example/task/2" title="https://erp.customer.example/task/2">Blocked by server</a>';
+    '<a href="https://erp.customer.example/task/1">Customer</a><a href="https://erp.example.test/odoo">Internal</a><a data-href="https://erp.customer.example/task/2" title="https://erp.customer.example/task/2">Blocked by server</a>';
   const custom = parse(
     createMailPreviewDocument(input, true, false, ['https://erp.customer.example'])!,
   );
@@ -194,12 +194,12 @@ test.each(['unavailable', 'disabled'] as const)(
         title="Mail"
         text="Fallback"
         preview={{
-          html: '<a href="https://erp.rzcloud.ch/odoo">ERP</a>',
+          html: '<a href="https://erp.example.test/odoo">ERP</a>',
           blockedImages: 0,
           warnings: [],
           truncated: false,
           linksEnabled: true,
-          trustedOrigins: ['https://erp.rzcloud.ch'],
+          trustedOrigins: ['https://erp.example.test'],
           linkCheck: { status, blocked: 0 },
         }}
       />,
@@ -218,12 +218,12 @@ test('known threat status shows the snapshot time and keeps only hrefs the serve
       title="Mail"
       text="Fallback"
       preview={{
-        html: '<a>Flagged by server</a><a href="https://erp.rzcloud.ch/odoo">Allowed</a>',
+        html: '<a>Flagged by server</a><a href="https://erp.example.test/odoo">Allowed</a>',
         blockedImages: 0,
         warnings: [],
         truncated: false,
         linksEnabled: true,
-        trustedOrigins: ['https://erp.rzcloud.ch'],
+        trustedOrigins: ['https://erp.example.test'],
         linkCheck: {
           status: 'known_threat',
           blocked: 1,
@@ -245,15 +245,15 @@ test('known threat status shows the snapshot time and keeps only hrefs the serve
 test('adds only trusted indexed navigation after sanitization and keeps the frame opaque', () => {
   const links: import('librechat-data-provider').MailPreviewLink[] = [];
   const output = createMailPreviewDocument(
-    '<html data-mail-preview-token="forged"><body><a href="https://erp.rzcloud.ch/odoo" data-mail-link-index="900" onclick="alert(1)">ERP</a><a href="https://evil.test" data-mail-link-index="0">Evil</a><script>parent.postMessage({index:900}, "*")</script></body></html>',
+    '<html data-mail-preview-token="forged"><body><a href="https://erp.example.test/odoo" data-mail-link-index="900" onclick="alert(1)">ERP</a><a href="https://evil.test" data-mail-link-index="0">Evil</a><script>parent.postMessage({index:900}, "*")</script></body></html>',
     true,
     false,
-    ['https://erp.rzcloud.ch'],
+    ['https://erp.example.test'],
     { token: '12-34-56-78', links },
   )!;
   const doc = parse(output);
   expect(links).toHaveLength(1);
-  expect(links[0].href).toBe('https://erp.rzcloud.ch/odoo');
+  expect(links[0].href).toBe('https://erp.example.test/odoo');
   expect(doc.documentElement.dataset.mailPreviewToken).toBe('12-34-56-78');
   expect(doc.querySelectorAll('[data-mail-link-index]')).toHaveLength(1);
   expect(doc.querySelector('[data-mail-link-index]')?.getAttribute('data-mail-link-index')).toBe(

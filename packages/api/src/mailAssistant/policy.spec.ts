@@ -26,7 +26,7 @@ describe('instance mail link security policy', () => {
   const policy = (config = env) => createMailSecurityPolicy(() => collection, config);
 
   test('ERP default is limited to the existing explicit CW01 opt-in', async () => {
-    expect((await policy().read()).trustedOrigins).toEqual(['https://erp.rzcloud.ch']);
+    expect((await policy().read()).trustedOrigins).toEqual(['https://erp.example.test']);
     expect(
       (await policy({ ...env, MAIL_ASSISTANT_INSTANCE: 'cw02' }).read()).trustedOrigins,
     ).toEqual([]);
