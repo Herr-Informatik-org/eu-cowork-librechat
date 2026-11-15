@@ -14,8 +14,8 @@ import type {
 } from './types';
 
 /** Instance addresses; the defaults are placeholders, a deployment sets both. */
-export const OPS_PERSONAL_ISSUER = process.env.OPS_PERSONAL_ISSUER ?? 'https://chat.example.test';
-export const OPS_PERSONAL_REDIRECT =
+export const OPS_PERSONAL_ISSUER: string = process.env.OPS_PERSONAL_ISSUER ?? 'https://chat.example.test';
+export const OPS_PERSONAL_REDIRECT: string =
   process.env.OPS_PERSONAL_REDIRECT ??
   'https://ops.example.test/functions/v1/kisuno-personal/callback';
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
