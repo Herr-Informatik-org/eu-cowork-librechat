@@ -42,7 +42,7 @@ export const documentToolDefinition: LCTool = {
       template_path: {
         type: 'string',
         description:
-          'Registrierter privater Pfad, z.B. skills/amsler/templates/Vorlage.docx. Verwendet Originalkopf, Fusszeile, Seitenlayout und Word-Schriften.',
+          'Registrierter privater Pfad, z.B. skills/kunde/templates/Vorlage.docx. Verwendet Originalkopf, Fusszeile, Seitenlayout und Word-Schriften.',
       },
       include_logo: {
         type: 'boolean',
