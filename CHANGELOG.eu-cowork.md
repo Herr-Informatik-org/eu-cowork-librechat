@@ -1,5 +1,16 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-15 — Einrichtungsrechte nach Outlook-Registrierung bereinigen
+
+- Vor der Erhöhung nur das eigene Profil anfragen und den zuvor bestätigten
+  Berechtigungsstand über Microsofts dokumentierten .default-Ablauf erfassen.
+- Nur zusätzlich benötigte Einrichtungsrechte entfernen; vorhandene Rechte,
+  andere Administratoren, andere Ressourcen und die neue Mail-App erhalten.
+- Erkannte Paralleländerungen und nicht bestätigte Bereinigungen führen zu einer
+  Fehlermeldung. Verschlüsselte Registrierung und Bereinigungsbeleg bleiben erhalten.
+- Echte PowerShell-Ausführung mit isolierten Microsoft-Befehlsattrappen sowie
+  native Outlook- und Admin-Regressionstests prüfen den Ablauf.
+
 ## 2026-11-14 — Verwaltetes Outlook-Leseprofil für den CWV02-Piloten
 
 - Persönliche Anmeldung ausschliesslich im vorhandenen MCP-Menü; keine zusätzliche Verbindungsseite.

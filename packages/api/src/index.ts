@@ -90,3 +90,4 @@ export type * from './types';
 export * from './outlook/policy';
 export * from './outlook/runtime';
 export * from './outlook/admin';
+export { outlookRegistrationScript } from './outlook/registration';
