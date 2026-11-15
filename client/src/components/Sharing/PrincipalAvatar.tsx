@@ -15,8 +15,8 @@ export default function PrincipalAvatar({
   size = 'md',
   className,
 }: PrincipalAvatarProps) {
-  const { avatar, type, name } = principal;
-  const displayName = name || 'Unknown';
+  const { avatar, type, name, email } = principal;
+  const displayName = name || email || 'Unknown';
 
   const sizeClasses = {
     sm: 'h-6 w-6',

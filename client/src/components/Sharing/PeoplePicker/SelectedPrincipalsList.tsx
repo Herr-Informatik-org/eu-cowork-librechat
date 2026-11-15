@@ -27,7 +27,7 @@ export default function SelectedPrincipalsList({
   const isMobile = useMediaQuery('(max-width: 768px)');
 
   const getPrincipalDisplayInfo = (principal: TPrincipal) => {
-    const displayName = principal.name || localize('com_ui_unknown');
+    const displayName = principal.name || principal.email || localize('com_ui_unknown');
     const subtitle = isMobile
       ? `${principal.type} (${principal.source || 'local'})`
       : principal.email || `${principal.type} (${principal.source || 'local'})`;

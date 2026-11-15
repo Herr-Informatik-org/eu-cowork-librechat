@@ -73,6 +73,19 @@ export const ROLE_LOCALIZATIONS = {
     name: 'com_ui_role_owner' as const,
     description: 'com_ui_skill_role_owner_desc' as const,
   } as const,
+  // Knowledge room roles — generic names, generic descriptions.
+  notebook_viewer: {
+    name: 'com_ui_role_viewer' as const,
+    description: 'com_ui_role_viewer_desc' as const,
+  } as const,
+  notebook_editor: {
+    name: 'com_ui_role_editor' as const,
+    description: 'com_ui_role_editor_desc' as const,
+  } as const,
+  notebook_owner: {
+    name: 'com_ui_role_owner' as const,
+    description: 'com_ui_role_owner_desc' as const,
+  } as const,
   // Shared link roles
   sharedLink_viewer: {
     name: 'com_ui_role_viewer' as const,

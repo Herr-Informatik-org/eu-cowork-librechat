@@ -14,6 +14,8 @@ const id = z.string().regex(/^[a-f0-9]{24}$/);
 const sourceId = z.string().uuid();
 const externalIdentity=z.string().regex(/^([0-9a-fA-F-]{36}|S-1-[0-9-]{3,180})$/);
 const zone = z.enum(['lokal', 'schweiz', 'europa', 'global']);
+const dataClass = z.enum(['gesperrt','lokal','schweiz','europa','offen']);
+const folderRule = z.object({ path: z.string().trim().min(1).max(1024), dataClass: dataClass.nullable().optional(), excluded: z.boolean().default(false) }).strict();
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 const jsonValue: z.ZodType<JsonValue> = z.lazy(() => z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonValue), z.record(jsonValue)]));
 const json = z.record(jsonValue);
@@ -222,6 +224,10 @@ export function createNotebooksRouter(deps: NotebookDependencies): Router {
   router.get('/admin/windows/package',handle(async(req,res)=>{
     res.json(await notebookRequest(await actor(req),'/admin/windows/package','GET',json));
   }));
+  router.get('/admin/sources/:sourceId/folders',handle(async(req,res)=>{
+    const source=sourceId.parse(req.params.sourceId);
+    res.json(await notebookRequest(await actor(req),`/admin/sources/${source}/folders`,'GET',json));
+  }));
   router.get('/admin/sources/:sourceId/agents',handle(async(req,res)=>{
     const source=sourceId.parse(req.params.sourceId);
     res.json(await notebookRequest(await actor(req),`/admin/sources/${source}/agents`,'GET',json));
@@ -261,8 +267,8 @@ export function createNotebooksRouter(deps: NotebookDependencies): Router {
   }));
   router.post('/admin/sources/:sourceId/:operation', handle(async (req, res) => {
     const source = sourceId.parse(req.params.sourceId);
-    const operation = z.enum(['probe','pause','acceptance','discover','library','setup-complete','pair','agent-approve','microsoft']).parse(req.params.operation);
-    const body = operation === 'acceptance' ? json.parse(req.body) : operation === 'library' ? z.object({ driveId: z.string().min(1).max(256),folderPath:z.string().min(1).max(1024) }).strict().parse(req.body) : operation==='setup-complete' ? z.object({tenantId:sourceId,clientId:sourceId}).strict().parse(req.body) : operation==='microsoft' ? z.object({roomId:id}).strict().parse(req.body) : operation==='agent-approve' ? z.object({agentId:sourceId,fingerprint:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(req.body) : {};
+    const operation = z.enum(['probe','pause','acceptance','discover','library','setup-complete','pair','agent-approve','microsoft','folders']).parse(req.params.operation);
+    const body = operation === 'acceptance' ? json.parse(req.body) : operation === 'folders' ? folderRule.parse(req.body) : operation === 'library' ? z.object({ driveId: z.string().min(1).max(256),folderPath:z.string().min(1).max(1024) }).strict().parse(req.body) : operation==='setup-complete' ? z.object({tenantId:sourceId,clientId:sourceId}).strict().parse(req.body) : operation==='microsoft' ? z.object({roomId:id}).strict().parse(req.body) : operation==='agent-approve' ? z.object({agentId:sourceId,fingerprint:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(req.body) : {};
     res.json(await notebookRequest(await actor(req,operation==='microsoft' ? (body as {roomId:string}).roomId : ''), `/admin/sources/${source}/${operation}`, 'POST', json, body));
   }));
   router.post('/admin/rooms/:id/sources', handle(async (req, res) => {

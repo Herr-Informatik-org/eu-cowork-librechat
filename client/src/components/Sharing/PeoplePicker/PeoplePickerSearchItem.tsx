@@ -17,7 +17,7 @@ const PeoplePickerSearchItem = forwardRef<HTMLDivElement, PeoplePickerSearchItem
     const localize = useLocalize();
     const { name, email, type } = principal;
 
-    const displayName = name || localize('com_ui_unknown');
+    const displayName = name || email || localize('com_ui_unknown');
     const subtitle = email || `${type} (${principal.source || 'local'})`;
 
     /** Get badge styling based on type */
