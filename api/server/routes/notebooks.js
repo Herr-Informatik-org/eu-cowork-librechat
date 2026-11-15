@@ -6,11 +6,14 @@ const permissions = require('~/server/services/PermissionService');
 const { requireJwtAuth, configMiddleware, checkBan } = require('~/server/middleware');
 const router = express.Router();
 router.use(requireJwtAuth, checkBan, configMiddleware, express.json({ limit: '2mb' }));
-router.use(createNotebooksRouter({
+const chatDependencies = {
   getUserById: db.getUserById,
   canUse: (user) => checkAccess({ user, permissionType: PermissionTypes.FILE_SEARCH, permissions: [Permissions.USE], getRoleByName: db.getRoleByName }),
   permissions: permissions.getEffectivePermissions,
   list: permissions.findAccessibleResources,
+};
+router.use(createNotebooksRouter({
+  ...chatDependencies,
   grant: permissions.grantPermission,
   remove: permissions.removeAllPermissions,
   answer: createNotebookAnswer({
@@ -31,3 +34,4 @@ router.use(createNotebooksRouter({
   }),
 }));
 module.exports = router;
+module.exports.chatDependencies = chatDependencies;

@@ -106,7 +106,7 @@ test('folder rules are an administrator operation with a strict body',async () =
   expect((await request(admin.app).post(`/api/notebooks/admin/sources/${source}/folders`).send({path:'Administration',dataClass:'offen',extra:true})).status).toBe(400);
   const saved=await request(admin.app).post(`/api/notebooks/admin/sources/${source}/folders`).send({path:' Administration ',dataClass:'offen'});
   expect(saved.status).toBe(200);
-  expect(rpc.mock.calls.at(-1)?.slice(1,2)).toEqual([`/admin/sources/${source}/folders`]);
-  expect(rpc.mock.calls.at(-1)?.[4]).toEqual({path:'Administration',dataClass:'offen',excluded:false});
+  expect(rpc.mock.calls[rpc.mock.calls.length-1]?.slice(1,2)).toEqual([`/admin/sources/${source}/folders`]);
+  expect(rpc.mock.calls[rpc.mock.calls.length-1]?.[4]).toEqual({path:'Administration',dataClass:'offen',excluded:false});
   expect((await request(admin.app).get(`/api/notebooks/admin/sources/${source}/folders`)).status).toBe(200);
 });

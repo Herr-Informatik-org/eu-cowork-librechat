@@ -1,5 +1,10 @@
 # EU-Cowork: Änderungen am LibreChat-Fork
 
+## 2026-11-15 — Wissensraum (RAG) im Chat
+
+- Lesendes MCP-Werkzeug `wissensraum_suchen` im Wissensraum-Einstieg unter `/internal/notebooks-mcp`. Antwortet nur dem Chat-Dienst selbst (Quelladresse von `api`), sucht mit Raumrecht und persönlichem Microsoft-Recht der anfragenden Person und nur in Räumen der Zone «global», also nur Dateien der Klasse «offen». Auszüge sind als Daten, nicht als Anweisungen gekennzeichnet.
+- Ordnerregeln der Wissensquellen als Administratorroute; Wissensraum-Rollen im Freigabedialog beschriftet.
+
 ## 2026-11-15 — Wissensräume: persönliche Microsoft-Verbindung an den Browser gebunden
 
 - Die angemeldete Sitzung setzt die Browserbindung, bevor der Anmeldelink entsteht; der Link allein genügt nicht mehr. Der öffentliche Start reicht die Bindung nur weiter und vergibt für persönliche Verbindungen keine neue.
