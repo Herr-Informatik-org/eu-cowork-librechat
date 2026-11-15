@@ -327,10 +327,10 @@ it('rechecks revoked role rights and active account bans before exposing the con
 it('keeps names accepted by model providers and rejects oversized tool names', () => {
   const before = process.env.KISUNO_OUTLOOK_SERVER_NAME;
   try {
-    process.env.KISUNO_OUTLOOK_SERVER_NAME = 'kisuno-outlook-amsler';
+    process.env.KISUNO_OUTLOOK_SERVER_NAME = 'kisuno-outlook-kunde';
     for (const tool of OUTLOOK_TOOLS)
       expect(`${tool}_mcp_${outlookServerName()}`.length).toBeLessThanOrEqual(64);
-    process.env.KISUNO_OUTLOOK_SERVER_NAME = 'kisuno-outlook-samuel-amsler-ag';
+    process.env.KISUNO_OUTLOOK_SERVER_NAME = 'kisuno-outlook-beispiel-kunde-ag';
     expect(() => outlookServerName()).toThrow();
   } finally {
     if (before === undefined) delete process.env.KISUNO_OUTLOOK_SERVER_NAME;
