@@ -55,21 +55,27 @@ it('routes Word to the permitted analysis path and closes the modal', () => {
   expect(mockRoute).toHaveBeenCalledWith(mockFiles, mockR.execute_code);
   expect(mockClose).toHaveBeenCalledTimes(1);
 });
-it('offers the unmasked original for PDF only where the operator enabled it', () => {
+it('makes sending to the provider the main choice for PDF where the operator enabled it', () => {
   mockFiles = [new File(['%PDF-'], 'Lieferschein.pdf', { type: 'application/pdf' })];
   mockOptions = [undefined, mockR.context];
   const { unmount } = render(<DragDropModal />);
   expect(screen.queryByText('com_ui_upload_original')).not.toBeInTheDocument();
+  expect(screen.getByText('com_ui_upload_use_in_chat')).toBeInTheDocument();
   unmount();
   mockStartup = { originalUploadEnabled: true };
   render(<DragDropModal />);
-  fireEvent.click(screen.getByText('com_ui_upload_original'));
-  expect(mockRoute).toHaveBeenCalledWith(mockFiles, undefined, true);
-  expect(mockClose).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('com_ui_upload_original_description')).toBeInTheDocument();
+  expect(screen.queryByText('com_ui_upload_use_in_chat')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /com_ui_upload_original/ }));
+  expect(mockRoute).toHaveBeenLastCalledWith(mockFiles, undefined, true);
+  fireEvent.click(screen.getByRole('button', { name: /com_ui_upload_protected/ }));
+  expect(mockRoute).toHaveBeenLastCalledWith(mockFiles, mockR.context);
+  expect(mockClose).toHaveBeenCalledTimes(2);
 });
-it('does not offer the original for other file types', () => {
+it('keeps the protected default for other file types', () => {
   mockStartup = { originalUploadEnabled: true };
   mockOptions = [undefined, mockR.context];
   render(<DragDropModal />);
   expect(screen.queryByText('com_ui_upload_original')).not.toBeInTheDocument();
+  expect(screen.getByText('com_ui_upload_use_in_chat')).toBeInTheDocument();
 });

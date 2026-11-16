@@ -205,25 +205,49 @@ const AttachFileMenu = ({
         isDocumentSupportedProvider(currentProvider) ||
         isAzureWithResponsesApi;
 
+      const providerFileType = (): Exclude<FileUploadType, 'image' | 'document' | 'pdf'> => {
+        if (currentProvider === Providers.GOOGLE || currentProvider === Providers.OPENROUTER) {
+          return 'image_document_video_audio';
+        }
+        if (currentProvider === Providers.BEDROCK || endpointType === EModelEndpoint.bedrock) {
+          return 'image_document_extended';
+        }
+        return 'image_document';
+      };
+      const sendOriginal = offerOriginal && providerDocuments;
+
       if (providerDocuments) {
         items.push({
-          label: localize('com_ui_upload_provider'),
-          render: <UploadMenuItem description={localize('com_ui_upload_provider_description')} />,
+          label: localize(sendOriginal ? 'com_ui_upload_original' : 'com_ui_upload_provider'),
+          render: (
+            <UploadMenuItem
+              description={localize(
+                sendOriginal
+                  ? 'com_ui_upload_original_description'
+                  : 'com_ui_upload_provider_description',
+              )}
+            />
+          ),
           onClick: () => {
             setToolResource(undefined);
-            let fileType: Exclude<FileUploadType, 'image' | 'document' | 'pdf'> = 'image_document';
-            if (currentProvider === Providers.GOOGLE || currentProvider === Providers.OPENROUTER) {
-              fileType = 'image_document_video_audio';
-            } else if (
-              currentProvider === Providers.BEDROCK ||
-              endpointType === EModelEndpoint.bedrock
-            ) {
-              fileType = 'image_document_extended';
-            }
-            onAction(fileType);
+            originalRef.current = sendOriginal;
+            onAction(providerFileType());
           },
           icon: <FileImageIcon className="icon-md" />,
         });
+        if (sendOriginal) {
+          items.push({
+            label: localize('com_ui_upload_protected'),
+            render: (
+              <UploadMenuItem description={localize('com_ui_upload_protected_description')} />
+            ),
+            onClick: () => {
+              setToolResource(undefined);
+              onAction(providerFileType());
+            },
+            icon: <FileOutputIcon className="icon-md" />,
+          });
+        }
       } else {
         items.push({
           label: localize('com_ui_upload_image_input'),
@@ -282,18 +306,6 @@ const AttachFileMenu = ({
 
       const [primary, ...further] = items;
       const direct = [primary];
-      if (offerOriginal && providerDocuments) {
-        direct.push({
-          label: localize('com_ui_upload_original'),
-          render: <UploadMenuItem description={localize('com_ui_upload_original_description')} />,
-          onClick: () => {
-            setToolResource(undefined);
-            originalRef.current = true;
-            onAction('pdf');
-          },
-          icon: <FileOutputIcon className="icon-md" />,
-        });
-      }
       if (further.length === 0) {
         return direct;
       }

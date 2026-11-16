@@ -115,7 +115,8 @@ function setupMocks(overrides: { provider?: string } = {}) {
     com_ui_upload_ocr_text: 'Upload as Text',
     com_ui_upload_provider: 'Upload to Provider',
     com_ui_more_options: 'More options',
-    com_ui_upload_original: 'Send original',
+    com_ui_upload_original: 'Send to provider',
+    com_ui_upload_protected: 'Read protected',
   };
   mockUseLocalize.mockReturnValue((key: string) => translations[key] || key);
   mockUseAgentCapabilities.mockReturnValue({
@@ -380,14 +381,16 @@ describe('AttachFileMenu', () => {
       expect(further).toHaveTextContent('Upload to Code Environment');
     });
 
-    it('offers the unmasked original only where the operator enabled it', () => {
+    it('keeps the protected default where the operator did not enable originals', () => {
       setupMocks();
       renderMenu({ endpointType: EModelEndpoint.openAI });
       openMenu();
-      expect(screen.queryByText('Send original')).not.toBeInTheDocument();
+      expect(screen.getByTestId('menu-item-0')).toHaveTextContent('Upload to Provider');
+      expect(screen.queryByText('Send to provider')).not.toBeInTheDocument();
+      expect(screen.queryByText('Read protected')).not.toBeInTheDocument();
     });
 
-    it('passes the original choice for a PDF and resets it afterwards', () => {
+    it('makes sending to the provider the main choice and keeps protected reading reachable', () => {
       setupMocks();
       const handleFileChange = jest.fn();
       mockUseFileHandlingNoChatContext.mockReturnValue({ handleFileChange });
@@ -401,9 +404,13 @@ describe('AttachFileMenu', () => {
       try {
         renderMenu({ endpointType: EModelEndpoint.openAI });
         openMenu();
-        expect(screen.getByTestId('menu-item-1')).toHaveTextContent('Send original');
-        fireEvent.click(screen.getByText('Send original'));
-        fireEvent.click(screen.getByText('Upload to Provider'));
+        expect(screen.getByTestId('menu-item-0')).toHaveTextContent('Send to provider');
+        expect(screen.getByTestId('menu-item-1')).toHaveTextContent('More options');
+        expect(screen.queryByTestId('menu-item-2')).not.toBeInTheDocument();
+        expect(screen.getByTestId('submenu-1')).toHaveTextContent('Read protected');
+        expect(screen.queryByText('Upload to Provider')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByText('Send to provider'));
+        fireEvent.click(screen.getByText('Read protected'));
       } finally {
         HTMLInputElement.prototype.click = originalClick;
       }

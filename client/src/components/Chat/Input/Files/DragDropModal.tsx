@@ -7,7 +7,6 @@ import {
   ImageUpIcon,
   FileType2Icon,
   FileImageIcon,
-  FileOutputIcon,
   TerminalSquareIcon,
 } from 'lucide-react';
 import {
@@ -115,17 +114,42 @@ const DragDropModal = () => {
         className="w-11/12 sm:w-[440px] md:w-[400px] lg:w-[360px]"
         main={
           <div className="flex flex-col gap-2">
+            {offerOriginal && (
+              <button
+                type="button"
+                onClick={() => {
+                  routeFiles(files, undefined, true);
+                  closeModal();
+                }}
+                className="rounded-lg border border-border-heavy bg-surface-active-alt p-3 text-left"
+              >
+                <span className="block font-medium">{localize('com_ui_upload_original')}</span>
+                <span className="mt-1 block text-xs text-text-secondary">
+                  {localize('com_ui_upload_original_description')}
+                </span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
                 routeFiles(files, defaultUploadRoute(files, options));
                 closeModal();
               }}
-              className="rounded-lg border border-border-heavy bg-surface-active-alt p-3 text-left"
+              className={
+                offerOriginal
+                  ? 'rounded-lg border border-border-light p-3 text-left'
+                  : 'rounded-lg border border-border-heavy bg-surface-active-alt p-3 text-left'
+              }
             >
-              <span className="block font-medium">{localize('com_ui_upload_use_in_chat')}</span>
+              <span className="block font-medium">
+                {localize(offerOriginal ? 'com_ui_upload_protected' : 'com_ui_upload_use_in_chat')}
+              </span>
               <span className="mt-1 block text-xs text-text-secondary">
-                {localize('com_ui_upload_auto_description')}
+                {localize(
+                  offerOriginal
+                    ? 'com_ui_upload_protected_description'
+                    : 'com_ui_upload_auto_description',
+                )}
               </span>
             </button>
             <details className="rounded-lg border border-border-light p-2">
@@ -156,25 +180,6 @@ const DragDropModal = () => {
                     </button>
                   );
                 })}
-                {offerOriginal && (
-                  <button
-                    onClick={() => {
-                      routeFiles(files, undefined, true);
-                      closeModal();
-                    }}
-                    className="flex items-start gap-2 rounded-lg p-2 text-left hover:bg-surface-active-alt"
-                  >
-                    <span className="mt-0.5 shrink-0" aria-hidden="true">
-                      <FileOutputIcon className="icon-md" />
-                    </span>
-                    <span className="flex flex-col gap-1">
-                      <span>{localize('com_ui_upload_original')}</span>
-                      <span className="text-xs leading-relaxed text-text-secondary">
-                        {localize('com_ui_upload_original_description')}
-                      </span>
-                    </span>
-                  </button>
-                )}
               </div>
             </details>
           </div>
