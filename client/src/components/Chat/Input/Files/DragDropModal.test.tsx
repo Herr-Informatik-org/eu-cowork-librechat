@@ -69,7 +69,7 @@ it('makes sending to the provider the main choice for PDF where the operator ena
   fireEvent.click(screen.getByRole('button', { name: /com_ui_upload_original/ }));
   expect(mockRoute).toHaveBeenLastCalledWith(mockFiles, undefined, true);
   fireEvent.click(screen.getByRole('button', { name: /com_ui_upload_protected/ }));
-  expect(mockRoute).toHaveBeenLastCalledWith(mockFiles, mockR.context);
+  expect(mockRoute).toHaveBeenLastCalledWith(mockFiles, undefined);
   expect(mockClose).toHaveBeenCalledTimes(2);
 });
 it('keeps the protected default for other file types', () => {

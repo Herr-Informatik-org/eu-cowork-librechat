@@ -132,7 +132,7 @@ const DragDropModal = () => {
             <button
               type="button"
               onClick={() => {
-                routeFiles(files, defaultUploadRoute(files, options));
+                routeFiles(files, offerOriginal ? undefined : defaultUploadRoute(files, options));
                 closeModal();
               }}
               className={
