@@ -7,6 +7,7 @@ import {
   ImageUpIcon,
   FileType2Icon,
   FileImageIcon,
+  FileOutputIcon,
   TerminalSquareIcon,
 } from 'lucide-react';
 import {
@@ -23,6 +24,7 @@ import {
   useAgentToolPermissions,
 } from '~/hooks';
 import { useDragDropContext, useUploadModalContext } from '~/Providers';
+import { useGetStartupConfig } from '~/data-provider';
 import { ephemeralAgentByConvoId } from '~/store';
 
 const DragDropModal = () => {
@@ -94,6 +96,13 @@ const DragDropModal = () => {
   };
 
   const options = useMemo(() => getOptions(files), [getOptions, files]);
+  const { data: startupConfig } = useGetStartupConfig();
+  const offerOriginal =
+    startupConfig?.originalUploadEnabled === true &&
+    isProviderDocSupported &&
+    options.includes(undefined) &&
+    files.length > 0 &&
+    files.every((file) => file.type === 'application/pdf');
 
   if (!isVisible) {
     return null;
@@ -147,6 +156,25 @@ const DragDropModal = () => {
                     </button>
                   );
                 })}
+                {offerOriginal && (
+                  <button
+                    onClick={() => {
+                      routeFiles(files, undefined, true);
+                      closeModal();
+                    }}
+                    className="flex items-start gap-2 rounded-lg p-2 text-left hover:bg-surface-active-alt"
+                  >
+                    <span className="mt-0.5 shrink-0" aria-hidden="true">
+                      <FileOutputIcon className="icon-md" />
+                    </span>
+                    <span className="flex flex-col gap-1">
+                      <span>{localize('com_ui_upload_original')}</span>
+                      <span className="text-xs leading-relaxed text-text-secondary">
+                        {localize('com_ui_upload_original_description')}
+                      </span>
+                    </span>
+                  </button>
+                )}
               </div>
             </details>
           </div>

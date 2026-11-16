@@ -109,19 +109,17 @@ describe('Word uploads cross the model boundary as locally inspected text', () =
         metadata: pdf,
         content: data.toString('base64'),
       });
-      jest
-        .mocked(global.fetch)
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              format: 'pdf',
-              sha256: createHash('sha256').update(data).digest('hex'),
-              binarySentToModel: false,
-              pages: [{ page: 1, text: '6000 Miete Annegret Zwyssig 1800.00' }],
-              complete: true,
-            }),
-          ),
-        );
+      jest.mocked(global.fetch).mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            format: 'pdf',
+            sha256: createHash('sha256').update(data).digest('hex'),
+            binarySentToModel: false,
+            pages: [{ page: 1, text: '6000 Miete Annegret Zwyssig 1800.00' }],
+            complete: true,
+          }),
+        ),
+      );
       const result = await encodeAndFormatDocuments(req, [pdf], { provider }, strategy);
       expect(result.documents).toHaveLength(1);
       expect(result.documents[0].type).toBe('text');
@@ -160,6 +158,84 @@ describe('Word uploads cross the model boundary as locally inspected text', () =
       expect(JSON.stringify(result.documents)).not.toContain('file_data');
     },
   );
+  describe('with the operator switch for complete PDF files', () => {
+    const scan = Buffer.from('%PDF-1.7\nsynthetic scan\n%%EOF\n');
+    const pdf = {
+      ...file,
+      filename: 'Lieferschein.pdf',
+      type: 'application/pdf',
+      metadata: { providerOriginal: true },
+    } as IMongoFile;
+    beforeEach(() => {
+      process.env.KISUNO_ORIGINAL_UPLOAD_ENABLED = 'true';
+      (getFileStream as jest.Mock).mockResolvedValue({
+        file: { ...pdf },
+        metadata: { ...pdf },
+        content: scan.toString('base64'),
+      });
+    });
+    afterEach(() => {
+      delete process.env.KISUNO_ORIGINAL_UPLOAD_ENABLED;
+    });
+    it.each([
+      [Providers.OPENAI, 'file'],
+      [Providers.OPENROUTER, 'file'],
+      [Providers.ANTHROPIC, 'document'],
+      [Providers.GOOGLE, 'media'],
+      [Providers.BEDROCK, 'document'],
+    ])('hands the complete PDF to %s without local reading', async (provider, type) => {
+      const result = await encodeAndFormatDocuments(req, [pdf], { provider }, strategy);
+      expect(result.documents).toHaveLength(1);
+      expect(result.documents[0].type).toBe(type);
+      expect((result.files[0] as IMongoFile).metadata?.documentIntake?.status).toBe('original');
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+    it('never sends a PDF above the configured limit', async () => {
+      (getConfiguredFileSizeLimit as jest.Mock).mockReturnValue(1);
+      const result = await encodeAndFormatDocuments(
+        req,
+        [pdf],
+        { provider: Providers.OPENAI },
+        strategy,
+      );
+      expect(result.documents).toHaveLength(1);
+      expect(result.documents[0].type).toBe('text');
+      expect((result.files[0] as IMongoFile).metadata?.documentIntake?.status).toBe('skipped');
+      expect(JSON.stringify(result.documents)).not.toContain(scan.toString('base64'));
+    });
+    it('keeps a PDF local when the uploader did not choose the original', async () => {
+      const unchosen = { ...pdf, metadata: undefined } as IMongoFile;
+      (getFileStream as jest.Mock).mockResolvedValue({
+        file: unchosen,
+        metadata: unchosen,
+        content: scan.toString('base64'),
+      });
+      const result = await encodeAndFormatDocuments(
+        req,
+        [unchosen],
+        { provider: Providers.OPENAI },
+        strategy,
+      );
+      expect(result.documents).toHaveLength(1);
+      expect(result.documents[0].type).toBe('text');
+      expect(JSON.stringify(result.documents)).not.toContain('file_data');
+    });
+    it('keeps Word files local', async () => {
+      (getFileStream as jest.Mock).mockResolvedValue({
+        file,
+        metadata: file,
+        content: data.toString('base64'),
+      });
+      const result = await encodeAndFormatDocuments(
+        req,
+        [file],
+        { provider: Providers.OPENAI },
+        strategy,
+      );
+      expect(result.documents[0].type).toBe('text');
+      expect(JSON.stringify(result.documents)).not.toContain('file_data');
+    });
+  });
   it('honours the configured file limit before invoking the renderer', async () => {
     (getConfiguredFileSizeLimit as jest.Mock).mockReturnValue(1);
     await expect(

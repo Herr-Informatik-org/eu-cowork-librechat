@@ -597,6 +597,7 @@ export interface ExtendedFile {
   attached?: boolean;
   embedded?: boolean;
   tool_resource?: string;
+  original_upload?: boolean;
   metadata?: t.TFile['metadata'];
 }
 

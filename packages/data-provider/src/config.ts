@@ -1627,6 +1627,7 @@ export type TStartupConfig = {
   bundlerURL?: string;
   staticBundlerURL?: string;
   sharePointFilePickerEnabled?: boolean;
+  originalUploadEnabled?: boolean;
   sharePointBaseUrl?: string;
   sharePointPickerGraphScope?: string;
   sharePointPickerSharePointScope?: string;

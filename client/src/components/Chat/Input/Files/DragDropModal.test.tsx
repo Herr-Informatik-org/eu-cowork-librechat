@@ -19,10 +19,13 @@ jest.mock('~/Providers', () => ({
   useUploadModalContext: () => ({ isVisible: true, files: mockFiles, closeModal: mockClose }),
   useDragDropContext: () => ({ conversationId: 'new', provider: 'openAI' }),
 }));
+let mockStartup = {};
+let mockOptions: (mockR | undefined)[] = [];
+jest.mock('~/data-provider', () => ({ useGetStartupConfig: () => ({ data: mockStartup }) }));
 jest.mock('~/hooks', () => ({
   useLocalize: () => (key: string) => key,
   useUploadOptions: () => ({
-    getOptions: () => [mockR.file_search, mockR.execute_code, mockR.context],
+    getOptions: () => mockOptions,
   }),
   useFileUploadRouter: () => mockRoute,
   useAgentToolPermissions: () => ({ provider: 'openAI' }),
@@ -30,6 +33,8 @@ jest.mock('~/hooks', () => ({
 import DragDropModal from './DragDropModal';
 beforeEach(() => {
   jest.clearAllMocks();
+  mockStartup = {};
+  mockOptions = [mockR.file_search, mockR.execute_code, mockR.context];
   mockFiles = [
     new File(['Original'], 'Vorlage.docx', {
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -49,4 +54,22 @@ it('routes Word to the permitted analysis path and closes the modal', () => {
   fireEvent.click(screen.getByRole('button', { name: /com_ui_upload_use_in_chat/ }));
   expect(mockRoute).toHaveBeenCalledWith(mockFiles, mockR.execute_code);
   expect(mockClose).toHaveBeenCalledTimes(1);
+});
+it('offers the unmasked original for PDF only where the operator enabled it', () => {
+  mockFiles = [new File(['%PDF-'], 'Lieferschein.pdf', { type: 'application/pdf' })];
+  mockOptions = [undefined, mockR.context];
+  const { unmount } = render(<DragDropModal />);
+  expect(screen.queryByText('com_ui_upload_original')).not.toBeInTheDocument();
+  unmount();
+  mockStartup = { originalUploadEnabled: true };
+  render(<DragDropModal />);
+  fireEvent.click(screen.getByText('com_ui_upload_original'));
+  expect(mockRoute).toHaveBeenCalledWith(mockFiles, undefined, true);
+  expect(mockClose).toHaveBeenCalledTimes(1);
+});
+it('does not offer the original for other file types', () => {
+  mockStartup = { originalUploadEnabled: true };
+  mockOptions = [undefined, mockR.context];
+  render(<DragDropModal />);
+  expect(screen.queryByText('com_ui_upload_original')).not.toBeInTheDocument();
 });

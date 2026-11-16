@@ -64,7 +64,9 @@ export interface IMongoFile extends Omit<Document, 'model'> {
   height?: number;
   metadata?: {
     /** Local reading outcome; contains no extracted document content. */
-    documentIntake?: { status: 'read' | 'ocr' | 'incomplete' | 'skipped' };
+    documentIntake?: { status: 'read' | 'ocr' | 'incomplete' | 'skipped' | 'original' };
+    /** The uploader chose to hand the unmasked original to the model provider. */
+    providerOriginal?: boolean;
     /** Server-verified export report, retained with the private file. */
     documentQuality?: Record<string, unknown>;
     /**

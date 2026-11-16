@@ -17,14 +17,14 @@ export default function useFileUploadRouter() {
   );
 
   return useCallback(
-    (files: File[], toolResource?: EToolResources) => {
+    (files: File[], toolResource?: EToolResources, original?: boolean) => {
       if (toolResource && toolResource !== EToolResources.file_search) {
         setEphemeralAgent((prev) => ({
           ...prev,
           [toolResource]: true,
         }));
       }
-      handleFiles(files, toolResource);
+      handleFiles(files, toolResource, original);
     },
     [handleFiles, setEphemeralAgent],
   );

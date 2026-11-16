@@ -6,6 +6,8 @@ import {
   ImageUpIcon,
   FileType2Icon,
   FileImageIcon,
+  FileOutputIcon,
+  MoreHorizontalIcon,
   TerminalSquareIcon,
 } from 'lucide-react';
 import {
@@ -50,6 +52,7 @@ import UploadMenuItem from './UploadMenuItem';
 type FileUploadType =
   | 'image'
   | 'document'
+  | 'pdf'
   | 'image_document'
   | 'image_document_extended'
   | 'image_document_video_audio';
@@ -58,6 +61,7 @@ type FileUploadType =
 const fileTypeCapabilities: Record<FileUploadType, MimeUploadCapability> = {
   image: { categories: ['image'] },
   document: { categories: ['document'] },
+  pdf: { categories: ['document'], documentMimeTypes: ['application/pdf'] },
   image_document: { categories: ['image', 'document'] },
   image_document_extended: {
     categories: ['image', 'document'],
@@ -107,6 +111,7 @@ const AttachFileMenu = ({
     ephemeralAgentByConvoId(conversationId),
   );
   const toolResourceRef = useRef<EToolResources | undefined>();
+  const originalRef = useRef(false);
   const { handleFileChange } = useFileHandlingNoChatContext(undefined, {
     files,
     setFiles,
@@ -122,6 +127,7 @@ const AttachFileMenu = ({
   const { agentsConfig } = useGetAgentsConfig();
   const { data: startupConfig } = useGetStartupConfig();
   const sharePointEnabled = startupConfig?.sharePointFilePickerEnabled;
+  const originalUploadEnabled = startupConfig?.originalUploadEnabled === true;
 
   const [isSharePointDialogOpen, setIsSharePointDialogOpen] = useState(false);
 
@@ -153,7 +159,7 @@ const AttachFileMenu = ({
         inputRef.current.accept = configuredAccept;
       } else if (fileType === 'image') {
         inputRef.current.accept = 'image/*,.heif,.heic';
-      } else if (fileType === 'document') {
+      } else if (fileType === 'document' || fileType === 'pdf') {
         inputRef.current.accept = '.pdf,application/pdf';
       } else if (fileType === 'image_document') {
         inputRef.current.accept = 'image/*,.heif,.heic,.pdf,application/pdf';
@@ -173,9 +179,13 @@ const AttachFileMenu = ({
   const dropdownItems = useMemo(() => {
     const setToolResource = (value: EToolResources | undefined) => {
       toolResourceRef.current = value;
+      originalRef.current = false;
     };
 
-    const createMenuItems = (onAction: (fileType?: FileUploadType) => void) => {
+    const createMenuItems = (
+      onAction: (fileType?: FileUploadType) => void,
+      offerOriginal = false,
+    ) => {
       const items: MenuItemProps[] = [];
 
       let currentProvider = provider || endpoint;
@@ -190,17 +200,18 @@ const AttachFileMenu = ({
           endpointType === EModelEndpoint.azureOpenAI) &&
         useResponsesApi === true;
 
-      if (
+      const providerDocuments =
         isDocumentSupportedProvider(endpointType) ||
         isDocumentSupportedProvider(currentProvider) ||
-        isAzureWithResponsesApi
-      ) {
+        isAzureWithResponsesApi;
+
+      if (providerDocuments) {
         items.push({
           label: localize('com_ui_upload_provider'),
           render: <UploadMenuItem description={localize('com_ui_upload_provider_description')} />,
           onClick: () => {
             setToolResource(undefined);
-            let fileType: Exclude<FileUploadType, 'image' | 'document'> = 'image_document';
+            let fileType: Exclude<FileUploadType, 'image' | 'document' | 'pdf'> = 'image_document';
             if (currentProvider === Providers.GOOGLE || currentProvider === Providers.OPENROUTER) {
               fileType = 'image_document_video_audio';
             } else if (
@@ -269,10 +280,35 @@ const AttachFileMenu = ({
         });
       }
 
-      return items;
+      const [primary, ...further] = items;
+      const direct = [primary];
+      if (offerOriginal && providerDocuments) {
+        direct.push({
+          label: localize('com_ui_upload_original'),
+          render: <UploadMenuItem description={localize('com_ui_upload_original_description')} />,
+          onClick: () => {
+            setToolResource(undefined);
+            originalRef.current = true;
+            onAction('pdf');
+          },
+          icon: <FileOutputIcon className="icon-md" />,
+        });
+      }
+      if (further.length === 0) {
+        return direct;
+      }
+      return [
+        ...direct,
+        {
+          label: localize('com_ui_more_options'),
+          onClick: () => {},
+          icon: <MoreHorizontalIcon className="icon-md" />,
+          subItems: further,
+        },
+      ];
     };
 
-    const localItems = createMenuItems(handleUploadClick);
+    const localItems = createMenuItems(handleUploadClick, originalUploadEnabled);
 
     if (sharePointEnabled) {
       const sharePointItems = createMenuItems(() => {
@@ -300,6 +336,7 @@ const AttachFileMenu = ({
     setEphemeralAgent,
     sharePointEnabled,
     codeAllowedByAgent,
+    originalUploadEnabled,
     fileSearchAllowedByAgent,
     setIsSharePointDialogOpen,
   ]);
@@ -341,8 +378,9 @@ const AttachFileMenu = ({
       <FileUpload
         ref={inputRef}
         handleFileChange={(e) => {
-          handleFileChange(e, toolResourceRef.current);
+          handleFileChange(e, toolResourceRef.current, originalRef.current);
           toolResourceRef.current = undefined;
+          originalRef.current = false;
         }}
       >
         <DropdownPopup

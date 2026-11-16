@@ -975,6 +975,16 @@ const processAgentFileUpload = async ({ req, res, metadata, sseStream }) => {
     filename = embeddingResult?.filename || filename;
   }
 
+  if (
+    messageAttachment &&
+    !tool_resource &&
+    metadata.original_upload === 'true' &&
+    process.env.KISUNO_ORIGINAL_UPLOAD_ENABLED === 'true' &&
+    file.mimetype === 'application/pdf'
+  ) {
+    fileInfoMetadata = { ...fileInfoMetadata, providerOriginal: true };
+  }
+
   let filepath = _filepath;
   let storageMetadata = getStorageMetadata({
     filepath,

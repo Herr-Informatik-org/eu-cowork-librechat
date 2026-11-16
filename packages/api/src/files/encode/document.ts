@@ -204,8 +204,55 @@ export async function encodeAndFormatDocuments(
   }
 
   const configuredFileSizeLimit = getConfiguredFileSizeLimit(req, { provider, endpoint });
-  const setPdfStatus = (file: IMongoFile, status: 'read' | 'ocr' | 'incomplete' | 'skipped') => {
+  const setPdfStatus = (
+    file: IMongoFile,
+    status: 'read' | 'ocr' | 'incomplete' | 'skipped' | 'original',
+  ) => {
     file.metadata = { ...file.metadata, documentIntake: { status } };
+  };
+  /**
+   * The operator allows it per instance and the uploader chooses it per file: hand the complete
+   * PDF to the provider. Returns null whenever that is not possible, so local reading takes over.
+   */
+  const originalPdfBlock = async (
+    content: string,
+    filename: string | undefined,
+    chosen: boolean,
+  ): Promise<DocumentBlock | null> => {
+    if (process.env.KISUNO_ORIGINAL_UPLOAD_ENABLED !== 'true' || !chosen) return null;
+    try {
+      const buffer = Buffer.from(content, 'base64');
+      if (isBedrock) {
+        const checked = await validateBedrockDocument(
+          buffer.length,
+          'application/pdf',
+          buffer,
+          configuredFileSizeLimit,
+          model,
+        );
+        if (!checked.isValid) return null;
+        return {
+          type: 'document',
+          document: {
+            name: (filename || 'document').replace(/[^a-zA-Z0-9\s\-()[\]]/g, '_').slice(0, 200),
+            format: bedrockDocumentFormats['application/pdf'],
+            source: { bytes: buffer },
+          },
+        };
+      }
+      if (!isDocSupported) return null;
+      const checked = await validatePdf(
+        buffer,
+        buffer.length,
+        provider,
+        configuredFileSizeLimit,
+        model,
+      );
+      if (!checked.isValid) return null;
+      return formatDocumentBlock(provider, 'application/pdf', content, filename, useResponsesApi);
+    } catch {
+      return null;
+    }
   };
   const skippedPdf = (file: IMongoFile) => {
     setPdfStatus(file, 'skipped');
@@ -273,6 +320,18 @@ export async function encodeAndFormatDocuments(
     const mimeType = file.type ?? '';
 
     if (localWord(file) && isPdfDocument(file.filename, file.type)) {
+      const original = await originalPdfBlock(
+        content,
+        file.filename,
+        file.metadata?.providerOriginal === true,
+      );
+      if (original) {
+        setPdfStatus(file, 'original');
+        metadata.metadata = { ...metadata.metadata, documentIntake: { status: 'original' } };
+        result.documents.push(original);
+        result.files.push(metadata);
+        continue;
+      }
       try {
         if (configuredFileSizeLimit && getBase64DecodedByteCount(content) > configuredFileSizeLimit)
           throw new Error('Dateigrösse');

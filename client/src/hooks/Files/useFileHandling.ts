@@ -230,6 +230,9 @@ const useFileHandlingCore = (params: UseFileHandling | undefined, fileState: Fil
       if (tool_resource != null) {
         formData.append('tool_resource', tool_resource);
       }
+      if (extendedFile.original_upload === true && tool_resource == null) {
+        formData.append('original_upload', 'true');
+      }
       if (conversation?.agent_id != null && formData.get('agent_id') == null) {
         formData.append('agent_id', conversation.agent_id);
       }
@@ -283,7 +286,11 @@ const useFileHandlingCore = (params: UseFileHandling | undefined, fileState: Fil
     img.src = preview;
   };
 
-  const handleFiles = async (_files: FileList | File[], _toolResource?: string) => {
+  const handleFiles = async (
+    _files: FileList | File[],
+    _toolResource?: string,
+    _original?: boolean,
+  ) => {
     abortControllerRef.current = new AbortController();
     const fileList = Array.from(_files);
     /* Validate files */
@@ -333,6 +340,8 @@ const useFileHandlingCore = (params: UseFileHandling | undefined, fileState: Fil
 
         if (_toolResource != null && _toolResource !== '') {
           initialExtendedFile.tool_resource = _toolResource;
+        } else if (_original === true && originalFile.type === 'application/pdf') {
+          initialExtendedFile.original_upload = true;
         }
 
         // Add file immediately to show in UI
@@ -447,11 +456,15 @@ const useFileHandlingCore = (params: UseFileHandling | undefined, fileState: Fil
     }
   };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>, _toolResource?: string) => {
+  const handleFileChange = (
+    event: React.ChangeEvent<HTMLInputElement>,
+    _toolResource?: string,
+    _original?: boolean,
+  ) => {
     event.stopPropagation();
     if (event.target.files) {
       setFilesLoading(true);
-      handleFiles(event.target.files, _toolResource);
+      handleFiles(event.target.files, _toolResource, _original);
       // reset the input
       event.target.value = '';
     }

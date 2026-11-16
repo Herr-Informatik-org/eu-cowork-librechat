@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import PdfIntakeNotice from '../PdfIntakeNotice';
 jest.mock('~/hooks', () => ({ useLocalize: () => (key: string) => key }));
 describe('local PDF reading notices', () => {
-  it.each(['read', 'ocr', 'incomplete', 'skipped'] as const)(
+  it.each(['read', 'ocr', 'incomplete', 'skipped', 'original'] as const)(
     'shows %s independently of model output',
     (status) => {
       render(<PdfIntakeNotice file={{ metadata: { documentIntake: { status } } }} />);

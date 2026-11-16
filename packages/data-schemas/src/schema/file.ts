@@ -118,12 +118,13 @@ const file: Schema<IMongoFile> = new Schema(
     width: Number,
     height: Number,
     metadata: {
+      providerOriginal: { type: Boolean, default: undefined },
       documentIntake: {
         type: new Schema(
           {
             status: {
               type: String,
-              enum: ['read', 'ocr', 'incomplete', 'skipped'],
+              enum: ['read', 'ocr', 'incomplete', 'skipped', 'original'],
               required: true,
             },
           },

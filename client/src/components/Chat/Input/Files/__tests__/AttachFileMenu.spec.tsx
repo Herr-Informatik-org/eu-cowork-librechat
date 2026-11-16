@@ -57,9 +57,21 @@ jest.mock('@librechat/client', () => {
             { 'data-testid': 'dropdown-menu' },
             props.items.map((item, idx) =>
               R.createElement(
-                'button',
-                { key: idx, onClick: item.onClick, 'data-testid': `menu-item-${idx}` },
-                item.label,
+                R.Fragment,
+                { key: idx },
+                R.createElement(
+                  'button',
+                  { onClick: item.onClick, 'data-testid': `menu-item-${idx}` },
+                  item.label,
+                ),
+                item.subItems &&
+                  R.createElement(
+                    'div',
+                    { 'data-testid': `submenu-${idx}` },
+                    item.subItems.map((sub, subIdx) =>
+                      R.createElement('button', { key: subIdx, onClick: sub.onClick }, sub.label),
+                    ),
+                  ),
               ),
             ),
           ),
@@ -102,6 +114,8 @@ function setupMocks(overrides: { provider?: string } = {}) {
     com_ui_upload_image_input: 'Upload Image',
     com_ui_upload_ocr_text: 'Upload as Text',
     com_ui_upload_provider: 'Upload to Provider',
+    com_ui_more_options: 'More options',
+    com_ui_upload_original: 'Send original',
   };
   mockUseLocalize.mockReturnValue((key: string) => translations[key] || key);
   mockUseAgentCapabilities.mockReturnValue({
@@ -343,6 +357,60 @@ describe('AttachFileMenu', () => {
       expect(screen.getByText('Upload to Code Environment')).toBeInTheDocument();
     });
 
+    it('keeps provider upload as the only direct choice and groups the rest', () => {
+      setupMocks();
+      mockUseAgentCapabilities.mockReturnValue({
+        contextEnabled: true,
+        fileSearchEnabled: true,
+        codeEnabled: true,
+      });
+      mockUseAgentToolPermissions.mockReturnValue({
+        fileSearchAllowedByAgent: true,
+        codeAllowedByAgent: true,
+        provider: undefined,
+      });
+      renderMenu({ endpointType: EModelEndpoint.openAI });
+      openMenu();
+      expect(screen.getByTestId('menu-item-0')).toHaveTextContent('Upload to Provider');
+      expect(screen.getByTestId('menu-item-1')).toHaveTextContent('More options');
+      expect(screen.queryByTestId('menu-item-2')).not.toBeInTheDocument();
+      const further = screen.getByTestId('submenu-1');
+      expect(further).toHaveTextContent('Upload as Text');
+      expect(further).toHaveTextContent('Upload for File Search');
+      expect(further).toHaveTextContent('Upload to Code Environment');
+    });
+
+    it('offers the unmasked original only where the operator enabled it', () => {
+      setupMocks();
+      renderMenu({ endpointType: EModelEndpoint.openAI });
+      openMenu();
+      expect(screen.queryByText('Send original')).not.toBeInTheDocument();
+    });
+
+    it('passes the original choice for a PDF and resets it afterwards', () => {
+      setupMocks();
+      const handleFileChange = jest.fn();
+      mockUseFileHandlingNoChatContext.mockReturnValue({ handleFileChange });
+      mockUseGetStartupConfig.mockReturnValue({
+        data: { sharePointFilePickerEnabled: false, originalUploadEnabled: true },
+      });
+      const originalClick = HTMLInputElement.prototype.click;
+      HTMLInputElement.prototype.click = function click() {
+        fireEvent.change(this);
+      };
+      try {
+        renderMenu({ endpointType: EModelEndpoint.openAI });
+        openMenu();
+        expect(screen.getByTestId('menu-item-1')).toHaveTextContent('Send original');
+        fireEvent.click(screen.getByText('Send original'));
+        fireEvent.click(screen.getByText('Upload to Provider'));
+      } finally {
+        HTMLInputElement.prototype.click = originalClick;
+      }
+      expect(handleFileChange).toHaveBeenNthCalledWith(1, expect.anything(), undefined, true);
+      expect(handleFileChange).toHaveBeenNthCalledWith(2, expect.anything(), undefined, false);
+    });
+
     it('passes File Search resource when the file input changes before React state commits', () => {
       setupMocks();
       const handleFileChange = jest.fn();
@@ -379,11 +447,12 @@ describe('AttachFileMenu', () => {
         HTMLInputElement.prototype.click = originalClick;
       }
 
-      expect(handleFileChange).toHaveBeenNthCalledWith(1, expect.any(Object), undefined);
+      expect(handleFileChange).toHaveBeenNthCalledWith(1, expect.any(Object), undefined, false);
       expect(handleFileChange).toHaveBeenNthCalledWith(
         2,
         expect.any(Object),
         EToolResources.file_search,
+        false,
       );
     });
   });
