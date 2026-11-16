@@ -11,7 +11,10 @@ export function isWordTemplate(
   return mimeType === DOCX_MIME || /\.docx$/i.test(filename ?? '');
 }
 
-async function inspectOfficeFile(data: Buffer, format: 'docx' | 'xlsx' | 'pdf'): Promise<string> {
+async function inspectOfficeFile(
+  data: Buffer,
+  format: 'docx' | 'xlsx' | 'pdf' | 'image',
+): Promise<string> {
   if (!data.length || data.length > MAX_BYTES) {
     throw new Error('Office-Datei ist leer oder grösser als 10 MiB.');
   }
@@ -19,12 +22,12 @@ async function inspectOfficeFile(data: Buffer, format: 'docx' | 'xlsx' | 'pdf'):
   if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) {
     throw new Error('Lokale Dokumentverarbeitung ist nicht korrekt eingerichtet.');
   }
-  target.pathname =
-    format === 'docx'
-      ? '/documents/inspect-template'
-      : format === 'xlsx'
-        ? '/documents/inspect-workbook'
-        : '/documents/inspect-pdf';
+  target.pathname = {
+    docx: '/documents/inspect-template',
+    xlsx: '/documents/inspect-workbook',
+    pdf: '/documents/inspect-pdf',
+    image: '/documents/inspect-image',
+  }[format];
   target.search = '';
   let response: Response;
   try {
@@ -33,7 +36,7 @@ async function inspectOfficeFile(data: Buffer, format: 'docx' | 'xlsx' | 'pdf'):
       body: new Uint8Array(data),
       redirect: 'error',
       headers: { 'content-type': 'application/octet-stream' },
-      signal: AbortSignal.timeout(format === 'pdf' ? 85000 : 15000),
+      signal: AbortSignal.timeout(format === 'pdf' || format === 'image' ? 85000 : 15000),
     });
   } catch {
     throw new Error(
@@ -83,6 +86,20 @@ export function inspectSpreadsheet(data: Buffer): Promise<string> {
 }
 export function inspectPdfDocument(data: Buffer): Promise<string> {
   return inspectOfficeFile(data, 'pdf');
+}
+export function inspectImageDocument(data: Buffer): Promise<string> {
+  return inspectOfficeFile(data, 'image');
+}
+/** Pictures are read locally where the person can choose to send originals and did not. */
+export function isLocalImage(
+  mimeType: string | undefined,
+  metadata: { providerOriginal?: boolean } | undefined,
+): boolean {
+  return (
+    process.env.KISUNO_ORIGINAL_UPLOAD_ENABLED === 'true' &&
+    /^image\/(png|jpeg|webp)$/i.test(mimeType ?? '') &&
+    metadata?.providerOriginal !== true
+  );
 }
 export function isPdfDocument(filename: string | undefined, mimeType: string | undefined): boolean {
   return mimeType === 'application/pdf' || /\.pdf$/i.test(filename ?? '');

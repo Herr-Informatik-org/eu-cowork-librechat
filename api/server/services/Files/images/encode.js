@@ -72,6 +72,17 @@ async function fetchImageToBase64(url) {
   }
 }
 
+/**
+ * A picture the person chose to send unmasked carries a marker for the local privacy
+ * filter, which releases only marked pictures and removes the marker again.
+ */
+const releasedOriginal = (file) =>
+  process.env.KISUNO_ORIGINAL_UPLOAD_ENABLED === 'true' &&
+  process.env.PRIVACY_REQUIRED === 'true' &&
+  file.metadata?.providerOriginal === true
+    ? ';kisuno-original=1'
+    : '';
+
 const base64Only = new Set([
   EModelEndpoint.google,
   EModelEndpoint.anthropic,
@@ -221,7 +232,7 @@ async function encodeAndFormat(req, files, params, mode) {
       image_url: {
         url: imageContent.startsWith('http')
           ? imageContent
-          : `data:${file.type};base64,${imageContent}`,
+          : `data:${file.type}${releasedOriginal(file)};base64,${imageContent}`,
         detail,
       },
     };

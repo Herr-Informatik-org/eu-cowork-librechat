@@ -478,6 +478,10 @@ const processImageFile = async ({ req, res, metadata, returnFile = false, sseStr
       context: FileContext.message_attachment,
       source,
       type: `image/${appConfig.imageOutputType}`,
+      ...(metadata.original_upload === 'true' &&
+      process.env.KISUNO_ORIGINAL_UPLOAD_ENABLED === 'true'
+        ? { metadata: { providerOriginal: true } }
+        : {}),
       ...(await getRetentionExpiry(req)),
       width,
       height,

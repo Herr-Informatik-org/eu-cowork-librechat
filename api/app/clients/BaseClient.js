@@ -12,6 +12,7 @@ const {
   encodeAndFormatAudios,
   encodeAndFormatVideos,
   encodeAndFormatDocuments,
+  isLocalImage,
   getLangfuseTraceDestinationIds,
   isLangfuseTraceSampled,
   traceIdForMessage,
@@ -1424,7 +1425,10 @@ class BaseClient {
         continue;
       }
 
-      if (file.type.startsWith('image/')) {
+      if (isLocalImage(file.type, file.metadata)) {
+        categorizedAttachments.documents.push(file);
+        allFiles.push(file);
+      } else if (file.type.startsWith('image/')) {
         categorizedAttachments.images.push(file);
       } else if (file.type === 'application/pdf') {
         categorizedAttachments.documents.push(file);

@@ -340,7 +340,10 @@ const useFileHandlingCore = (params: UseFileHandling | undefined, fileState: Fil
 
         if (_toolResource != null && _toolResource !== '') {
           initialExtendedFile.tool_resource = _toolResource;
-        } else if (_original === true && originalFile.type === 'application/pdf') {
+        } else if (
+          _original === true &&
+          (originalFile.type === 'application/pdf' || originalFile.type.startsWith('image/'))
+        ) {
           initialExtendedFile.original_upload = true;
         }
 

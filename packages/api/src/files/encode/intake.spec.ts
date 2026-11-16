@@ -220,6 +220,63 @@ describe('Word uploads cross the model boundary as locally inspected text', () =
       expect(result.documents[0].type).toBe('text');
       expect(JSON.stringify(result.documents)).not.toContain('file_data');
     });
+    it('reads a picture locally unless the uploader chose the original', async () => {
+      const image = {
+        ...file,
+        filename: 'Lieferschein.jpg',
+        type: 'image/jpeg',
+        metadata: undefined,
+      } as IMongoFile;
+      (getFileStream as jest.Mock).mockResolvedValue({
+        file: image,
+        metadata: image,
+        content: data.toString('base64'),
+      });
+      jest.mocked(global.fetch).mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            format: 'image',
+            sha256: createHash('sha256').update(data).digest('hex'),
+            binarySentToModel: false,
+            pages: [{ page: 1, text: 'Lieferschein 25410 Netto 29.25 t' }],
+            complete: true,
+          }),
+        ),
+      );
+      const result = await encodeAndFormatDocuments(
+        req,
+        [image],
+        { provider: Providers.OPENAI },
+        strategy,
+      );
+      expect(result.documents).toHaveLength(1);
+      expect(result.documents[0].type).toBe('text');
+      expect(JSON.stringify(result.documents)).toContain('Lokal gelesenes Bild');
+      expect(JSON.stringify(result.documents)).toContain('29.25 t');
+      expect(JSON.stringify(result.documents)).not.toContain(data.toString('base64'));
+      expect(String(jest.mocked(global.fetch).mock.calls[0][0])).toContain(
+        '/documents/inspect-image',
+      );
+      expect((result.files[0] as IMongoFile).metadata?.documentIntake?.status).toBe('ocr');
+    });
+    it('tells the model when a picture has no locally readable text', async () => {
+      const image = { ...file, filename: 'Foto.png', type: 'image/png' } as IMongoFile;
+      (getFileStream as jest.Mock).mockResolvedValue({
+        file: image,
+        metadata: image,
+        content: data.toString('base64'),
+      });
+      jest.mocked(global.fetch).mockResolvedValue(new Response('{"error":"x"}', { status: 422 }));
+      const result = await encodeAndFormatDocuments(
+        req,
+        [image],
+        { provider: Providers.OPENAI },
+        strategy,
+      );
+      expect(result.documents).toHaveLength(1);
+      expect(JSON.stringify(result.documents)).toContain('An Anbieter senden');
+      expect(JSON.stringify(result.documents)).not.toContain(data.toString('base64'));
+    });
     it('keeps Word files local', async () => {
       (getFileStream as jest.Mock).mockResolvedValue({
         file,

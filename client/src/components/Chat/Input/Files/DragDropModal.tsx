@@ -101,7 +101,7 @@ const DragDropModal = () => {
     isProviderDocSupported &&
     options.includes(undefined) &&
     files.length > 0 &&
-    files.every((file) => file.type === 'application/pdf');
+    files.every((file) => file.type === 'application/pdf' || file.type.startsWith('image/'));
 
   if (!isVisible) {
     return null;

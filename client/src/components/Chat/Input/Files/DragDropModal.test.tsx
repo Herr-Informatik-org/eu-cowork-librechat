@@ -79,3 +79,13 @@ it('keeps the protected default for other file types', () => {
   expect(screen.queryByText('com_ui_upload_original')).not.toBeInTheDocument();
   expect(screen.getByText('com_ui_upload_use_in_chat')).toBeInTheDocument();
 });
+it('offers both ways for pictures as well', () => {
+  mockStartup = { originalUploadEnabled: true };
+  mockOptions = [undefined, mockR.context];
+  mockFiles = [new File(['x'], 'Lieferschein.jpg', { type: 'image/jpeg' })];
+  render(<DragDropModal />);
+  fireEvent.click(screen.getByRole('button', { name: /com_ui_upload_protected/ }));
+  expect(mockRoute).toHaveBeenLastCalledWith(mockFiles, undefined);
+  fireEvent.click(screen.getByRole('button', { name: /com_ui_upload_original/ }));
+  expect(mockRoute).toHaveBeenLastCalledWith(mockFiles, undefined, true);
+});
